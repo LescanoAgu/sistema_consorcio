@@ -44,10 +44,8 @@ function AdminLayout() {
   };
   // --- Fin de Estilos ---
 
-
-  return (
+return (
     <div style={layoutStyle}>
-      {/* 1. Barra Lateral (Sidebar) */}
       <nav style={sidebarStyle}>
         <h3>Sistema Consorcio</h3>
         <Link to="/admin/gastos" style={navLinkStyle}>
@@ -56,21 +54,24 @@ function AdminLayout() {
         <Link to="/admin/propietarios" style={navLinkStyle}>
           Propietarios
         </Link>
+        {/* --- AÑADIR ESTA LÍNEA --- */}
+        <Link to="/admin/liquidacion" style={navLinkStyle}>
+          Liquidación
+        </Link>
+        {/* --- FIN LÍNEA --- */}
         <button 
           onClick={handleLogout} 
-          style={{ ...navLinkStyle, background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}
+          // ... (resto del botón)
         >
           Cerrar Sesión
         </button>
       </nav>
-
-      {/* 2. Contenido Principal (donde se cargan las páginas) */}
       <main style={contentStyle}>
-        {/* Outlet le dice a React Router dónde renderizar las "sub-páginas" */}
         <Outlet /> 
       </main>
     </div>
   );
 }
+
 
 export default AdminLayout;

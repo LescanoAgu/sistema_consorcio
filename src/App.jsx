@@ -4,10 +4,10 @@ import { useAuth } from './hooks/useAuth';
 
 // Importamos las páginas
 import LoginPage from './pages/LoginPage';
-import AdminLayout from './pages/admin/AdminLayout'; // <-- RUTA ACTUALIZADA
-import GastosPage from './pages/admin/GastosPage'; // <-- NUEVA PÁGINA
-import PropietariosPage from './pages/admin/PropietariosPage'; // <-- NUEVA PÁGINA
-
+import AdminLayout from './pages/admin/AdminLayout'; 
+import GastosPage from './pages/admin/GastosPage'; 
+import PropietariosPage from './pages/admin/PropietariosPage'; 
+import LiquidacionPage from './pages/admin/LiquidacionPage';
 // Componente Guardia (sin cambios)
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -44,6 +44,7 @@ function App() {
           
           <Route path="gastos" element={<GastosPage />} />
           <Route path="propietarios" element={<PropietariosPage />} />
+          <Route path="liquidacion" element={<LiquidacionPage />} />
         </Route>
         
         {/* Ruta por defecto */}

@@ -13,11 +13,7 @@ function CargaGastosForm() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!facturaFile) {
-      setMessage('Por favor, adjunta la factura en PDF.');
-      return;
-    }
-
+    
     setLoading(true);
     setMessage('');
 
@@ -110,7 +106,7 @@ function CargaGastosForm() {
             accept="application/pdf" // Solo acepta PDFs
             onChange={handleFileChange}
             style={{ width: '100%' }}
-            required
+            
           />
         </div>
 

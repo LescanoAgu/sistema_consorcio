@@ -1,10 +1,13 @@
 import React from 'react';
+import CargaPropietarioForm from '../../components/CargaPropietarioForm';
+import PropietariosList from '../../components/PropietariosList';
 
 function PropietariosPage() {
   return (
     <div>
       <h2>Módulo de Propietarios y Unidades</h2>
-      <p>Próximamente: formulario para cargar unidades y sus porcentajes.</p>
+      <CargaPropietarioForm />
+      <PropietariosList />
     </div>
   );
 }
