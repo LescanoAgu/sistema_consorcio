@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { calcularPreviewLiquidacion, ejecutarLiquidacion } from '../../services/liquidacionService';
+import { generarPDFLiquidacion } from '../../utils/pdfGenerator';
 
 function LiquidacionPage() {
   // --- Estados del Formulario ---
@@ -67,16 +68,36 @@ function LiquidacionPage() {
         fechaVenc2,
       };
 
-      // ¡Llamamos a la nueva función de lógica!
-      const { liquidacionId, unidades } = await ejecutarLiquidacion(params, preview);
+      // --- 2. OBTENEMOS LOS DATOS DE VUELTA ---
+      const { liquidacionId, unidades, itemsCtaCteGenerados } = 
+        await ejecutarLiquidacion(params, preview);
 
-      // Éxito:
-      alert(`¡Liquidación "${nombre}" (ID: ${liquidacionId}) generada exitosamente! 
-Se actualizaron los saldos de ${unidades.length} unidades.`);
+      alert(`¡Liquidación "${nombre}" generada! 
+        Actualizados ${unidades.length} saldos. 
+        Generando PDFs...`);
 
       // ¡AQUÍ ES DONDE GENERAREMOS LOS PDFs! (próximo paso)
-      console.log("¡LISTO PARA GENERAR PDFs!");
-      
+      const liquidacionData = {
+        nombre: nombre,
+        totalGastos: preview.totalGastos,
+        montoFondo: preview.montoFondo,
+        totalAProrratear: preview.totalAProrratear
+      };      
+      // Recorremos las unidades y generamos un PDF para cada una
+      for (const unidad of unidades) {
+        // Buscamos el item de CtaCte que le corresponde
+        const itemCtaCte = itemsCtaCteGenerados.find(item => item.unidadId === unidad.id);
+        
+        if (itemCtaCte) {
+          // ¡Llamamos al generador!
+          generarPDFLiquidacion(
+            unidad, 
+            liquidacionData, 
+            preview.gastos, 
+            itemCtaCte
+          );
+        }
+      }
       // Limpiamos todo para la próxima liquidación
       setPreview(null);
       setNombre('');

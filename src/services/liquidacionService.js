@@ -82,8 +82,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
 
       // --- B. Actualizar todas las UNIDADES (saldos) ---
       // Y crear un "item de cuenta corriente" para cada una
-      for (const unidad of unidades) {
-        // Calcular la deuda de esta unidad
+      for (const unidad of unidades) {        // Calcular la deuda de esta unidad
         const montoAPagar = totalAProrratear * unidad.porcentaje;
         
         // El saldo actual de la unidad
@@ -105,20 +104,23 @@ export const ejecutarLiquidacion = async (params, preview) => {
         const itemCtaCte = {
           fecha: Timestamp.now(),
           concepto: `Expensa ${nombre}`,
-          monto: -montoAPagar, // Negativo porque es una deuda
+          monto: -montoAPagar,
           saldoResultante: saldoAnterior - montoAPagar,
           liquidacionId: liquidacionId,
           vencimiento1: fechaVenc1,
           montoVencimiento1: montoAPagar,
           vencimiento2: fechaVenc2,
-          montoVencimiento2: montoAPagar * (1 + pctRecargo)
+          montoVencimiento2: montoAPagar * (1 + pctRecargo),
+          unidadId: unidad.id
         };
         transaction.set(ctaCteRef, itemCtaCte);
+        itemsCtaCteGenerados.push(itemCtaCte);
       }
-    }); // --- FIN DE LA TRANSACCIÓN ---
+    }); 
+    // --- FIN DE LA TRANSACCIÓN ---
     
     console.log("¡Liquidación completada exitosamente!");
-    return { liquidacionId, unidades };
+return { liquidacionId, unidades, itemsCtaCteGenerados };
 
   } catch (error) {
     // Si algo falla, Firebase revierte todo automáticamente
