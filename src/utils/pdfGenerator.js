@@ -1,7 +1,9 @@
 import jsPDF from 'jspdf';
-import 'jspdf-autotable'; // Importamos el plugin de tablas
+// --- CAMBIO 1 ---
+// Importamos 'autoTable' como una función separada
+import autoTable from 'jspdf-autotable'; 
 
-// Función para formatear moneda (la copiamos de los componentes)
+// Función para formatear moneda
 const formatCurrency = (value) => {
   return new Intl.NumberFormat('es-AR', {
     style: 'currency',
@@ -16,15 +18,8 @@ const formatDate = (dateString) => {
   return `${day}/${month}/${year}`;
 };
 
-/**
- * Genera un PDF de liquidación para una unidad específica
- * @param {object} unidad - El objeto de la unidad (propietario, nombre, etc.)
- * @param {object} liquidacion - El objeto de la liquidación (nombre, totales)
- * @param {array} gastos - La lista de gastos de esta liquidación
- * @param {object} itemCtaCte - El item de Cta. Cte. con los montos y vencimientos
- */
 export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) => {
-  const doc = new jsPDF(); // Crea el documento PDF
+  const doc = new jsPDF(); 
 
   // --- 1. TÍTULO ---
   doc.setFontSize(18);
@@ -40,7 +35,6 @@ export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) =
   doc.setFontSize(14);
   doc.text('Detalle de Gastos Comunes', 14, 55);
 
-  // Preparamos los datos para la tabla de gastos
   const bodyGastos = gastos.map(gasto => [
     gasto.fecha,
     gasto.concepto,
@@ -48,8 +42,9 @@ export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) =
     formatCurrency(gasto.monto)
   ]);
   
-  // Usamos autoTable para dibujar la tabla
-  doc.autoTable({
+  // --- CAMBIO 2 ---
+  // Ahora llamamos a autoTable(doc, ...) en lugar de doc.autoTable(...)
+  autoTable(doc, { 
     startY: 60,
     head: [['Fecha', 'Concepto', 'Proveedor', 'Monto']],
     body: bodyGastos,
@@ -64,7 +59,7 @@ export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) =
   });
 
   // --- 4. RESUMEN DEL PRORRATEO ---
-  let finalY = doc.lastAutoTable.finalY + 10; // Posición después de la tabla
+  let finalY = doc.lastAutoTable.finalY + 10; 
   doc.setFontSize(12);
   doc.text('Resumen de Cálculo', 14, finalY);
 
@@ -75,7 +70,9 @@ export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) =
     ['MONTO CORRESPONDIENTE A SU UNIDAD', formatCurrency(itemCtaCte.montoVencimiento1)],
   ];
   
-  doc.autoTable({
+  // --- CAMBIO 3 ---
+  // También aquí
+  autoTable(doc, { 
     startY: finalY + 5,
     theme: 'grid',
     styles: { fontSize: 10 },
@@ -86,11 +83,11 @@ export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) =
     }
   });
 
-  // --- 5. CUPÓN DE PAGO (Como en tu CUPONES.csv) ---
+  // --- 5. CUPÓN DE PAGO (Sin cambios) ---
   finalY = doc.lastAutoTable.finalY + 15;
   doc.setDrawColor(0);
   doc.setFillColor(240, 240, 240);
-  doc.rect(10, finalY, 190, 40, 'F'); // Un rectángulo de fondo
+  doc.rect(10, finalY, 190, 40, 'F'); 
 
   doc.setFontSize(16);
   doc.text(`CUPÓN DE PAGO - ${liquidacion.nombre}`, 14, finalY + 10);
