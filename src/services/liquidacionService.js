@@ -1,8 +1,9 @@
-import { db } from '../config/firebase';
+import { db, storage } from '../config/firebase'; // <--- AGREGA storage
 import { 
   collection, addDoc, doc, runTransaction, 
-  serverTimestamp, Timestamp 
+  serverTimestamp, Timestamp, updateDoc // <--- AGREGA updateDoc
 } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // <--- AGREGA ESTA LÍNEA
 import { getGastosNoLiquidados } from './gastosService';
 import { getTodasUnidades } from './propietariosService';
 
@@ -23,9 +24,9 @@ export const calcularPreviewLiquidacion = async (porcentajeFondo) => {
 };
 
 
-// --- ejecutarLiquidacion (VERSIÓN CORREGIDA) ---
+// --- ejecutarLiquidacion (VERSIÓN CORREGIDA Y CON SNAPSHOT) ---
 export const ejecutarLiquidacion = async (params, preview) => {
-  // Aquí había un pequeño error de variable, lo corregí (fechaVenc2)
+  
   const { nombre, fechaVenc1, pctRecargo, fechaVenc2 } = params;
   const { gastos, totalGastos, montoFondo, totalAProrratear } = preview;
   
@@ -36,6 +37,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
     throw new Error(`La suma de porcentajes no es 1 (100%). Suma actual: ${(sumaPorcentajes * 100).toFixed(4)}%`);
   }
   
+  // 1. Preparamos el documento de liquidación
   const liquidacionRef = collection(db, "liquidaciones");
   const nuevaLiquidacion = {
     nombre,
@@ -45,18 +47,23 @@ export const ejecutarLiquidacion = async (params, preview) => {
     fechaCreada: serverTimestamp(),
     gastosIds: gastos.map(g => g.id),
     unidadesIds: unidades.map(u => u.id)
+    // El 'detalleUnidades' lo agregaremos después de la transacción
   };
+  
+  // 2. Creamos el documento principal Y OBTENEMOS SU ID
   const liquidacionDoc = await addDoc(liquidacionRef, nuevaLiquidacion);
   const liquidacionId = liquidacionDoc.id;
 
+  // 3. Preparamos los arrays que se llenarán en la transacción
   const itemsCtaCteGenerados = []; 
+  const detalleUnidades = []; // <--- Array para el snapshot
 
   try {
-    // --- INICIA LA TRANSACCIÓN CORREGIDA ---
+    // --- 4. INICIA LA TRANSACCIÓN ---
     await runTransaction(db, async (transaction) => {
       
       // --- PASO 1: TODAS LAS LECTURAS (READS) PRIMERO ---
-      const saldosUnidades = []; // Aquí guardamos los saldos que leímos
+      const saldosUnidades = []; 
       
       for (const unidad of unidades) {
         const unidadRef = doc(db, "unidades", unidad.id);
@@ -66,7 +73,6 @@ export const ejecutarLiquidacion = async (params, preview) => {
         }
         const saldoAnterior = unidadDoc.data().saldo;
         
-        // Guardamos los datos leídos para usarlos después
         saldosUnidades.push({ 
           unidadRef: unidadRef, 
           saldoAnterior: saldoAnterior,
@@ -79,7 +85,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
       // A. Actualizar GASTOS
       for (const gasto of gastos) {
         const gastoRef = doc(db, "gastos", gasto.id);
-        transaction.update(gastoRef, { // <-- ESCRITURA
+        transaction.update(gastoRef, { 
           liquidacionId: liquidacionId,
           liquidadoEn: nombre
         });
@@ -89,10 +95,11 @@ export const ejecutarLiquidacion = async (params, preview) => {
       for (const dataUnidad of saldosUnidades) {
         const { unidadRef, saldoAnterior, unidad } = dataUnidad;
         const montoAPagar = totalAProrratear * unidad.porcentaje;
+        const saldoResultante = saldoAnterior - montoAPagar;
         
-        // 1. Actualizar el saldo
-        transaction.update(unidadRef, { // <-- ESCRITURA
-          saldo: saldoAnterior - montoAPagar
+        // 1. Actualizar el saldo de la unidad
+        transaction.update(unidadRef, { 
+          saldo: saldoResultante
         });
 
         // 2. Crear el "item de cuenta corriente"
@@ -101,7 +108,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
           fecha: Timestamp.now(),
           concepto: `Expensa ${nombre}`,
           monto: -montoAPagar,
-          saldoResultante: saldoAnterior - montoAPagar,
+          saldoResultante: saldoResultante,
           liquidacionId: liquidacionId,
           vencimiento1: fechaVenc1,
           montoVencimiento1: montoAPagar,
@@ -109,17 +116,78 @@ export const ejecutarLiquidacion = async (params, preview) => {
           montoVencimiento2: montoAPagar * (1 + pctRecargo),
           unidadId: unidad.id 
         };
-        transaction.set(ctaCteRef, itemCtaCte); // <-- ESCRITURA
+        transaction.set(ctaCteRef, itemCtaCte); 
         
-        itemsCtaCteGenerados.push(itemCtaCte);
+        // 3. Guardar la data para el return (con el ID)
+        itemsCtaCteGenerados.push({
+          ...itemCtaCte,
+          id: ctaCteRef.id
+        });
+        
+        // 4. GUARDAR EL SNAPSHOT para el doc. principal
+        detalleUnidades.push({
+          unidadId: unidad.id,
+          nombre: unidad.nombre,
+          propietario: unidad.propietario,
+          porcentaje: unidad.porcentaje,
+          saldoAnterior: saldoAnterior,
+          montoLiquidado: -montoAPagar,
+          saldoResultante: saldoResultante
+        });
       }
     }); // --- FIN DE LA TRANSACCIÓN ---
     
-    console.log("¡Liquidación completada exitosamente!");
+    // --- 5. ACTUALIZAR EL DOC. LIQUIDACIÓN CON EL SNAPSHOT ---
+    // (Esto se hace FUERA de la transacción, pero después de que fue exitosa)
+    const liquidacionDocRef = doc(db, "liquidaciones", liquidacionId);
+    await updateDoc(liquidacionDocRef, {
+      detalleUnidades: detalleUnidades
+    });
+    
+    console.log("¡Liquidación completada y snapshot guardado!");
     return { liquidacionId, unidades, itemsCtaCteGenerados };
 
   } catch (error) {
     console.error("¡FALLÓ LA TRANSACCIÓN! ", error);
+    // TODO: Si la transacción falla, podríamos borrar el doc de liquidación que creamos?
+    // Por ahora, solo lanzamos el error.
     throw new Error(`Error al ejecutar la transacción: ${error.message}`);
   }
 };
+
+// --- (Las funciones de uploadPDF y guardarURL no cambian) ---
+
+/**
+ * Sube un cupón PDF (Blob) a Storage
+ * @param {Blob} pdfBlob El archivo PDF generado
+ * @param {string} liquidacionNombre El nombre de la liquidación (Ej: "Octubre 2025")
+ * @param {string} unidadNombre El nombre de la unidad (Ej: "Departamento 1")
+ * @returns {string} La URL de descarga
+ */
+export const uploadCuponPDF = async (pdfBlob, liquidacionNombre, unidadNombre) => {
+  // Limpiamos nombres para que sean aptos para URL/Storage
+  const safeLiquidacionNombre = liquidacionNombre.replace(/ /g, '_');
+  const safeUnidadNombre = unidadNombre.replace(/ /g, '_');
+  
+  const fileName = `expensa-${safeLiquidacionNombre}-${safeUnidadNombre}.pdf`;
+  // Lo guardamos en una carpeta por liquidación para mantener el orden
+  const storageRef = ref(storage, `liquidaciones/${safeLiquidacionNombre}/${fileName}`);
+  
+  console.log(`Subiendo cupón: ${fileName}`);
+  const snapshot = await uploadBytes(storageRef, pdfBlob);
+  const downloadURL = await getDownloadURL(snapshot.ref);
+  
+  return downloadURL;
+};
+
+/**
+ * Guarda la URL del cupón en el item de Cta. Cte. correspondiente
+ * @param {string} unidadId ID de la unidad (para la ruta)
+ * @param {string} ctaCteId ID del documento en la subcolección cuentaCorriente
+ * @param {string} url La URL de descarga del PDF
+ */
+export const guardarURLCupon = async (unidadId, ctaCteId, url) => {
+  // Armamos la referencia directa al documento en la subcolección
+  const ctaCteRef = doc(db, `unidades/${unidadId}/cuentaCorriente`, ctaCteId);
+
+}

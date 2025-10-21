@@ -104,6 +104,7 @@ export const generarPDFLiquidacion = (unidad, liquidacion, gastos, itemCtaCte) =
   doc.text(formatDate(itemCtaCte.vencimiento2), 150, finalY + 27);
   doc.text(formatCurrency(itemCtaCte.montoVencimiento2), 150, finalY + 34);
   
-  // --- 6. GUARDAR EL ARCHIVO ---
-  doc.save(`Expensa-${liquidacion.nombre}-${unidad.nombre}.pdf`);
+  // --- 6. DEVOLVER EL BLOB ---
+  // En lugar de descargar, devolvemos el archivo como un Blob
+  return doc.output('blob');
 };

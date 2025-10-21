@@ -1,7 +1,10 @@
-// src/pages/admin/LiquidacionPage.jsx
-
 import React, { useState } from 'react';
-import { calcularPreviewLiquidacion, ejecutarLiquidacion } from '../../services/liquidacionService';
+import { 
+  calcularPreviewLiquidacion, 
+  ejecutarLiquidacion,
+  uploadCuponPDF,
+  guardarURLCupon
+} from '../../services/liquidacionService';
 import { generarPDFLiquidacion } from '../../utils/pdfGenerator';
 
 function LiquidacionPage() {
@@ -47,19 +50,6 @@ function LiquidacionPage() {
 
   // --- PASO 2: Ejecutar (¡AHORA SÍ HACE ALGO!) ---
   const handleEjecutar = async () => {
-    if (!preview) {
-      setError("Primero debes calcular la previsualización.");
-      return;
-    }
-    
-    if (!nombre || !fechaVenc1 || !fechaVenc2) {
-      setError("Completa todos los campos del período (Nombre y Fechas).");
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    
     try {
       const params = {
         nombre,
@@ -68,37 +58,65 @@ function LiquidacionPage() {
         fechaVenc2,
       };
 
-      // --- 2. OBTENEMOS LOS DATOS DE VUELTA ---
+      // --- 1. EJECUTAR LA TRANSACCIÓN (Esto no cambia) ---
+      // itemsCtaCteGenerados AHORA CONTIENE EL ".id" gracias al paso anterior
       const { liquidacionId, unidades, itemsCtaCteGenerados } = 
         await ejecutarLiquidacion(params, preview);
 
-      alert(`¡Liquidación "${nombre}" generada! 
-        Actualizados ${unidades.length} saldos. 
-        Generando PDFs...`);
-
-      // ¡AQUÍ ES DONDE GENERAREMOS LOS PDFs! (próximo paso)
+      
+      // --- 2. GENERAR Y SUBIR PDFs (NUEVO FLUJO) ---
+      
+      // Preparamos los datos comunes de la liquidación
       const liquidacionData = {
         nombre: nombre,
         totalGastos: preview.totalGastos,
         montoFondo: preview.montoFondo,
         totalAProrratear: preview.totalAProrratear
-      };      
-      // Recorremos las unidades y generamos un PDF para cada una
+      };
+
+      // Mostramos un "cargando" más específico
+      // Usamos setError para mostrar el progreso
+      setError(`Liquidación "${nombre}" guardada. Generando y subiendo PDFs... (0/${unidades.length})`);
+
+      let contador = 0;
+      // Recorremos las unidades para generar, subir y actualizar
+      // Usamos un 'for...of' para poder usar 'await' dentro
       for (const unidad of unidades) {
-        // Buscamos el item de CtaCte que le corresponde
+        // Buscamos el itemCtaCte que le corresponde
         const itemCtaCte = itemsCtaCteGenerados.find(item => item.unidadId === unidad.id);
         
-        if (itemCtaCte) {
-          // ¡Llamamos al generador!
-          generarPDFLiquidacion(
+        // Verificamos que tengamos el item Y el ID del documento
+        if (itemCtaCte && itemCtaCte.id) { 
+          
+          // A. Generar el PDF (ahora devuelve un Blob)
+          const pdfBlob = generarPDFLiquidacion(
             unidad, 
             liquidacionData, 
             preview.gastos, 
             itemCtaCte
           );
+          
+          // B. Subir el Blob a Firebase Storage
+          const downloadURL = await uploadCuponPDF(
+            pdfBlob, 
+            nombre, // "Octubre 2025"
+            unidad.nombre // "Departamento 1"
+          );
+
+          // C. Guardar la URL en el doc de Cta. Cte.
+          await guardarURLCupon(
+            unidad.id,        // ID de la unidad (para la ruta)
+            itemCtaCte.id,    // ID del documento de CtaCte
+            downloadURL
+          );
+
+          contador++;
+          setError(`Generando y subiendo PDFs... (${contador}/${unidades.length})`);
         }
       }
-      // Limpiamos todo para la próxima liquidación
+
+      // 4. ¡Todo listo! Limpiamos el formulario
+      alert(`¡Proceso completado! Se generaron y subieron ${contador} cupones PDF.`);
       setPreview(null);
       setNombre('');
       setFechaVenc1('');
@@ -106,11 +124,13 @@ function LiquidacionPage() {
       setError('');
 
     } catch (err) {
-      // Si la transacción falla, mostramos el error
-      setError(err.message);
+      // Si la transacción o la subida de PDFs falla, mostramos el error
+      console.error("Error al ejecutar liquidación o subir PDFs:", err);
+      setError(`Error: ${err.message}`);
     } finally {
       setLoading(false);
     }
+  };
   };
 
 
@@ -211,7 +231,7 @@ function LiquidacionPage() {
       )}
     </div>
   );
-}
+
 
 // --- Estilos para la página ---
 const styles = {
