@@ -1,23 +1,28 @@
+// src/components/GastosList.jsx
 import React, { useState, useEffect } from 'react';
 import { getGastos } from '../services/gastosService';
+
+// --- IMPORTACIONES DE MUI ---
+import { 
+  Paper, Table, TableBody, TableCell, 
+  TableContainer, TableHead, TableRow, 
+  Typography, Button, Box 
+} from '@mui/material';
+// --- FIN IMPORTACIONES MUI ---
 
 function GastosList() {
   const [gastos, setGastos] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // La lógica es la misma
   useEffect(() => {
-    // 1. Nos suscribimos al servicio de gastos
     const unsubscribe = getGastos((gastosNuevos) => {
       setGastos(gastosNuevos);
       setLoading(false);
     });
-
-    // 2. Cuando el componente se "desmonte", nos desuscribimos
-    //    para evitar gastar recursos.
     return () => unsubscribe();
-  }, []); // El array vacío [] significa que esto se ejecuta solo una vez
+  }, []);
 
-  // Función para formatear el monto a moneda
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('es-AR', {
       style: 'currency',
@@ -26,45 +31,57 @@ function GastosList() {
   };
 
   if (loading) {
-    return <p>Cargando lista de gastos...</p>;
+    return <Typography>Cargando lista de gastos...</Typography>;
   }
 
   return (
-    <div style={{ marginTop: '40px' }}>
-      <h3>Gastos Cargados</h3>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid black' }}>
-            <th style={{ textAlign: 'left', padding: '8px' }}>Fecha</th>
-            <th style={{ textAlign: 'left', padding: '8px' }}>Concepto</th>
-            <th style={{ textAlign: 'left', padding: '8px' }}>Proveedor</th>
-            <th style={{ textAlign: 'right', padding: '8px' }}>Monto</th>
-            <th style={{ textAlign: 'center', padding: '8px' }}>Factura</th>
-          </tr>
-        </thead>
-        <tbody>
-          {gastos.map((gasto) => (
-            <tr key={gasto.id} style={{ borderBottom: '1px solid #ddd' }}>
-              <td style={{ padding: '8px' }}>{gasto.fecha}</td>
-              <td style={{ padding: '8px' }}>{gasto.concepto}</td>
-              <td style={{ padding: '8px' }}>{gasto.proveedor}</td>
-              <td style={{ textAlign: 'right', padding: '8px' }}>
-                {formatCurrency(gasto.monto)}
-              </td>
-              <td style={{ textAlign: 'center', padding: '8px' }}>
-                {/* gasto.facturaURL es el link al PDF que guardamos.
-                  target="_blank" rel="noopener noreferrer" es por seguridad
-                  y para que abra en una pestaña nueva.
-                */}
-                <a href={gasto.facturaURL} target="_blank" rel="noopener noreferrer">
-                  Ver PDF
-                </a>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Paper sx={{ p: 3 }}>
+      <Typography variant="h6" gutterBottom>
+        Gastos Cargados
+      </Typography>
+      <TableContainer>
+        <Table sx={{ minWidth: 650 }} aria-label="tabla de gastos">
+          <TableHead sx={{ '& th': { fontWeight: 'bold' } }}>
+            <TableRow>
+              <TableCell>Fecha</TableCell>
+              <TableCell>Concepto</TableCell>
+              <TableCell>Proveedor</TableCell>
+              <TableCell align="right">Monto</TableCell>
+              <TableCell align="center">Factura</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {gastos.map((gasto) => (
+              <TableRow
+                key={gasto.id}
+                sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+              >
+                <TableCell component="th" scope="row">{gasto.fecha}</TableCell>
+                <TableCell>{gasto.concepto}</TableCell>
+                <TableCell>{gasto.proveedor}</TableCell>
+                <TableCell align="right">{formatCurrency(gasto.monto)}</TableCell>
+                <TableCell align="center">
+                  {gasto.facturaURL ? (
+                    <Button 
+                      variant="outlined" 
+                      size="small" 
+                      href={gasto.facturaURL} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                    >
+                      Ver PDF
+                    </Button>
+                  ) : (
+                    // Si no hay PDF, mostramos un texto gris
+                    <Typography variant="caption" color="textSecondary">Sin PDF</Typography>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Paper>
   );
 }
 
