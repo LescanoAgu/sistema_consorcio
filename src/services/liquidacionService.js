@@ -1,7 +1,8 @@
 import { db, storage } from '../config/firebase'; // <--- AGREGA storage
-import { 
-  collection, addDoc, doc, runTransaction, 
-  serverTimestamp, Timestamp, updateDoc // <--- AGREGA updateDoc
+import {
+  collection, addDoc, doc, runTransaction,
+  serverTimestamp, Timestamp, updateDoc, // <--- 'collection' ya está aquí
+  onSnapshot, query, orderBy, where, getDocs // <-- y aquí también por si acaso
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // <--- AGREGA ESTA LÍNEA
 import { getGastosNoLiquidados } from './gastosService';
@@ -189,5 +190,42 @@ export const uploadCuponPDF = async (pdfBlob, liquidacionNombre, unidadNombre) =
 export const guardarURLCupon = async (unidadId, ctaCteId, url) => {
   // Armamos la referencia directa al documento en la subcolección
   const ctaCteRef = doc(db, `unidades/${unidadId}/cuentaCorriente`, ctaCteId);
+  
+  // ---> ESTA PARTE FALTABA <---
+  // Actualizamos ese documento específico con la nueva URL
+  await updateDoc(ctaCteRef, {
+    cuponURL: url 
+  });
+  console.log(`URL guardada para ctaCteId: ${ctaCteId}`);
+  // ---> FIN DE LO QUE FALTABA <---
+};
 
-}
+// --- ¡NUEVA FUNCIÓN! ---
+/**
+ * Obtiene todas las liquidaciones en tiempo real, ordenadas por fecha de creación descendente.
+ * @param {function} callback - Función que se llamará con la lista de liquidaciones.
+ * @returns {function} - Función para desuscribirse del listener.
+ */
+export const getLiquidaciones = (callback) => {
+  const q = query(collection(db, "liquidaciones"), orderBy("fechaCreada", "desc"));
+
+  const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const liquidaciones = [];
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      // Convertimos el Timestamp a Date para mostrarlo
+      const fechaJS = data.fechaCreada ? data.fechaCreada.toDate() : null;
+      liquidaciones.push({
+        id: doc.id,
+        ...data,
+        fechaCreada: fechaJS // Sobrescribimos con objeto Date
+      });
+    });
+    callback(liquidaciones);
+  }, (error) => {
+    console.error("Error al obtener liquidaciones:", error);
+    callback([], error); // Llama al callback con array vacío y error
+  });
+
+  return unsubscribe;
+};

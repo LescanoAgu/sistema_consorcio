@@ -1,7 +1,9 @@
 import React from 'react';
 import { logout } from '../../services/authService';
 import { useNavigate, Link, Outlet, useLocation } from 'react-router-dom';
-
+import WarningIcon from '@mui/icons-material/Warning';
+import PointOfSaleIcon from '@mui/icons-material/PointOfSale'; 
+import HistoryIcon from '@mui/icons-material/History';
 // --- IMPORTACIONES DE MUI ---
 import Box from '@mui/material/Box';
 import Drawer from '@mui/material/Drawer';
@@ -30,6 +32,9 @@ const menuItems = [
   { text: 'Gastos', path: '/admin/gastos', icon: <ReceiptLongIcon /> },
   { text: 'Propietarios', path: '/admin/propietarios', icon: <PeopleIcon /> },
   { text: 'Liquidación', path: '/admin/liquidacion', icon: <RequestQuoteIcon /> },
+  { text: 'Deudores', path: '/admin/deudores', icon: <WarningIcon /> },
+  { text: 'Cobranzas', path: '/admin/cobranzas', icon: <PointOfSaleIcon /> },
+  { text: 'Historial Liquidaciones', path: '/admin/historial-liquidaciones', icon: <HistoryIcon /> },
 ];
 
 function AdminLayout() {

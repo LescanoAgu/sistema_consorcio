@@ -1,4 +1,3 @@
-// src/components/CargaGastosForm.jsx
 import React, { useState } from 'react';
 import { crearGasto } from '../services/gastosService';
 
@@ -13,11 +12,10 @@ function CargaGastosForm() {
   const [proveedor, setProveedor] = useState('');
   const [monto, setMonto] = useState('');
   const [facturaFile, setFacturaFile] = useState(null);
-  
+
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // La lógica de handleSubmit es la misma, no cambia
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -25,15 +23,14 @@ function CargaGastosForm() {
 
     try {
       await crearGasto({ fecha, concepto, proveedor, monto, facturaFile });
-      
+
       setMessage('¡Gasto cargado exitosamente!');
       setFecha('');
       setConcepto('');
       setProveedor('');
       setMonto('');
       setFacturaFile(null);
-      // Reseteamos el formulario
-      e.target.reset(); 
+      e.target.reset();
 
     } catch (error) {
       setMessage(`Error: ${error.message}`);
@@ -49,26 +46,25 @@ function CargaGastosForm() {
   };
 
   return (
-    // Usamos 'Paper' para darle un fondo y sombra
-    <Paper sx={{ p: 3, mb: 4 }}> 
+    <Paper sx={{ p: 3, mb: 4 }}>
       <Typography variant="h6" gutterBottom>
         Cargar Nuevo Gasto
       </Typography>
       <Box component="form" onSubmit={handleSubmit}>
-        {/* 'Grid' nos ayuda a alinear los campos */}
+        {/* Usamos Grid v2: Las props xs/sm van directamente en los <Grid> hijos */}
         <Grid container spacing={3}>
-          <Grid item xs={12} sm={4}>
+          <Grid xs={12} sm={4}> {/* <- xs/sm aquí */}
             <TextField
               label="Fecha"
               type="date"
               fullWidth
-              InputLabelProps={{ shrink: true }} // Para que la etiqueta "Fecha" no se superponga
+              InputLabelProps={{ shrink: true }}
               value={fecha}
               onChange={(e) => setFecha(e.target.value)}
               required
             />
           </Grid>
-          <Grid item xs={12} sm={8}>
+          <Grid xs={12} sm={8}> {/* <- xs/sm aquí */}
             <TextField
               label="Concepto"
               fullWidth
@@ -78,7 +74,7 @@ function CargaGastosForm() {
               required
             />
           </Grid>
-          <Grid item xs={12} sm={8}>
+          <Grid xs={12} sm={8}> {/* <- xs/sm aquí */}
             <TextField
               label="Proveedor"
               fullWidth
@@ -87,7 +83,7 @@ function CargaGastosForm() {
               onChange={(e) => setProveedor(e.target.value)}
             />
           </Grid>
-          <Grid item xs={12} sm={4}>
+          <Grid xs={12} sm={4}> {/* <- xs/sm aquí */}
             <TextField
               label="Monto"
               type="number"
@@ -98,36 +94,34 @@ function CargaGastosForm() {
               required
             />
           </Grid>
-          <Grid item xs={12} sm={6}>
-            {/* Botón estilizado para subir archivos */}
+          <Grid xs={12} sm={6}> {/* <- xs/sm aquí */}
             <Button
               variant="outlined"
-              component="label" // Esto hace que el botón actúe como un <label>
+              component="label"
               fullWidth
               startIcon={<UploadFileIcon />}
             >
               {facturaFile ? facturaFile.name : 'Adjuntar PDF (Opcional)'}
-              <input 
+              <input
                 type="file"
                 accept="application/pdf"
                 onChange={handleFileChange}
-                hidden // El input real está oculto
+                hidden
               />
             </Button>
           </Grid>
-          <Grid item xs={12} sm={6}>
+          <Grid xs={12} sm={6}> {/* <- xs/sm aquí */}
             <Button
               type="submit"
               variant="contained"
               fullWidth
               disabled={loading}
-              sx={{ height: '100%' }} // Para que tenga la misma altura que el botón de al lado
+              sx={{ height: '100%' }}
             >
               {loading ? <CircularProgress size={24} /> : 'Guardar Gasto'}
             </Button>
           </Grid>
         </Grid>
-        {/* Mensaje de éxito o error */}
         {message && (
           <Alert severity={message.startsWith('Error') ? 'error' : 'success'} sx={{ mt: 3 }}>
             {message}

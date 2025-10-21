@@ -132,3 +132,149 @@ export const aplicarInteresesMoratorios = async (tasaMensual, concepto) => {
     throw new Error(`Error al aplicar intereses: ${error.message}`);
   }
 };
+
+// ... (después de la función aplicarInteresesMoratorios)
+
+/**
+ * Registra un pago para una unidad específica, actualizando su saldo y cuenta corriente.
+ * @param {string} unidadId - ID de la unidad que realiza el pago.
+ * @param {number} montoPagado - El monto positivo del pago.
+ * @param {string} fechaPago - La fecha del pago (formato 'AAAA-MM-DD').
+ * @param {string} conceptoPago - Descripción o referencia del pago.
+ */
+export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPago) => {
+  if (!unidadId) {
+    throw new Error("Se requiere el ID de la unidad.");
+  }
+  if (!montoPagado || montoPagado <= 0) {
+    throw new Error("El monto pagado debe ser un número positivo.");
+  }
+  if (!fechaPago) {
+    throw new Error("La fecha de pago es obligatoria.");
+  }
+  if (!conceptoPago || conceptoPago.trim() === '') {
+    throw new Error("El concepto del pago es obligatorio.");
+  }
+
+  // Convertimos la fecha string a Timestamp de Firebase para guardar
+  // Aseguramos que se guarde como el inicio del día en UTC para consistencia
+  const fechaTimestamp = Timestamp.fromDate(new Date(`${fechaPago}T00:00:00Z`));
+
+  const unidadRef = doc(db, "unidades", unidadId);
+
+  try {
+    // Usamos una transacción para asegurar la atomicidad
+    await runTransaction(db, async (transaction) => {
+      // 1. Leer el saldo actual de la unidad DENTRO de la transacción
+      const unidadDoc = await transaction.get(unidadRef);
+      if (!unidadDoc.exists()) {
+        throw new Error(`La unidad con ID ${unidadId} no existe.`);
+      }
+      const saldoAnterior = unidadDoc.data().saldo;
+
+      // 2. Calcular el nuevo saldo (sumamos el pago)
+      const saldoResultante = saldoAnterior + montoPagado; // Ej: -5000 + 2000 = -3000
+
+      // 3. Actualizar el saldo de la unidad
+      transaction.update(unidadRef, {
+        saldo: saldoResultante
+      });
+
+      // 4. Crear el registro positivo en la cuenta corriente
+      const ctaCteRef = doc(collection(db, `unidades/${unidadId}/cuentaCorriente`));
+      const itemCtaCte = {
+        fecha: fechaTimestamp, // Usamos el Timestamp de la fecha del pago
+        concepto: conceptoPago,
+        monto: montoPagado, // Monto positivo
+        saldoResultante: saldoResultante,
+        liquidacionId: null, // No pertenece a una liquidación
+        unidadId: unidadId
+        // No hay campos de vencimiento para un pago
+      };
+      transaction.set(ctaCteRef, itemCtaCte);
+    }); // --- FIN DE LA TRANSACCIÓN ---
+
+    console.log(`Pago de ${montoPagado} registrado para unidad ${unidadId}`);
+    // No necesitamos devolver nada especial aquí, si no hay error, funcionó.
+
+  } catch (error) {
+    console.error("¡FALLÓ LA TRANSACCIÓN DE PAGO! ", error);
+    throw new Error(`Error al registrar el pago: ${error.message}`);
+  }
+};
+
+// ... (después de la función registrarPago)
+
+/**
+ * Obtiene los datos de una unidad específica y su historial de cuenta corriente.
+ * @param {string} unidadId - ID de la unidad a consultar.
+ * @param {function} callback - Función que se llamará con los datos { unidad, movimientos }.
+ * @returns {function} - Función para desuscribirse del listener de la Cta. Cte.
+ */
+export const getCuentaCorriente = (unidadId, callback) => {
+  if (!unidadId) {
+    console.error("Se requiere unidadId para getCuentaCorriente");
+    // Llama al callback con error o datos vacíos
+    callback(null, new Error("Falta el ID de la unidad."));
+    return () => {}; // Devuelve una función vacía para desuscripción
+  }
+
+  let unidadData = null;
+  let unsubscribeUnidad = null;
+  let unsubscribeMovimientos = null;
+
+  // 1. Listener para los datos de la unidad (por si cambia el saldo mientras vemos la Cta Cte)
+  const unidadRef = doc(db, "unidades", unidadId);
+  unsubscribeUnidad = onSnapshot(unidadRef, (docSnap) => {
+    if (docSnap.exists()) {
+      unidadData = { id: docSnap.id, ...docSnap.data() };
+      // Si ya tenemos los movimientos, llamamos al callback
+      // Esto asegura que si cambia el saldo, se actualice la vista
+      if (movimientosData !== null) {
+          callback({ unidad: unidadData, movimientos: movimientosData });
+      }
+    } else {
+      console.error(`Unidad con ID ${unidadId} no encontrada.`);
+      callback(null, new Error(`Unidad no encontrada.`));
+    }
+  }, (error) => {
+    console.error("Error al obtener datos de la unidad:", error);
+    callback(null, error);
+  });
+
+
+  // 2. Listener para los movimientos de la cuenta corriente, ordenados por fecha ASCENDENTE
+  let movimientosData = null; // Variable para guardar temporalmente los movimientos
+  const ctaCteCollection = collection(db, `unidades/${unidadId}/cuentaCorriente`);
+  const q = query(ctaCteCollection, orderBy("fecha", "asc")); // Ordenamos por fecha
+
+  unsubscribeMovimientos = onSnapshot(q, (querySnapshot) => {
+    const movimientos = [];
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      // Convertimos el Timestamp de Firebase a objeto Date de JS para facilitar el formato
+      const fechaJS = data.fecha ? data.fecha.toDate() : null;
+      movimientos.push({
+        id: doc.id,
+        ...data,
+        fecha: fechaJS // Sobrescribimos fecha con el objeto Date
+      });
+    });
+    movimientosData = movimientos; // Guardamos los movimientos
+
+    // Si ya tenemos los datos de la unidad, llamamos al callback
+    if (unidadData) {
+        callback({ unidad: unidadData, movimientos: movimientosData });
+    }
+
+  }, (error) => {
+    console.error("Error al obtener movimientos de Cta. Cte.:", error);
+    callback(null, error);
+  });
+
+  // 3. Devolvemos una función que cancela AMBAS suscripciones
+  return () => {
+    if (unsubscribeUnidad) unsubscribeUnidad();
+    if (unsubscribeMovimientos) unsubscribeMovimientos();
+  };
+};

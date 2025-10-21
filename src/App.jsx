@@ -4,11 +4,15 @@ import { useAuth } from './hooks/useAuth';
 
 // Importamos las páginas
 import LoginPage from './pages/LoginPage';
-import AdminLayout from './pages/admin/AdminLayout'; 
-import GastosPage from './pages/admin/GastosPage'; 
-import PropietariosPage from './pages/admin/PropietariosPage'; 
+import AdminLayout from './pages/admin/AdminLayout';
+import GastosPage from './pages/admin/GastosPage';
+import PropietariosPage from './pages/admin/PropietariosPage';
 import LiquidacionPage from './pages/admin/LiquidacionPage';
-// Componente Guardia (sin cambios)
+import DeudoresPage from './pages/admin/DeudoresPage';
+import CobranzasPage from './pages/admin/CobranzasPage';
+import CuentaCorrientePage from './pages/admin/CuentaCorrientePage';
+import HistorialLiquidacionesPage from './pages/admin/HistorialLiquidacionesPage'; 
+
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   if (!user) {
@@ -45,6 +49,10 @@ function App() {
           <Route path="gastos" element={<GastosPage />} />
           <Route path="propietarios" element={<PropietariosPage />} />
           <Route path="liquidacion" element={<LiquidacionPage />} />
+          <Route path="deudores" element={<DeudoresPage />} />
+          <Route path="cobranzas" element={<CobranzasPage />} />
+          <Route path="cuenta-corriente/:unidadId" element={<CuentaCorrientePage />} />
+          <Route path="historial-liquidaciones" element={<HistorialLiquidacionesPage />} />
         </Route>
         
         {/* Ruta por defecto */}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { 
-  calcularPreviewLiquidacion, 
+import {
+  calcularPreviewLiquidacion,
   ejecutarLiquidacion,
   uploadCuponPDF,
   guardarURLCupon
@@ -50,6 +50,21 @@ function LiquidacionPage() {
 
   // --- PASO 2: Ejecutar (¡AHORA SÍ HACE ALGO!) ---
   const handleEjecutar = async () => {
+    // ---- VALIDACIONES INICIALES ----
+    if (!preview) {
+      setError("Primero debes calcular la previsualización.");
+      return;
+    }
+    
+    if (!nombre || !fechaVenc1 || !fechaVenc2) {
+      setError("Completa todos los campos del período (Nombre y Fechas).");
+      return;
+    }
+    // ---- FIN VALIDACIONES ----
+
+    setLoading(true); // Ponemos loading al inicio
+    setError(''); // Limpiamos errores previos
+
     try {
       const params = {
         nombre,
@@ -60,12 +75,12 @@ function LiquidacionPage() {
 
       // --- 1. EJECUTAR LA TRANSACCIÓN (Esto no cambia) ---
       // itemsCtaCteGenerados AHORA CONTIENE EL ".id" gracias al paso anterior
-      const { liquidacionId, unidades, itemsCtaCteGenerados } = 
+      const { liquidacionId, unidades, itemsCtaCteGenerados } =
         await ejecutarLiquidacion(params, preview);
 
-      
+
       // --- 2. GENERAR Y SUBIR PDFs (NUEVO FLUJO) ---
-      
+
       // Preparamos los datos comunes de la liquidación
       const liquidacionData = {
         nombre: nombre,
@@ -84,21 +99,21 @@ function LiquidacionPage() {
       for (const unidad of unidades) {
         // Buscamos el itemCtaCte que le corresponde
         const itemCtaCte = itemsCtaCteGenerados.find(item => item.unidadId === unidad.id);
-        
+
         // Verificamos que tengamos el item Y el ID del documento
-        if (itemCtaCte && itemCtaCte.id) { 
-          
+        if (itemCtaCte && itemCtaCte.id) {
+
           // A. Generar el PDF (ahora devuelve un Blob)
           const pdfBlob = generarPDFLiquidacion(
-            unidad, 
-            liquidacionData, 
-            preview.gastos, 
+            unidad,
+            liquidacionData,
+            preview.gastos,
             itemCtaCte
           );
-          
+
           // B. Subir el Blob a Firebase Storage
           const downloadURL = await uploadCuponPDF(
-            pdfBlob, 
+            pdfBlob,
             nombre, // "Octubre 2025"
             unidad.nombre // "Departamento 1"
           );
@@ -128,20 +143,19 @@ function LiquidacionPage() {
       console.error("Error al ejecutar liquidación o subir PDFs:", err);
       setError(`Error: ${err.message}`);
     } finally {
-      setLoading(false);
+      setLoading(false); // Quitamos loading al final, ya sea éxito o error
     }
-  };
-  };
+  }; // <--- Cierre de handleEjecutar (la llave extra fue eliminada)
 
-
+  // AHORA EL RETURN ESTÁ CORRECTAMENTE DENTRO DE LiquidacionPage
   return (
     <div>
       <h2>Módulo de Liquidación de Expensas</h2>
-      
+
       {/* --- Formulario de Parámetros --- */}
       <form onSubmit={handlePreview} style={styles.formContainer}>
         <h3>1. Parámetros del Período</h3>
-        
+
         {/* Fila 1 */}
         <div style={styles.row}>
           <div style={styles.field}>
@@ -152,6 +166,7 @@ function LiquidacionPage() {
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               style={styles.input}
+              required // Agregado required
             />
           </div>
           <div style={styles.field}>
@@ -161,6 +176,7 @@ function LiquidacionPage() {
               value={pctFondo}
               onChange={(e) => setPctFondo(e.target.value)}
               style={styles.input}
+              required // Agregado required
             />
           </div>
         </div>
@@ -174,6 +190,7 @@ function LiquidacionPage() {
               value={fechaVenc1}
               onChange={(e) => setFechaVenc1(e.target.value)}
               style={styles.input}
+              required // Agregado required
             />
           </div>
           <div style={styles.field}>
@@ -183,6 +200,7 @@ function LiquidacionPage() {
               value={pctRecargo}
               onChange={(e) => setPctRecargo(e.target.value)}
               style={styles.input}
+              required // Agregado required
             />
           </div>
           <div style={styles.field}>
@@ -192,10 +210,11 @@ function LiquidacionPage() {
               value={fechaVenc2}
               onChange={(e) => setFechaVenc2(e.target.value)}
               style={styles.input}
+              required // Agregado required
             />
           </div>
         </div>
-        
+
         <button type="submit" disabled={loading} style={styles.button}>
           {loading ? 'Calculando...' : '1. Calcular Previsualización'}
         </button>
@@ -203,7 +222,7 @@ function LiquidacionPage() {
 
       {/* --- Zona de Error --- */}
       {error && <p style={styles.error}>{error}</p>}
-      
+
       {/* --- Zona de Previsualización --- */}
       {preview && (
         <div style={styles.previewContainer}>
@@ -224,13 +243,14 @@ function LiquidacionPage() {
             <strong>{formatCurrency(preview.totalAProrratear)}</strong>
           </p>
           <hr/>
-          <button onClick={handleEjecutar} disabled={loading} style={{...styles.button, background: 'green'}}>
+          <button onClick={handleEjecutar} disabled={loading || !nombre || !fechaVenc1 || !fechaVenc2} style={{...styles.button, background: 'green'}}>
             {loading ? 'Procesando...' : '2. Confirmar y Generar PDFs'}
           </button>
         </div>
       )}
     </div>
   );
+} // <--- Cierre de la función LiquidacionPage
 
 
 // --- Estilos para la página ---
