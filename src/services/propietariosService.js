@@ -1,13 +1,9 @@
-// Arriba de todo en propietariosService.js
 import { db } from '../config/firebase';
-import { 
-  collection, addDoc, serverTimestamp, 
-  onSnapshot, query, orderBy, getDocs, 
-  runTransaction, doc, Timestamp, where // <-- Asegúrate de tener runTransaction, doc, Timestamp y where
-} from 'firebase/firestore';/**
- * Guarda una nueva unidad (propietario/depto) en Firestore
- * @param {object} unidadData - Datos { nombre, propietario, porcentaje }
- */
+import {
+  collection, addDoc, serverTimestamp,
+  onSnapshot, query, orderBy, getDocs, // <-- Ya está aquí
+  runTransaction, doc, Timestamp, where
+} from 'firebase/firestore';
 export const crearUnidad = async (unidadData) => {
   const { nombre, propietario, porcentaje } = unidadData;
 
@@ -277,4 +273,55 @@ export const getCuentaCorriente = (unidadId, callback) => {
     if (unsubscribeUnidad) unsubscribeUnidad();
     if (unsubscribeMovimientos) unsubscribeMovimientos();
   };
+};
+
+
+// --- ¡NUEVA FUNCIÓN DE RESETEO! (Solo para Desarrollo) ---
+/**
+ * Pone el saldo de TODAS las unidades a 0 y BORRA TODO su historial de cuenta corriente.
+ * ¡USAR CON EXTREMA PRECAUCIÓN!
+ */
+export const resetearSaldosUnidades = async () => {
+  console.warn("Iniciando reseteo total de saldos y cuentas corrientes...");
+  const unidadesCollection = collection(db, "unidades");
+  const unidadesSnapshot = await getDocs(unidadesCollection);
+  let unidadesActualizadas = 0;
+  let movimientosBorrados = 0;
+  let contadorErrores = 0;
+
+  const promesasResetUnidad = unidadesSnapshot.docs.map(async (unidadDoc) => {
+    const unidadRef = unidadDoc.ref;
+
+    try {
+      // 1. Resetear saldo a 0
+      await updateDoc(unidadRef, { saldo: 0 });
+      unidadesActualizadas++;
+
+      // 2. Borrar subcolección cuentaCorriente
+      const ctaCteCollection = collection(db, `unidades/${unidadDoc.id}/cuentaCorriente`);
+      const ctaCteSnapshot = await getDocs(ctaCteCollection);
+      const promesasDeleteMovimientos = ctaCteSnapshot.docs.map(async (movDoc) => {
+        try {
+          await deleteDoc(movDoc.ref);
+          movimientosBorrados++;
+        } catch (deleteMovError) {
+          console.error(`Error borrando movimiento ${movDoc.id} de unidad ${unidadDoc.id}:`, deleteMovError);
+          contadorErrores++;
+        }
+      });
+      await Promise.all(promesasDeleteMovimientos); // Espera a borrar todos los movs de esta unidad
+
+    } catch (unidadError) {
+      console.error(`Error reseteando unidad ${unidadDoc.id}:`, unidadError);
+      contadorErrores++;
+    }
+  });
+
+  await Promise.all(promesasResetUnidad); // Espera a que todas las unidades terminen
+
+  console.warn(`Reseteo de unidades completado. Saldos actualizados: ${unidadesActualizadas}, Movimientos borrados: ${movimientosBorrados}, Errores: ${contadorErrores}`);
+  if (contadorErrores > 0) {
+    throw new Error(`Ocurrieron ${contadorErrores} errores al resetear unidades/cta cte.`);
+  }
+  return { unidadesActualizadas, movimientosBorrados };
 };

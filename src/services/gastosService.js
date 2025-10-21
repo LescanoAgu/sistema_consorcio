@@ -175,3 +175,48 @@ export const deleteGasto = async (id, facturaURL) => {
     throw new Error('No se pudo eliminar el gasto.');
   }
 };
+
+export const resetearTodosLosGastos = async () => {
+  console.warn("Iniciando reseteo total de gastos...");
+  const gastosCollection = collection(db, "gastos");
+  const gastosSnapshot = await getDocs(gastosCollection);
+  let contadorBorrados = 0;
+  let contadorErrores = 0;
+
+  // Usamos Promise.all para manejar las eliminaciones en paralelo (más rápido)
+  const promesasDelete = gastosSnapshot.docs.map(async (gastoDoc) => {
+    const gastoData = gastoDoc.data();
+    const gastoRef = gastoDoc.ref; // Referencia al documento
+
+    // 1. Intentar borrar PDF si existe
+    if (gastoData.facturaURL) {
+      try {
+        const fileRef = ref(storage, gastoData.facturaURL);
+        await deleteObject(fileRef);
+        console.log(`PDF eliminado: ${gastoData.facturaURL}`);
+      } catch (storageError) {
+        // Ignoramos errores si el archivo no existe, pero logueamos otros
+        if (storageError.code !== 'storage/object-not-found') {
+            console.warn(`No se pudo eliminar PDF ${gastoData.facturaURL}:`, storageError);
+        }
+      }
+    }
+
+    // 2. Borrar documento de Firestore
+    try {
+      await deleteDoc(gastoRef);
+      contadorBorrados++;
+    } catch (firestoreError) {
+      console.error(`Error al borrar gasto ${gastoDoc.id}:`, firestoreError);
+      contadorErrores++;
+    }
+  });
+
+  await Promise.all(promesasDelete); // Espera a que todas las promesas terminen
+
+  console.warn(`Reseteo de gastos completado. Borrados: ${contadorBorrados}, Errores: ${contadorErrores}`);
+  if (contadorErrores > 0) {
+    throw new Error(`Ocurrieron ${contadorErrores} errores al borrar gastos.`);
+  }
+  return contadorBorrados;
+};
