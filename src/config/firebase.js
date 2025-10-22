@@ -6,13 +6,13 @@ import { getStorage } from "firebase/storage";
 
 // TUS CLAVES VAN AQUÍ
 const firebaseConfig = {
-  apiKey: "AIzaSyDDcA6EB-5HsGZJFBFvZ-7KpBSNa-LC_UU",
-  authDomain: "sistema-consorcio-43b49.firebaseapp.com",
-  projectId: "sistema-consorcio-43b49",
-  storageBucket: "sistema-consorcio-43b49.firebasestorage.app",
-  messagingSenderId: "19981449431",
-  appId: "1:19981449431:web:ef9ef49efad84441a31892",
-  measurementId: "G-YJFHTVQCVR"
+  apiKey: "AIzaSyDR9ZeCU4Cbt4uFwszb_wOH7Ruq2z-LHVE",
+  authDomain: "sistema-consorcio-v2.firebaseapp.com",
+  projectId: "sistema-consorcio-v2",
+  storageBucket: "sistema-consorcio-v2.firebasestorage.app",
+  messagingSenderId: "161822155934",
+  appId: "1:161822155934:web:d6e7ef43fd0a079fd0478f",
+  measurementId: "G-Z4V8YM8D3X"
 };
 
 // Inicializar Firebase

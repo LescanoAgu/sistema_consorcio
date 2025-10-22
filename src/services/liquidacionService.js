@@ -1,10 +1,11 @@
-import { db, storage } from '../config/firebase'; // <--- AGREGA storage
+// src/services/liquidacionService.js
+import { db, storage } from '../config/firebase';
 import {
   collection, addDoc, doc, runTransaction,
-  serverTimestamp, Timestamp, updateDoc, // <--- 'collection' ya está aquí
-  onSnapshot, query, orderBy, where, getDocs // <-- y aquí también por si acaso
+  serverTimestamp, Timestamp, updateDoc,
+  onSnapshot, query, orderBy, where, getDocs
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // <--- AGREGA ESTA LÍNEA
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getGastosNoLiquidados } from './gastosService';
 import { getTodasUnidades } from './propietariosService';
 
@@ -25,7 +26,7 @@ export const calcularPreviewLiquidacion = async (porcentajeFondo) => {
 };
 
 
-// --- ejecutarLiquidacion (VERSIÓN CORREGIDA Y CON SNAPSHOT) ---
+// --- ejecutarLiquidacion (VERSIÓN MODIFICADA) ---
 export const ejecutarLiquidacion = async (params, preview) => {
   
   const { nombre, fechaVenc1, pctRecargo, fechaVenc2 } = params;
@@ -48,7 +49,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
     fechaCreada: serverTimestamp(),
     gastosIds: gastos.map(g => g.id),
     unidadesIds: unidades.map(u => u.id)
-    // El 'detalleUnidades' lo agregaremos después de la transacción
+    // El 'detalleUnidades' AHORA se agregará desde LiquidacionPage
   };
   
   // 2. Creamos el documento principal Y OBTENEMOS SU ID
@@ -57,7 +58,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
 
   // 3. Preparamos los arrays que se llenarán en la transacción
   const itemsCtaCteGenerados = []; 
-  const detalleUnidades = []; // <--- Array para el snapshot
+  const detalleUnidades = []; // <--- Array para el snapshot (que se devolverá)
 
   try {
     // --- 4. INICIA LA TRANSACCIÓN ---
@@ -134,19 +135,18 @@ export const ejecutarLiquidacion = async (params, preview) => {
           saldoAnterior: saldoAnterior,
           montoLiquidado: -montoAPagar,
           saldoResultante: saldoResultante
+          // cuponURL se agregará en LiquidacionPage
         });
       }
     }); // --- FIN DE LA TRANSACCIÓN ---
     
-    // --- 5. ACTUALIZAR EL DOC. LIQUIDACIÓN CON EL SNAPSHOT ---
-    // (Esto se hace FUERA de la transacción, pero después de que fue exitosa)
-    const liquidacionDocRef = doc(db, "liquidaciones", liquidacionId);
-    await updateDoc(liquidacionDocRef, {
-      detalleUnidades: detalleUnidades
-    });
+    // --- 5. YA NO SE ACTUALIZA EL DOC. LIQUIDACIÓN AQUÍ ---
+    // (Esta línea fue eliminada)
     
-    console.log("¡Liquidación completada y snapshot guardado!");
-    return { liquidacionId, unidades, itemsCtaCteGenerados };
+    console.log("¡Transacción de liquidación completada!");
+    
+    // <-- DEVOLVEMOS EL SNAPSHOT 'detalleUnidades'
+    return { liquidacionId, unidades, itemsCtaCteGenerados, detalleUnidades };
 
   } catch (error) {
     console.error("¡FALLÓ LA TRANSACCIÓN! ", error);
