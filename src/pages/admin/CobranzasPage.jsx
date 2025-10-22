@@ -1,34 +1,26 @@
+// src/pages/admin/CobranzasPage.jsx
 import React, { useState, useEffect } from 'react';
-import { getTodasUnidades, registrarPago } from '../../services/propietariosService'; // Importaremos registrarPago luego
-
-// --- IMPORTACIONES DE MUI ---
+import { getTodasUnidades, registrarPago } from '../../services/propietariosService';
 import {
   Box, Button, TextField, Typography, Paper, Alert, CircularProgress, Grid,
-  Autocomplete // <-- Nuevo componente para el selector de unidades
+  Autocomplete
 } from '@mui/material';
-// --- FIN IMPORTACIONES MUI ---
 
 function CobranzasPage() {
-  // Estado para la lista de unidades (para el selector)
   const [unidades, setUnidades] = useState([]);
   const [loadingUnidades, setLoadingUnidades] = useState(true);
-
-  // Estado del formulario
-  const [unidadSeleccionada, setUnidadSeleccionada] = useState(null); // Guardará el objeto unidad completo
+  const [unidadSeleccionada, setUnidadSeleccionada] = useState(null);
   const [monto, setMonto] = useState('');
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]); // Fecha de hoy por defecto
+  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
   const [concepto, setConcepto] = useState('');
-
-  // Estado general
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // Cargar unidades al montar el componente
   useEffect(() => {
     const cargarUnidades = async () => {
+      setLoadingUnidades(true);
       try {
         const unidadesObtenidas = await getTodasUnidades();
-        // Ordenamos alfabéticamente por nombre para el selector
         unidadesObtenidas.sort((a, b) => a.nombre.localeCompare(b.nombre));
         setUnidades(unidadesObtenidas);
       } catch (error) {
@@ -47,26 +39,22 @@ function CobranzasPage() {
       setMessage('Error: Debes seleccionar una unidad.');
       return;
     }
-
     setLoading(true);
     setMessage('');
-
     try {
       const montoFloat = parseFloat(monto.replace(',', '.'));
       if (isNaN(montoFloat) || montoFloat <= 0) {
         throw new Error('El monto debe ser un número positivo.');
       }
-
-      // Llamamos al servicio (lo crearemos en el siguiente paso)
       await registrarPago(unidadSeleccionada.id, montoFloat, fecha, concepto || `Pago ${unidadSeleccionada.nombre}`);
-
-      setMessage(`¡Pago de ${montoFloat} registrado exitosamente para ${unidadSeleccionada.nombre}!`);
-      // Limpiar formulario
+      setMessage(`¡Pago de ${formatCurrency(montoFloat)} registrado exitosamente para ${unidadSeleccionada.nombre}!`);
       setUnidadSeleccionada(null);
       setMonto('');
-      // setFecha(new Date().toISOString().split('T')[0]); // Opcional: resetear fecha
       setConcepto('');
-
+      // Forzar reseteo visual del Autocomplete si es necesario
+      // Puedes intentar limpiar el input directamente si setUnidadSeleccionada(null) no funciona
+      // const input = document.querySelector('#autocomplete-unidad input');
+      // if (input) input.value = '';
     } catch (error) {
       setMessage(`Error al registrar el pago: ${error.message}`);
       console.error(error);
@@ -74,6 +62,11 @@ function CobranzasPage() {
       setLoading(false);
     }
   };
+
+   const formatCurrency = (value) => {
+      if (typeof value !== 'number') return '';
+      return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
+   };
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -89,26 +82,31 @@ function CobranzasPage() {
           <CircularProgress />
         ) : (
           <Box component="form" onSubmit={handleSubmit}>
-            <Grid container spacing={3}>
-              {/* Selector de Unidad */}
-              <Grid item xs={12} sm={6}>
+             {/* Usamos alignItems="flex-end" */}
+            <Grid container spacing={3} alignItems="flex-end">
+
+              {/* Selector de Unidad - AÚN MÁS ANCHO */}
+              <Grid item xs={12} sm={12} md={6}> {/* <-- Ocupa todo en sm, mitad en md */}
                 <Autocomplete
+                  id="autocomplete-unidad" // Añadir ID para posible manipulación manual (último recurso)
                   options={unidades}
-                  getOptionLabel={(option) => `${option.nombre} (${option.propietario})`} // Muestra nombre y propietario
+                  getOptionLabel={(option) => `${option.nombre} (${option.propietario})`}
                   value={unidadSeleccionada}
                   onChange={(event, newValue) => {
                     setUnidadSeleccionada(newValue);
                   }}
-                  isOptionEqualToValue={(option, value) => option.id === value.id} // Necesario para comparar objetos
+                  isOptionEqualToValue={(option, value) => option?.id === value?.id}
                   renderInput={(params) => (
-                    <TextField {...params} label="Seleccionar Unidad" required />
+                    <TextField {...params} label="Seleccionar Unidad" required variant="standard" />
                   )}
                   disabled={loading}
+                  // Quitar la key puede ayudar a veces si causa problemas con el reset
+                  // key={unidadSeleccionada ? unidadSeleccionada.id : 'autocomplete-reset'}
                 />
               </Grid>
 
               {/* Monto */}
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={6} md={3}> {/* <-- Ajustado */}
                 <TextField
                   label="Monto Pagado"
                   type="number"
@@ -117,13 +115,14 @@ function CobranzasPage() {
                   value={monto}
                   onChange={(e) => setMonto(e.target.value)}
                   required
-                  InputProps={{ inputProps: { step: '0.01' } }} // Permite decimales
+                  InputProps={{ inputProps: { step: '0.01' } }}
                   disabled={loading}
+                  variant="standard"
                 />
               </Grid>
 
               {/* Fecha */}
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={6} md={3}> {/* <-- Ajustado */}
                 <TextField
                   label="Fecha del Pago"
                   type="date"
@@ -133,11 +132,12 @@ function CobranzasPage() {
                   onChange={(e) => setFecha(e.target.value)}
                   required
                   disabled={loading}
+                  variant="standard"
                 />
               </Grid>
 
               {/* Concepto (Opcional) */}
-              <Grid item xs={12} sm={9}>
+              <Grid item xs={12} sm={9} md={9}> {/* <-- Más ancho */}
                 <TextField
                   label="Concepto / Referencia (Opcional)"
                   fullWidth
@@ -145,24 +145,23 @@ function CobranzasPage() {
                   value={concepto}
                   onChange={(e) => setConcepto(e.target.value)}
                   disabled={loading}
+                  variant="standard"
                 />
               </Grid>
 
               {/* Botón Guardar */}
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={3} md={3}> {/* <-- Ajustado */}
                 <Button
                   type="submit"
                   variant="contained"
                   fullWidth
-                  disabled={loading || !unidadSeleccionada} // Deshabilitado si no hay unidad o está cargando
-                  sx={{ height: '100%' }} // Misma altura que TextField
+                  disabled={loading || !unidadSeleccionada}
                 >
                   {loading ? <CircularProgress size={24} /> : 'Registrar Pago'}
                 </Button>
               </Grid>
             </Grid>
 
-            {/* Mensaje de éxito o error */}
             {message && (
               <Alert severity={message.startsWith('Error') ? 'error' : 'success'} sx={{ mt: 3 }}>
                 {message}
@@ -171,9 +170,6 @@ function CobranzasPage() {
           </Box>
         )}
       </Paper>
-
-      {/* Aquí podríamos agregar una lista de los últimos pagos registrados si quisiéramos */}
-
     </Box>
   );
 }
