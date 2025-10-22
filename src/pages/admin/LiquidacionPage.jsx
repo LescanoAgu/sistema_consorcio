@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   calcularPreviewLiquidacion,
-  ejecutarLiquidacion,
+  ejecutarLiquidacion, 
   uploadCuponPDF,
   guardarURLCupon
 } from '../../services/liquidacionService';
