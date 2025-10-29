@@ -15,10 +15,8 @@ const uploadFactura = async (file) => {
   return downloadURL;
 };
 
-// --- crearGasto (SIN CAMBIOS) ---
 export const crearGasto = async (gastoData) => {
-  // ... (código existente)
-    let facturaURL = '';
+  let facturaURL = '';
   if (gastoData.facturaFile) {
     try {
       facturaURL = await uploadFactura(gastoData.facturaFile);
@@ -37,10 +35,22 @@ export const crearGasto = async (gastoData) => {
     facturaURL,
     createdAt: serverTimestamp(),
     liquidacionId: null,
-    liquidadoEn: null
+    liquidadoEn: null,
+
+    // --- CAMPOS AÑADIDOS ---
+    tipo: gastoData.tipo, // <-- ¡Importante!
+    distribucion: gastoData.distribucion || 'Prorrateo', // <-- ¡Importante!
+    unidadesAfectadas: gastoData.unidadesAfectadas || [] // <-- ¡Importante!
+    // --- FIN CAMPOS AÑADIDOS ---
   };
 
   try {
+    // Quitamos los campos extra si es Ordinario (para limpieza)
+    if (nuevoGasto.tipo === 'Ordinario') {
+      delete nuevoGasto.distribucion;
+      delete nuevoGasto.unidadesAfectadas;
+    }
+
     const docRef = await addDoc(collection(db, "gastos"), nuevoGasto);
     console.log("Gasto registrado con ID: ", docRef.id);
     return docRef;
