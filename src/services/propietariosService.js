@@ -4,10 +4,11 @@ import {
   collection, addDoc, serverTimestamp,
   onSnapshot, query, orderBy, getDocs,
   runTransaction, doc, Timestamp, where,
-  updateDoc, deleteDoc // Asegúrate que updateDoc y deleteDoc estén importados
+  updateDoc, deleteDoc, setDoc // <-- Asegurarse que setDoc esté importado
 } from 'firebase/firestore';
+import { registrarMovimientoFondo } from './fondoService'; // <-- Importamos el servicio del fondo
 
-// --- crearUnidad ---
+// --- crearUnidad (Sin cambios) ---
 export const crearUnidad = async (unidadData) => {
   const { nombre, propietario, porcentaje } = unidadData;
   const nuevaUnidad = {
@@ -27,7 +28,7 @@ export const crearUnidad = async (unidadData) => {
   }
 };
 
-// --- getUnidades ---
+// --- getUnidades (Sin cambios) ---
 export const getUnidades = (callback) => {
   const q = query(collection(db, "unidades"), orderBy("nombre", "asc"));
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -40,7 +41,7 @@ export const getUnidades = (callback) => {
   return unsubscribe;
 };
 
-// --- getTodasUnidades ---
+// --- getTodasUnidades (Sin cambios) ---
 export const getTodasUnidades = async () => {
   const q = query(collection(db, "unidades"));
   const querySnapshot = await getDocs(q);
@@ -51,13 +52,13 @@ export const getTodasUnidades = async () => {
   return unidades;
 };
 
-// --- aplicarInteresesMoratorios ---
+// --- aplicarInteresesMoratorios (Sin cambios) ---
 export const aplicarInteresesMoratorios = async (tasaMensual, concepto) => {
     if (!tasaMensual || tasaMensual <= 0) throw new Error("La tasa de interés debe ser un número positivo.");
     if (!concepto || concepto.trim() === '') throw new Error("El concepto para el registro es obligatorio.");
 
     const q = query(collection(db, "unidades"), where("saldo", "<", 0));
-    const deudoresSnapshot = await getDocs(q);
+    const deudoresSnapshot = await getDocs(q); // Esta consulta necesita un índice (crear desde el error de consola)
 
     if (deudoresSnapshot.empty) {
         console.log("No se encontraron deudores.");
@@ -81,7 +82,10 @@ export const aplicarInteresesMoratorios = async (tasaMensual, concepto) => {
                 const ctaCteRef = doc(collection(db, `unidades/${unidadDoc.id}/cuentaCorriente`));
                 const itemCtaCte = {
                     fecha: Timestamp.now(), concepto, monto: montoInteres, saldoResultante,
-                    liquidacionId: null, unidadId: unidadDoc.id
+                    liquidacionId: null, unidadId: unidadDoc.id,
+                    desglose: { ordinario: 0, extraProrrateo: 0, extraEspecifico: 0, aporteFondo: 0 },
+                    pagado: false, // Las deudas por interés nacen pendientes
+                    montoAplicado: 0
                 };
                 transaction.set(ctaCteRef, itemCtaCte);
 
@@ -97,40 +101,140 @@ export const aplicarInteresesMoratorios = async (tasaMensual, concepto) => {
     }
 };
 
-// --- registrarPago ---
+// --- registrarPago (¡NUEVA VERSIÓN INTELIGENTE!) ---
 export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPago) => {
-    if (!unidadId) throw new Error("Se requiere el ID de la unidad.");
-    if (!montoPagado || montoPagado <= 0) throw new Error("El monto pagado debe ser un número positivo.");
-    if (!fechaPago) throw new Error("La fecha de pago es obligatoria.");
-    if (!conceptoPago || conceptoPago.trim() === '') throw new Error("El concepto del pago es obligatorio.");
+  if (!unidadId) throw new Error("Se requiere el ID de la unidad.");
+  if (!montoPagado || montoPagado <= 0) throw new Error("El monto pagado debe ser un número positivo.");
+  if (!fechaPago) throw new Error("La fecha de pago es obligatoria.");
+  if (!conceptoPago || conceptoPago.trim() === '') throw new Error("El concepto del pago es obligatorio.");
 
-    const fechaTimestamp = Timestamp.fromDate(new Date(`${fechaPago}T00:00:00Z`));
-    const unidadRef = doc(db, "unidades", unidadId);
+  const fechaTimestamp = Timestamp.fromDate(new Date(`${fechaPago}T00:00:00Z`));
+  const unidadRef = doc(db, "unidades", unidadId);
+  const configRef = doc(db, "configuracion", "general");
+  const ctaCteCollectionRef = collection(db, `unidades/${unidadId}/cuentaCorriente`);
 
-    try {
-        await runTransaction(db, async (transaction) => {
-            const unidadDoc = await transaction.get(unidadRef);
-            if (!unidadDoc.exists()) throw new Error(`La unidad con ID ${unidadId} no existe.`);
-            const saldoAnterior = unidadDoc.data().saldo;
-            const saldoResultante = saldoAnterior + montoPagado;
+  try {
+    await runTransaction(db, async (transaction) => {
+      let montoRestante = montoPagado;
+      let totalFondoRecaudado = 0;
+      let conceptosDeudasPagadas = [];
 
-            transaction.update(unidadRef, { saldo: saldoResultante });
+      // 1. Leer saldo actual de la unidad
+      const unidadDoc = await transaction.get(unidadRef);
+      if (!unidadDoc.exists()) throw new Error(`La unidad con ID ${unidadId} no existe.`);
+      const saldoAnteriorUnidad = unidadDoc.data().saldo;
 
-            const ctaCteRef = doc(collection(db, `unidades/${unidadId}/cuentaCorriente`));
-            const itemCtaCte = {
-                fecha: fechaTimestamp, concepto: conceptoPago, monto: montoPagado, saldoResultante,
-                liquidacionId: null, unidadId: unidadId
-            };
-            transaction.set(ctaCteRef, itemCtaCte);
+      // 2. Buscar deudas pendientes (monto < 0) y no pagadas, ordenadas por fecha
+      // IMPORTANTE: Esta consulta requiere un índice compuesto.
+      // (Crear desde el error de consola si aparece)
+      const deudasQuery = query(
+        ctaCteCollectionRef,
+        where("monto", "<", 0),
+        where("pagado", "==", false),
+        orderBy("fecha", "asc")
+      );
+      
+      // Leemos las deudas FUERA de la transacción
+      const deudasSnapshot = await getDocs(deudasQuery); 
+      const deudasRefs = deudasSnapshot.docs.map(d => d.ref);
+      
+      // Volvemos a leerlas DENTRO de la transacción para poder actualizarlas
+      const deudasDocsEnTransaccion = await Promise.all(
+        deudasRefs.map(ref => transaction.get(ref))
+      );
+
+      if (deudasDocsEnTransaccion.length > 0) {
+        console.log(`Encontradas ${deudasDocsEnTransaccion.length} deudas pendientes para ${unidadId}`);
+        
+        for (const deudaDoc of deudasDocsEnTransaccion) {
+          if (montoRestante <= 0) break; // Si ya aplicamos todo el pago, salimos
+
+          const deudaData = deudaDoc.data();
+          const montoDeudaTotal = Math.abs(deudaData.monto);
+          const montoDeudaPendiente = montoDeudaTotal - (deudaData.montoAplicado || 0);
+
+          // Determinar cuánto de este pago se aplica a esta deuda
+          const montoAAplicar = Math.min(montoRestante, montoDeudaPendiente);
+          
+          if (montoAAplicar > 0) {
+            const nuevoMontoAplicado = (deudaData.montoAplicado || 0) + montoAAplicar;
+            const estaPagadaCompleta = nuevoMontoAplicado >= montoDeudaTotal - 0.01; // Margen de centavos
+
+            transaction.update(deudaDoc.ref, {
+              montoAplicado: nuevoMontoAplicado,
+              pagado: estaPagadaCompleta
+            });
+
+            montoRestante -= montoAAplicar;
+            
+            // Registrar fondo recaudado (basado en proporción pagada)
+            if (deudaData.desglose && deudaData.desglose.aporteFondo > 0) {
+              // Proporción del AporteFondo que se está pagando
+              const proporcionPagada = montoAAplicar / montoDeudaTotal;
+              const fondoRecaudadoEstaDeuda = (deudaData.desglose.aporteFondo || 0) * proporcionPagada;
+              totalFondoRecaudado += fondoRecaudadoEstaDeuda;
+            }
+            conceptosDeudasPagadas.push(deudaData.concepto);
+          }
+        }
+      } else {
+        console.log(`No se encontraron deudas pendientes para ${unidadId}. El pago se aplica como saldo a favor.`);
+      }
+
+      // 3. Crear el registro del pago (Crédito)
+      const saldoResultanteUnidad = saldoAnteriorUnidad + montoPagado;
+      const ctaCtePagoRef = doc(collection(db, `unidades/${unidadId}/cuentaCorriente`));
+      
+      let conceptoFinalPago = conceptoPago;
+      if (conceptosDeudasPagadas.length > 0) {
+         // Acortamos el concepto si paga muchas deudas
+         conceptoFinalPago = `${conceptoPago} (Aplica a: ${conceptosDeudasPagadas.slice(0, 2).join(', ')}${conceptosDeudasPagadas.length > 2 ? ', ...' : ''})`;
+      }
+
+      transaction.set(ctaCtePagoRef, {
+        fecha: fechaTimestamp,
+        concepto: conceptoFinalPago,
+        monto: montoPagado, // Positivo
+        saldoResultante: saldoResultanteUnidad,
+        liquidacionId: null,
+        unidadId: unidadId,
+        pagado: true,
+        montoAplicado: montoPagado
+      });
+
+      // 4. Actualizar el saldo total de la unidad
+      transaction.update(unidadRef, { saldo: saldoResultanteUnidad });
+
+      // 5. Actualizar el Fondo de Reserva si recaudamos algo
+      if (totalFondoRecaudado > 0) {
+        console.log(`Recaudados ${totalFondoRecaudado} para el fondo de reserva.`);
+        const configDoc = await transaction.get(configRef); // Leer config DENTRO de la tx
+        const saldoActualFondo = configDoc.exists() ? (configDoc.data().saldoFondoReserva || 0) : 0;
+        const saldoNuevoFondo = saldoActualFondo + totalFondoRecaudado;
+
+        // a. Actualizar el saldo general
+        transaction.update(configRef, { saldoFondoReserva: saldoNuevoFondo });
+
+        // b. Registrar el INGRESO en el historial del fondo
+        transaction.set(doc(collection(db, "historicoFondoReserva")), {
+          fecha: fechaTimestamp, // Usar la fecha del pago
+          concepto: `Cobro aporte s/pago ${unidadDoc.data().nombre}`,
+          monto: totalFondoRecaudado, // Positivo
+          saldoResultante: saldoNuevoFondo,
+          liquidacionId: null,
+          gastoId: null
         });
-        console.log(`Pago de ${montoPagado} registrado para unidad ${unidadId}`);
-    } catch (error) {
-        console.error("¡FALLÓ LA TRANSACCIÓN DE PAGO! ", error);
-        throw new Error(`Error al registrar el pago: ${error.message}`);
-    }
+      }
+    }); // --- FIN DE LA TRANSACCIÓN ---
+
+    console.log(`Pago de ${montoPagado} registrado y aplicado para unidad ${unidadId}`);
+  } catch (error) {
+    console.error("¡FALLÓ LA TRANSACCIÓN DE PAGO! ", error);
+    throw new Error(`Error al registrar el pago: ${error.message}`);
+  }
 };
 
-// --- getCuentaCorriente ---
+// --- getCuentaCorriente (Sin cambios) ---
 export const getCuentaCorriente = (unidadId, callback) => {
     if (!unidadId) {
         callback(null, new Error("Falta el ID de la unidad."));
@@ -167,7 +271,27 @@ export const getCuentaCorriente = (unidadId, callback) => {
     };
 };
 
-// --- FUNCIÓN DE RESETEO (con más logging) ---
+// --- getSaldoFondoActual (Sin cambios) ---
+export const getSaldoFondoActual = (callback) => {
+  const configRef = doc(db, "configuracion", "general");
+
+  const unsubscribe = onSnapshot(configRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const saldo = docSnap.data().saldoFondoReserva || 0;
+      callback(saldo, null);
+    } else {
+      console.warn("Documento 'configuracion/general' no encontrado.");
+      callback(0, null);
+    }
+  }, (error) => {
+    console.error("Error al obtener saldo del fondo:", error);
+    callback(0, error);
+  });
+
+  return unsubscribe;
+};
+
+// --- resetearSaldosUnidades (Sin cambios) ---
 export const resetearSaldosUnidades = async () => {
   console.warn(" Iniciando reseteo total de saldos y cuentas corrientes...");
   const unidadesCollection = collection(db, "unidades");
@@ -180,21 +304,16 @@ export const resetearSaldosUnidades = async () => {
 
   const promesasResetUnidad = unidadesSnapshot.docs.map(async (unidadDoc) => {
     const unidadRef = unidadDoc.ref;
-    console.log(` -> Procesando unidad: ${unidadDoc.id} (${unidadDoc.data().nombre || 'Sin nombre'})`); // Añadido fallback por si nombre no existe
+    console.log(` -> Procesando unidad: ${unidadDoc.id} (${unidadDoc.data().nombre || 'Sin nombre'})`);
 
     try {
-      // 1. Resetear saldo a 0
-      console.log(`    Intentando poner saldo a 0 para ${unidadDoc.id}`);
       await updateDoc(unidadRef, { saldo: 0 });
-      console.log(`    Saldo reseteado para ${unidadDoc.id}`);
       unidadesActualizadas++;
 
-      // 2. Borrar subcolección cuentaCorriente
-      const ctaCteCollectionRef = collection(db, `unidades/${unidadDoc.id}/cuentaCorriente`); // Renombrado para claridad
+      const ctaCteCollectionRef = collection(db, `unidades/${unidadDoc.id}/cuentaCorriente`);
       const ctaCteSnapshot = await getDocs(ctaCteCollectionRef);
       console.log(`    Encontrados ${ctaCteSnapshot.docs.length} movimientos en Cta. Cte. para borrar en ${unidadDoc.id}.`);
 
-      // Borrado secuencial para evitar posibles problemas de concurrencia masiva (más lento pero más seguro)
       for (const movDoc of ctaCteSnapshot.docs) {
           try {
               await deleteDoc(movDoc.ref);
@@ -204,28 +323,13 @@ export const resetearSaldosUnidades = async () => {
               contadorErrores++;
           }
       }
-      // Alternativa con Promise.all (más rápido, pero puede fallar si hay demasiados documentos)
-      /*
-      const promesasDeleteMovimientos = ctaCteSnapshot.docs.map(async (movDoc) => {
-        try {
-          await deleteDoc(movDoc.ref);
-          movimientosBorrados++;
-        } catch (deleteMovError) {
-          console.error(`      ERROR borrando movimiento ${movDoc.id} de unidad ${unidadDoc.id}:`, deleteMovError);
-          contadorErrores++;
-        }
-      });
-      await Promise.all(promesasDeleteMovimientos);
-      */
-      console.log(`    Movimientos borrados para ${unidadDoc.id}`);
-
     } catch (unidadError) {
       console.error(`  ERROR reseteando unidad ${unidadDoc.id}:`, unidadError);
       contadorErrores++;
     }
   });
 
-  await Promise.all(promesasResetUnidad); // Espera a que todas las unidades terminen
+  await Promise.all(promesasResetUnidad);
 
   console.warn(` Reseteo de unidades completado. Saldos actualizados: ${unidadesActualizadas}, Movimientos borrados: ${movimientosBorrados}, Errores: ${contadorErrores}`);
   if (contadorErrores > 0) {
@@ -233,16 +337,15 @@ export const resetearSaldosUnidades = async () => {
   }
   return { unidadesActualizadas, movimientosBorrados };
 };
-  
+
+// --- resetearFondoReserva (Sin cambios) ---
 export const resetearFondoReserva = async () => {
   console.warn("Reseteando Saldo Fondo de Reserva a 0...");
   const configRef = doc(db, "configuracion", "general");
   try {
-    // Usamos setDoc con merge: true para crear el documento si no existe,
-    // o actualizarlo si ya existe.
     await setDoc(configRef, { saldoFondoReserva: 0 }, { merge: true });
     console.log("Saldo Fondo de Reserva reseteado a 0.");
-    return 1; // 1 documento actualizado/creado
+    return 1;
   } catch (error) {
     console.error("Error al resetear fondo de reserva:", error);
     throw new Error("No se pudo resetear el Fondo de Reserva.");

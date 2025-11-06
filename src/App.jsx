@@ -1,17 +1,18 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth';
+import { useAuth } from './hooks/useAuth'; //
 
 // Importamos las páginas
-import LoginPage from './pages/LoginPage';
-import AdminLayout from './pages/admin/AdminLayout';
-import GastosPage from './pages/admin/GastosPage';
-import PropietariosPage from './pages/admin/PropietariosPage';
-import LiquidacionPage from './pages/admin/LiquidacionPage';
-import DeudoresPage from './pages/admin/DeudoresPage';
-import CobranzasPage from './pages/admin/CobranzasPage';
-import CuentaCorrientePage from './pages/admin/CuentaCorrientePage';
-import HistorialLiquidacionesPage from './pages/admin/HistorialLiquidacionesPage'; 
+import LoginPage from './pages/LoginPage'; //
+import AdminLayout from './pages/admin/AdminLayout'; //
+import GastosPage from './pages/admin/GastosPage'; //
+import PropietariosPage from './pages/admin/PropietariosPage'; //
+import LiquidacionPage from './pages/admin/LiquidacionPage'; //
+import DeudoresPage from './pages/admin/DeudoresPage'; //
+import CobranzasPage from './pages/admin/CobranzasPage'; //
+import CuentaCorrientePage from './pages/admin/CuentaCorrientePage'; //
+import HistorialLiquidacionesPage from './pages/admin/HistorialLiquidacionesPage'; //
+import FondoReservaPage from './pages/admin/FondoReservaPage'; //
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -41,18 +42,31 @@ function App() {
             </ProtectedRoute>
           } 
         >
-          {/* Estas son las "rutas anidadas" que se renderizan en el <Outlet> */}
+          {/* Redirige /admin a /admin/propietarios por defecto */}
+          <Route index element={<Navigate to="propietarios" replace />} /> 
           
-          {/* Redirige /admin a /admin/gastos por defecto */}
-          <Route index element={<Navigate to="gastos" replace />} /> 
-          
-          <Route path="gastos" element={<GastosPage />} />
+          {/* Nivel Superior */}
           <Route path="propietarios" element={<PropietariosPage />} />
-          <Route path="liquidacion" element={<LiquidacionPage />} />
-          <Route path="deudores" element={<DeudoresPage />} />
-          <Route path="cobranzas" element={<CobranzasPage />} />
+          
+          {/* Módulo Liquidación */}
+          {/* <Route path="liquidacion" element={<Outlet />}> */} {/* Opcional si quieres una página padre */}
+            <Route path="liquidacion/gastos" element={<GastosPage />} />
+            <Route path="liquidacion/generar" element={<LiquidacionPage />} />
+            <Route path="liquidacion/historial" element={<HistorialLiquidacionesPage />} />
+          {/* </Route> */}
+
+          {/* Módulo Estado de Cuenta */}
+          {/* <Route path="estado-cuenta" element={<Outlet />}> */}
+            <Route path="estado-cuenta/cobranzas" element={<CobranzasPage />} />
+            <Route path="estado-cuenta/deudores" element={<DeudoresPage />} />
+          {/* </Route> */}
+          
+          {/* Ruta de Cta. Cte. (la dejamos en admin/ para acceso fácil desde historial) */}
           <Route path="cuenta-corriente/:unidadId" element={<CuentaCorrientePage />} />
-          <Route path="historial-liquidaciones" element={<HistorialLiquidacionesPage />} />
+        
+          {/* Módulo Fondo de Reserva */}
+          <Route path="fondo-reserva" element={<FondoReservaPage />} />
+
         </Route>
         
         {/* Ruta por defecto */}

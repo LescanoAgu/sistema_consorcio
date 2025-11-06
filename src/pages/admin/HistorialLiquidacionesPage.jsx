@@ -4,13 +4,16 @@ import { getLiquidaciones } from '../../services/liquidacionService';
 import { Link as RouterLink } from 'react-router-dom';
 import { naturalSort } from '../../utils/helpers';
 // --- IMPORTACIONES DE MUI ---
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 import {
   Box, Typography, Paper, List, ListItem, ListItemButton, ListItemText,
   CircularProgress, Alert, Divider, Grid,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Button
 } from '@mui/material';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
-import DescriptionIcon from '@mui/icons-material/Description'; // <-- AÑADIR ESTE ICONO
+import DescriptionIcon from '@mui/icons-material/Description';
+import DownloadIcon from '@mui/icons-material/Download';
 // --- FIN IMPORTACIONES MUI ---
 
 function HistorialLiquidacionesPage() {
@@ -78,6 +81,61 @@ function HistorialLiquidacionesPage() {
   // --- Componente Interno para Mostrar Detalles (MODIFICADO) ---
   const DetalleLiquidacion = ({ liquidacion }) => {
 
+    // --- NUEVO ESTADO Y FUNCIÓN PARA EL ZIP ---
+    const [zipLoading, setZipLoading] = useState(false);
+
+    const handleDownloadZip = async () => {
+      if (!tieneDetalles) return;
+      setZipLoading(true);
+
+      try {
+        const zip = new JSZip();
+        const safeLiquidacionNombre = (liquidacion.nombre || 'Liquidacion').replace(/[^a-z0-9]/gi, '_');
+
+        // 1. Crear un array de promesas de fetch
+        const promises = detalleOrdenado.map(detalle => {
+          if (!detalle.cuponURL) return Promise.resolve(null);
+          
+          return fetch(detalle.cuponURL) // CORS debe permitir GET desde este origen
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`Error al descargar ${detalle.nombre}: ${response.statusText}`);
+              }
+              return response.blob();
+            })
+            .then(blob => {
+              // Limpiar nombre de archivo
+              const safeUnidadNombre = (detalle.nombre || 'unidad').replace(/[^a-z0-9]/gi, '_');
+              const fileName = `expensa_${safeUnidadNombre}.pdf`;
+              zip.file(fileName, blob); // Añadir archivo al zip
+            })
+            .catch(err => {
+              console.error(`Error procesando PDF para ${detalle.nombre}:`, err);
+              // Opcional: Añadir un txt de error al zip
+              const safeUnidadNombre = (detalle.nombre || 'unidad_error').replace(/[^a-z0-9]/gi, '_');
+              zip.file(`ERROR_${safeUnidadNombre}.txt`, `No se pudo descargar el PDF: ${err.message}`);
+            });
+        });
+
+        // 2. Esperar que todas las descargas terminen
+        await Promise.all(promises);
+
+        // 3. Generar el ZIP
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+        // 4. Guardar el ZIP
+        saveAs(zipBlob, `Liquidacion_${safeLiquidacionNombre}_Cupones.zip`);
+
+      } catch (error) {
+        console.error("Error al generar el ZIP:", error);
+        // Aquí podrías usar un Alert de MUI para mostrar el error al usuario
+      } finally {
+        setZipLoading(false);
+      }
+    };
+    // --- FIN LÓGICA ZIP ---
+
+
     if (!liquidacion) {
       return (
          <Typography sx={{ color: 'text.secondary', textAlign: 'center', pt: 5 }}>
@@ -86,20 +144,19 @@ function HistorialLiquidacionesPage() {
       );
     }
 
-const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.detalleUnidades) && liquidacion.detalleUnidades.length > 0;
+    const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.detalleUnidades) && liquidacion.detalleUnidades.length > 0;
+
     const detalleOrdenado = tieneDetalles
-        ? [...liquidacion.detalleUnidades].sort((a, b) => naturalSort(a.nombre, b.nombre))
-        : [];
+       ? [...liquidacion.detalleUnidades].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
+       : [];
 
     return (
       <Box>
         <Typography variant="h5" gutterBottom>Detalles de: {liquidacion.nombre || 'Liquidación sin nombre'}</Typography>
         <Typography variant="body2" color="textSecondary" gutterBottom>Generada el: {formatDate(liquidacion.fechaCreada)}</Typography>
 
-        {/* Resumen de Totales */}
+        {/* Resumen de Totales (Sin cambios) */}
         <Paper variant="outlined" sx={{ p: 2, my: 2 }}>
-           {/* ... (Tu código de resumen de totales va aquí) ... */}
-           {/* (Asegúrate de que esta sección esté actualizada con la lógica de preview nueva) */}
            <Typography variant="h6" gutterBottom>Resumen General</Typography>
            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                <Typography>Total Gastos Ordinarios:</Typography>
@@ -114,11 +171,28 @@ const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.d
                <Typography variant="subtitle1">Total a Prorratear:</Typography>
                <Typography variant="subtitle1" fontWeight="bold">{formatCurrency(liquidacion.totalAProrratearGeneral ?? liquidacion.totalAProrratear)}</Typography>
            </Box>
-           {/* ... (etc) ... */}
         </Paper>
 
-        {/* Tabla Detalle por Unidad (Snapshot) (MODIFICADA) */}
-        <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>Detalle por Unidad (Snapshot)</Typography>
+        {/* --- CABECERA DE LA TABLA CON BOTÓN ZIP --- */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, mb: 1 }}>
+          <Typography variant="h6" gutterBottom sx={{ mb: 0 }}>
+            Detalle por Unidad (Snapshot)
+          </Typography>
+          <Button
+            variant="contained"
+            color="secondary" // Un color que destaque
+            size="small"
+            startIcon={zipLoading ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
+            disabled={!tieneDetalles || zipLoading}
+            onClick={handleDownloadZip}
+          >
+            {zipLoading ? 'Generando ZIP...' : 'Descargar Todos (ZIP)'}
+          </Button>
+        </Box>
+        {/* --- FIN CABECERA TABLA --- */}
+
+
+        {/* Tabla Detalle por Unidad (Snapshot) (Sin cambios) */}
         {tieneDetalles ? (
           <>
             <TableContainer component={Paper}>
@@ -131,7 +205,7 @@ const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.d
                     <TableCell align="right">Monto Liq.</TableCell>
                     <TableCell align="right">Saldo Res.</TableCell>
                     <TableCell align="center">Cta. Cte.</TableCell>
-                    <TableCell align="center">Cupón PDF</TableCell> {/* <-- NUEVA COLUMNA --> */}
+                    <TableCell align="center">Cupón PDF</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -156,7 +230,6 @@ const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.d
                           sx={{ minWidth: 'auto', p: 0.5 }}
                         />
                       </TableCell>
-                      {/* <-- NUEVA CELDA --> */}
                       <TableCell align="center">
                         {detalle.cuponURL ? (
                           <Button
@@ -172,11 +245,9 @@ const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.d
                             Ver
                           </Button>
                         ) : (
-                          // Si no hay URL, podría ser una liquidación antigua
                           <Typography variant="caption" color="textSecondary">-</Typography>
                         )}
                       </TableCell>
-                      {/* <-- FIN NUEVA CELDA --> */}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -196,7 +267,6 @@ const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.d
       </Box>
     );
   };
-  // --- Fin Componente Interno ---
 
   // --- Render principal de la página (SIN CAMBIOS) ---
   return (

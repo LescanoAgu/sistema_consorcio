@@ -1,20 +1,17 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+// ¡Necesitamos el servicio del fondo para la Hoja 2!
+import { getHistorialFondo } from '../services/fondoService'; 
 
-// <-- Mantenemos las funciones de formato fuera -->
+// --- Funciones de Formato ---
 const formatCurrency = (value) => {
-  // Aseguramos que sea número, si no, devolvemos 0 formateado o 'N/A'
   const numValue = Number(value);
-  if (isNaN(numValue)) return formatCurrency(0); // O podrías devolver 'N/A'
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS'
-  }).format(numValue);
+  if (isNaN(numValue)) return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(0);
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(numValue);
 };
 
 const formatDate = (dateString) => {
   if (!dateString) return '';
-  // Intentamos manejar si viene como objeto Date o string YYYY-MM-DD
   try {
     let date;
     if (dateString instanceof Date) {
@@ -22,62 +19,62 @@ const formatDate = (dateString) => {
     } else if (typeof dateString === 'string' && dateString.includes('-')) {
       const parts = dateString.split('-');
       if (parts.length === 3) {
-         // Aseguramos hora 0 para evitar problemas de zona horaria
         date = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0);
-      } else {
-        return dateString; // Si no es YYYY-MM-DD, devolvemos como está
-      }
-    } else {
-       return String(dateString); // Si no es reconocible, lo devolvemos
-    }
+      } else { return dateString; }
+    } else { return String(dateString); }
+    
+    // Formato dd/mm/aaaa
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const year = date.getFullYear();
     return `${day}/${month}/${year}`;
   } catch (error) {
-    console.error("Error formateando fecha en PDF:", dateString, error);
-    return String(dateString); // Devolvemos el original si hay error
+    return String(dateString);
   }
 };
 
+const formatDateTime = (date) => {
+  if (!date) return 'N/A';
+  return date.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+};
 
-// <-- La función principal ahora recibe 'liquidacionData' que es la PREVIEW COMPLETA -->
-export const generarPDFLiquidacion = (unidad, liquidacionData, gastosIncluidos, itemCtaCte) => {
+// --- Generador de PDF (¡AHORA ES ASÍNCRONO!) ---
+export const generarPDFLiquidacion = async (unidad, liquidacionData, gastosIncluidos, itemCtaCte) => {
   const doc = new jsPDF();
-  let finalY = 0; // <-- Variable para controlar la posición Y
+  let finalY = 0; 
 
-  // --- 1. TÍTULO ---
+  // --- HOJA 1: CUPÓN DE PAGO ---
+  
+  // 1. TÍTULO
   doc.setFontSize(18);
-  doc.text(`Resumen de Expensas - ${liquidacionData.nombre}`, 14, 22);
+  doc.text(`LIQUIDACIÓN EXPENSAS - ${liquidacionData.nombre}`, 14, 22);
   finalY = 22;
 
-  // --- 2. DATOS DE LA UNIDAD ---
+  // 2. DATOS DE LA UNIDAD
   doc.setFontSize(11);
   doc.text(`Propietario: ${unidad.propietario}`, 14, finalY + 10);
   doc.text(`Unidad Funcional: ${unidad.nombre}`, 14, finalY + 15);
   doc.text(`Porcentaje de Incidencia (Prorrateo): ${(unidad.porcentaje * 100).toFixed(4)} %`, 14, finalY + 20);
   finalY += 20;
 
-  // --- 3. DETALLE DE GASTOS (Filtrado por tipo) ---
-  // <-- Filtramos los gastos que corresponden a Ordinarios o Extra por Prorrateo -->
+  // 3. DETALLE DE GASTOS (Filtrado)
   const gastosComunes = gastosIncluidos.filter(g =>
      g.tipo === 'Ordinario' || (g.tipo === 'Extraordinario' && g.distribucion === 'Prorrateo')
   );
-  // <-- Filtramos los gastos Extraordinarios Específicos para ESTA unidad -->
   const gastosExtraEspecificos = gastosIncluidos.filter(g =>
      g.tipo === 'Extraordinario' && g.distribucion === 'UnidadesEspecificas' && g.unidadesAfectadas?.includes(unidad.id)
   );
 
-  // --- 3.A. Tabla de Gastos Comunes (Ordinarios + Extra Prorrateo) ---
+  // 3.A. Tabla de Gastos Comunes (Prorrateados)
   if (gastosComunes.length > 0) {
     finalY += 15;
     doc.setFontSize(14);
-    doc.text('Detalle de Gastos Comunes (Prorrateados)', 14, finalY);
+    doc.text('DETALLE DE GASTOS ORDINARIOS (Prorrateados)', 14, finalY);
     finalY += 5;
 
     const bodyGastosComunes = gastosComunes.map(gasto => [
-      formatDate(gasto.fecha), // <-- Usar formatDate
-      gasto.concepto + (gasto.tipo === 'Extraordinario' ? ' (Extra)' : ''), // <-- Indicamos si es Extra
+      formatDate(gasto.fecha),
+      gasto.concepto + (gasto.tipo === 'Extraordinario' ? ' (Extra)' : ''),
       gasto.proveedor,
       formatCurrency(gasto.monto)
     ]);
@@ -88,7 +85,7 @@ export const generarPDFLiquidacion = (unidad, liquidacionData, gastosIncluidos, 
       body: bodyGastosComunes,
       theme: 'striped',
       headStyles: { fillColor: [41, 128, 185] },
-      foot: [ // <-- Pie de tabla con desglose -->
+      foot: [
           ['TOTAL GASTOS ORDINARIOS', '', '', formatCurrency(liquidacionData.totalGastosOrdinarios)],
           ['TOTAL GASTOS EXTRA (Prorrateo)', '', '', formatCurrency(liquidacionData.totalGastosExtraProrrateo)],
       ],
@@ -96,14 +93,14 @@ export const generarPDFLiquidacion = (unidad, liquidacionData, gastosIncluidos, 
     });
     finalY = doc.lastAutoTable.finalY;
   }
-
-  // --- 3.B. Tabla de Gastos Extraordinarios Específicos ---
+  
+  // 3.B. Tabla de Gastos Extraordinarios (Específicos)
   if (gastosExtraEspecificos.length > 0) {
     finalY += 10;
     doc.setFontSize(14);
-    doc.setTextColor(192, 57, 43); // <-- Color distintivo (rojo)
-    doc.text('Detalle de Gastos Extraordinarios Específicos (No Prorrateados)', 14, finalY);
-    doc.setTextColor(0); // <-- Volver a negro
+    doc.setTextColor(192, 57, 43); // Rojo
+    doc.text('DETALLE DE GASTOS EXTRAORDINARIOS (Específicos)', 14, finalY);
+    doc.setTextColor(0); 
     finalY += 5;
 
     const bodyGastosExtra = gastosExtraEspecificos.map(gasto => [
@@ -113,42 +110,39 @@ export const generarPDFLiquidacion = (unidad, liquidacionData, gastosIncluidos, 
       formatCurrency(gasto.monto)
     ]);
 
-     // <-- Calculamos el total de estos gastos específicos -->
      const totalEspecificos = gastosExtraEspecificos.reduce((sum, g) => sum + g.monto, 0);
+     // El monto que PAGA la unidad (dividido)
+     const montoEspecificoUnidad = (itemCtaCte.desglose?.extraEspecifico || 0);
 
     autoTable(doc, {
       startY: finalY,
-      head: [['Fecha', 'Concepto', 'Proveedor', 'Monto']],
+      head: [['Fecha', 'Concepto', 'Proveedor', 'Monto Total Gasto']],
       body: bodyGastosExtra,
       theme: 'striped',
-      headStyles: { fillColor: [192, 57, 43] }, // <-- Cabecera roja
+      headStyles: { fillColor: [192, 57, 43] },
        foot: [[
-         'TOTAL GASTOS EXTRA ESPECÍFICOS (Para su unidad)',
+         'MONTO ASIGNADO A SU UNIDAD (División por Iguales)',
          '', '',
-         formatCurrency(totalEspecificos)
+         formatCurrency(montoEspecificoUnidad)
        ]],
-       footStyles: { fillColor: [255, 235, 238], textColor: 0, fontStyle: 'bold' } // <-- Pie rojo claro
+       footStyles: { fillColor: [255, 235, 238], textColor: 0, fontStyle: 'bold' }
     });
     finalY = doc.lastAutoTable.finalY;
   }
 
-
-  // --- 4. RESUMEN DEL CÁLCULO (MODIFICADO) ---
+  // 4. RESUMEN DE CÁLCULO
   finalY += 10;
   doc.setFontSize(12);
   doc.text('Resumen de Cálculo para su Unidad', 14, finalY);
   finalY += 5;
 
-  // <-- Calculamos los montos prorrateados para esta unidad -->
-  const montoOrdinarioUnidad = liquidacionData.totalGastosOrdinarios * unidad.porcentaje;
-  const montoFondoUnidad = liquidacionData.montoFondoReservaCalculado * unidad.porcentaje;
-  const montoExtraProrrateoUnidad = liquidacionData.totalGastosExtraProrrateo * unidad.porcentaje;
-  // <-- El total específico ya lo calculamos antes -->
-  const montoExtraEspecificoUnidad = gastosExtraEspecificos.reduce((sum, g) => sum + g.monto, 0);
-
-  // <-- El total a pagar es la suma de todo lo que le corresponde -->
-  //    (Coincide con itemCtaCte.montoVencimiento1 si todo está bien)
-  const montoTotalUnidad = montoOrdinarioUnidad + montoFondoUnidad + montoExtraProrrateoUnidad + montoExtraEspecificoUnidad;
+  // Leemos el desglose del itemCtaCte (que se guardó en la transacción)
+  const desglose = itemCtaCte.desglose || {};
+  const montoOrdinarioUnidad = desglose.ordinario || 0;
+  const montoFondoUnidad = desglose.aporteFondo || 0;
+  const montoExtraProrrateoUnidad = desglose.extraProrrateo || 0;
+  const montoExtraEspecificoUnidad = desglose.extraEspecifico || 0;
+  const montoTotalUnidad = Math.abs(itemCtaCte.monto); // El total es el monto del item
 
   const resumenData = [
     ['Total Gastos Ordinarios (Prorrateado)', formatCurrency(montoOrdinarioUnidad)],
@@ -164,10 +158,10 @@ export const generarPDFLiquidacion = (unidad, liquidacionData, gastosIncluidos, 
     styles: { fontSize: 10 },
     body: resumenData,
     columnStyles: {
-      0: { fontStyle: 'bold', cellWidth: 120 }, // <-- Más ancho para etiquetas largas
+      0: { fontStyle: 'bold', cellWidth: 120 }, 
       1: { halign: 'right' }
     },
-     didParseCell: function (data) { // <-- Para resaltar la fila del total
+     didParseCell: function (data) { 
         if (data.row.index === resumenData.length - 1) {
             data.cell.styles.fontStyle = 'bold';
             data.cell.styles.fillColor = [230, 230, 230];
@@ -177,72 +171,130 @@ export const generarPDFLiquidacion = (unidad, liquidacionData, gastosIncluidos, 
   });
   finalY = doc.lastAutoTable.finalY;
 
-
-  // --- 5. ESTADO DEL FONDO DE RESERVA (NUEVO) ---
-  // Verificamos si tenemos la info del fondo
-  if (liquidacionData.saldoFondoInicial !== undefined && liquidacionData.saldoFondoFinal !== undefined) {
-      finalY += 10;
-      doc.setFontSize(10);
-      doc.setTextColor(100); // <-- Gris
-      doc.text('Estado del Fondo de Reserva del Consorcio (Informativo)', 14, finalY);
-      doc.setTextColor(0);
-      finalY += 5;
-
-      const fondoData = [
-          ['Saldo Inicial', formatCurrency(liquidacionData.saldoFondoInicial)],
-          ['(-) Gastos Cubiertos por Fondo', formatCurrency(liquidacionData.totalGastosExtraFondo)],
-          ['(+) Aporte del Período', formatCurrency(liquidacionData.montoFondoReservaCalculado)],
-          ['Saldo Final Estimado', formatCurrency(liquidacionData.saldoFondoFinal)],
-      ];
-
-       autoTable(doc, {
-         startY: finalY,
-         theme: 'plain', // <-- Más simple
-         styles: { fontSize: 8, cellPadding: 1 }, // <-- Más pequeño
-         body: fondoData,
-         columnStyles: {
-           1: { halign: 'right' }
-         },
-          didParseCell: function (data) {
-             if (data.row.index === fondoData.length - 1) { // <-- Resaltar saldo final
-                 data.cell.styles.fontStyle = 'bold';
-             }
-         }
-       });
-       finalY = doc.lastAutoTable.finalY;
-  }
-
-  // --- 6. CUPÓN DE PAGO (Ajustamos posición Y) ---
-  // <-- Aseguramos que haya espacio, si no, añadimos página -->
-  if (finalY > 240) { // <-- Si estamos muy abajo
-    doc.addPage();
-    finalY = 15; // <-- Empezamos arriba en la nueva página
-  } else {
-    finalY += 15; // <-- Dejamos espacio
-  }
-
+  // 5. CUPÓN DE PAGO Y COMENTARIOS
+  finalY += 15;
   doc.setDrawColor(0);
   doc.setFillColor(240, 240, 240);
-  doc.rect(10, finalY, 190, 40, 'F'); // Fondo gris
+  
+  // Calcular alto de comentarios
+  let lineasComentarios = [];
+  let altoComentarios = 0;
+  if (liquidacionData.comentarios) {
+    lineasComentarios = doc.splitTextToSize(liquidacionData.comentarios, 170); // Ancho de 170px
+    altoComentarios = (lineasComentarios.length * 4) + 5; // 4mm por línea + 5mm padding
+  }
+  
+  doc.rect(10, finalY, 190, 40 + altoComentarios, 'F'); // Fondo gris
 
   doc.setFontSize(16);
   doc.text(`CUPÓN DE PAGO - ${liquidacionData.nombre}`, 14, finalY + 10);
   doc.setFontSize(12);
   doc.text(`Unidad: ${unidad.nombre}`, 14, finalY + 17);
 
-  // Datos del Cupón (como antes)
+  // Vencimientos
   doc.setFontSize(12);
   doc.setFont(undefined, 'bold');
   doc.text('1er Vencimiento:', 110, finalY + 10);
-  doc.text(formatDate(itemCtaCte.vencimiento1), 150, finalY + 10); // <-- Usar formatDate
-  // <-- Mostramos el monto TOTAL calculado (debe coincidir con vencimiento1) -->
+  doc.text(formatDate(itemCtaCte.vencimiento1), 150, finalY + 10); 
   doc.text(formatCurrency(montoTotalUnidad), 150, finalY + 17);
 
   doc.text('2do Vencimiento:', 110, finalY + 27);
-  doc.text(formatDate(itemCtaCte.vencimiento2), 150, finalY + 27); // <-- Usar formatDate
-  // <-- Calculamos el 2do vencimiento basado en el total -->
-  const montoVencimiento2 = montoTotalUnidad * (1 + (liquidacionData.pctRecargo || 0)); // Usa pctRecargo de liquidacionData
+  doc.text(formatDate(itemCtaCte.vencimiento2), 150, finalY + 27);
+  const montoVencimiento2 = montoTotalUnidad * (1 + (liquidacionData.pctRecargo || 0));
   doc.text(formatCurrency(montoVencimiento2), 150, finalY + 34);
+  
+  // Mostrar Comentarios
+  if (liquidacionData.comentarios) {
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(50); // Gris oscuro
+    doc.text(lineasComentarios, 14, finalY + 45);
+  }
+  finalY += (40 + altoComentarios); // Alto total del cupón
+
+
+  // --- HOJA 2: BALANCE DEL FONDO DE RESERVA ---
+  
+  doc.addPage();
+  finalY = 22;
+
+  doc.setFontSize(18);
+  doc.text(`Informe del Fondo de Reserva - ${liquidacionData.nombre}`, 14, finalY);
+
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'italic');
+  doc.setTextColor(100);
+  doc.text(
+    "Nota: El Saldo del Fondo de Reserva se calcula en base a lo PERCIBIDO (cobrado) y GASTADO (ejecutado).",
+    14, finalY + 7
+  );
+  doc.setTextColor(0);
+  doc.setFont(undefined, 'normal');
+  finalY += 15;
+
+  // Mostramos el resumen de saldos
+  const resumenFondo = [
+    ['Saldo Inicial del Fondo (al inicio de esta liquidación)', formatCurrency(liquidacionData.saldoFondoInicial)],
+    ['(-) Gastos Cubiertos por el Fondo (en este período)', formatCurrency(liquidacionData.totalGastosExtraFondo)],
+    ['SALDO FINAL DEL FONDO (al cierre de esta liquidación)', formatCurrency(liquidacionData.saldoFondoFinal)],
+  ];
+
+  autoTable(doc, {
+    startY: finalY,
+    theme: 'grid',
+    styles: { fontSize: 10 },
+    body: resumenFondo,
+    columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
+     didParseCell: function (data) { 
+        if (data.row.index === resumenFondo.length - 1) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [230, 230, 230];
+        }
+    }
+  });
+  finalY = doc.lastAutoTable.finalY;
+
+  // --- Historial de Movimientos del Fondo (¡Llamada Async!) ---
+  finalY += 15;
+  doc.setFontSize(14);
+  doc.text('Historial de Movimientos del Fondo (Últimos 50)', 14, finalY);
+  finalY += 5;
+
+  try {
+    // Usamos una Promise para manejar el callback de onSnapshot
+    const historial = await new Promise((resolve, reject) => {
+      // Pedimos el historial, pero getHistorialFondo usa onSnapshot (tiempo real)
+      // Para un PDF, solo queremos los datos UNA VEZ.
+      const unsubscribe = getHistorialFondo((movimientos, err) => {
+        unsubscribe(); // ¡Nos desuscribimos inmediatamente!
+        if (err) {
+          reject(err);
+        } else {
+          resolve(movimientos);
+        }
+      });
+    });
+
+    const bodyHistorial = historial.slice(0, 50).map(mov => [ // Limitamos a 50
+      formatDateTime(mov.fecha),
+      mov.concepto,
+      mov.gastoId ? `Gasto: ${mov.gastoId.substring(0, 5)}` : (mov.liquidacionId ? `Liq: ${mov.liquidacionId.substring(0, 5)}` : '-'),
+      formatCurrency(mov.monto)
+    ]);
+
+    autoTable(doc, {
+      startY: finalY,
+      head: [['Fecha', 'Concepto', 'Referencia', 'Monto']],
+      body: bodyHistorial,
+      theme: 'striped',
+      headStyles: { fillColor: [80, 80, 80] },
+      columnStyles: { 3: { halign: 'right' } }
+    });
+
+  } catch (error) {
+    console.error("Error al obtener historial del fondo para el PDF:", error);
+    doc.text("No se pudo cargar el historial de movimientos.", 14, finalY);
+  }
 
   // --- 7. DEVOLVER EL BLOB ---
   return doc.output('blob');

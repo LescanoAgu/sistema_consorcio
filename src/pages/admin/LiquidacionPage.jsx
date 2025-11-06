@@ -7,17 +7,12 @@ import {
   guardarURLCupon
 } from '../../services/liquidacionService';
 import { generarPDFLiquidacion } from '../../utils/pdfGenerator';
-
-// --- IMPORTACIONES DE MUI ---
 import {
   Box, Button, TextField, Typography, Paper, Alert,
   CircularProgress, Grid, Divider
 } from '@mui/material';
-// --- FIN IMPORTACIONES MUI ---
-
-// <-- AÑADIMOS IMPORTACIONES DE FIRESTORE -->
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../config/firebase'; // <-- Importar db
+import { db } from '../../config/firebase'; // <-- ¡RUTA CORREGIDA!
 
 const formatCurrency = (value) => {
     if (typeof value !== 'number' || isNaN(value)) return 'N/A';
@@ -26,19 +21,19 @@ const formatCurrency = (value) => {
 
 function LiquidacionPage() {
   // --- Estados del Formulario ---
-  const [nombre, setNombre] = useState(''); // Ej: "Octubre 2025"
-  const [pctFondo, setPctFondo] = useState('3'); // 3% por defecto
+  const [nombre, setNombre] = useState('');
+  const [pctFondo, setPctFondo] = useState('3');
   const [fechaVenc1, setFechaVenc1] = useState('');
-  const [pctRecargo, setPctRecargo] = useState('10'); // 10% por defecto
+  const [pctRecargo, setPctRecargo] = useState('10');
   const [fechaVenc2, setFechaVenc2] = useState('');
+  const [comentarios, setComentarios] = useState(''); // Para el PDF
 
   // --- Estados de la App ---
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(''); // Errores generales
+  const [error, setError] = useState('');
   const [previewError, setPreviewError] = useState(''); 
   const [preview, setPreview] = useState(null); 
 
-  // --- PASO 1: Calcular la Preview (USANDO TU LÓGICA ANTERIOR) ---
   const handlePreview = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -51,10 +46,6 @@ function LiquidacionPage() {
       if (isNaN(porcentajeFondo)) {
         throw new Error("El % de Fondo de Reserva es inválido.");
       }
-
-      // *** NOTA: Asumo que tu backend (calcularPreviewLiquidacion) fue actualizado
-      // para devolver la estructura que implementamos en el paso anterior
-      // (ej: totalGastosOrdinarios, saldoFondoInicial, etc.)
       const previewData = await calcularPreviewLiquidacion(porcentajeFondo);
       setPreview(previewData);
 
@@ -69,9 +60,7 @@ function LiquidacionPage() {
     }
   };
 
-  // --- PASO 2: Ejecutar (MODIFICADO) ---
   const handleEjecutar = async () => {
-    // ---- VALIDACIONES INICIALES (NO CAMBIAN) ----
     if (!preview) {
       setError("Primero debes calcular la previsualización.");
       return;
@@ -85,13 +74,12 @@ function LiquidacionPage() {
       setError("Completa todos los campos del período (Nombre y Fechas).");
       return;
     }
-    // ---- FIN VALIDACIONES ----
 
     setLoading(true); 
     setError(''); 
     setPreviewError(''); 
     
-    let liquidacionIdParaCatch = null; // Para poder revertir si falla
+    let liquidacionIdParaCatch = null; 
 
     try {
       const params = {
@@ -99,24 +87,20 @@ function LiquidacionPage() {
         fechaVenc1,
         pctRecargo: parseFloat(pctRecargo) / 100,
         fechaVenc2,
+        comentarios: comentarios 
       };
 
-      // --- 1. EJECUTAR LA TRANSACCIÓN (MODIFICADO) ---
-      // <-- Ahora capturamos 'detalleUnidades' y 'liquidacionId'
+      // 1. Ejecutar transacción
       const { liquidacionId, unidades, itemsCtaCteGenerados, detalleUnidades } =
         await ejecutarLiquidacion(params, preview);
       
-      liquidacionIdParaCatch = liquidacionId; // Guardamos ID por si falla
+      liquidacionIdParaCatch = liquidacionId; 
 
-      // --- 2. GENERAR Y SUBIR PDFs (MODIFICADO) ---
-
-      // Asumo que 'preview.gastos' (del handlePreview) es la lista de gastos
-      // Si actualizaste el backend, quizás sea 'preview.gastosIncluidos'
-      const gastosParaPDF = preview.gastos || preview.gastosIncluidos || [];
-      
-      // Los datos para el PDF ahora usan la preview completa
+      // 2. Preparar datos para PDFs
+      const gastosParaPDF = preview.gastosIncluidos || [];
       const liquidacionData = {
         nombre: nombre,
+        comentarios: comentarios,
         ...preview
       };
 
@@ -127,139 +111,109 @@ function LiquidacionPage() {
         const itemCtaCte = itemsCtaCteGenerados.find(item => item.unidadId === unidad.id);
 
         if (itemCtaCte && itemCtaCte.id) {
-
-          // A. Generar el PDF (ahora devuelve un Blob)
-          const pdfBlob = generarPDFLiquidacion(
+          
+          // A. Generar el PDF (¡AHORA ES ASÍNCRONO!)
+          const pdfBlob = await generarPDFLiquidacion(
             unidad,
-            liquidacionData, // Pasamos la preview completa
-            gastosParaPDF,   // Pasamos la lista de gastos
+            liquidacionData,
+            gastosParaPDF,
             itemCtaCte
           );
 
-          // B. Subir el Blob a Firebase Storage
+          // B. Subir el Blob
           const downloadURL = await uploadCuponPDF(
             pdfBlob,
             nombre, 
             unidad.nombre 
           );
 
-          // C. Guardar la URL en el doc de Cta. Cte.
+          // C. Guardar la URL en Cta. Cte.
           await guardarURLCupon(
             unidad.id,
             itemCtaCte.id,
             downloadURL
           );
 
-          // <-- ¡NUEVO! Actualizar el snapshot local 'detalleUnidades' -->
+          // D. Actualizar snapshot local con URL
           const detalle = detalleUnidades.find(d => d.unidadId === unidad.id);
           if (detalle) {
-            detalle.cuponURL = downloadURL; // Añadimos la URL al objeto
+            detalle.cuponURL = downloadURL;
           }
-          // <-- Fin nuevo paso -->
 
           contador++;
           setError(`Generando y subiendo PDFs... (${contador}/${unidades.length})`);
         }
       }
 
-      // --- 3. ACTUALIZAR EL DOC. LIQUIDACIÓN CON EL SNAPSHOT COMPLETO ---
-      // <-- ¡NUEVO! Guardamos el snapshot CON las URLs -->
-      console.log("Guardando snapshot final con URLs en el documento de liquidación...");
+      // 3. Actualizar Doc Liquidación
+      console.log("Guardando snapshot final con URLs...");
       const liquidacionDocRef = doc(db, "liquidaciones", liquidacionId);
       await updateDoc(liquidacionDocRef, {
-        detalleUnidades: detalleUnidades // <-- Ahora este array contiene las cuponURL
+        detalleUnidades: detalleUnidades,
+        comentarios: comentarios 
       });
       console.log("Snapshot final guardado.");
-      // <-- Fin nuevo paso -->
 
-
-      // 4. ¡Todo listo! Limpiamos el formulario
+      // 4. Limpiar formulario
       alert(`¡Proceso completado! Se generaron y subieron ${contador} cupones PDF.`);
       setPreview(null);
       setNombre('');
       setFechaVenc1('');
       setFechaVenc2('');
+      setComentarios('');
       setError('');
 
     } catch (err) {
       console.error("Error al ejecutar liquidación o subir PDFs:", err);
       setError(`Error: ${err.message}`);
-      // Aquí podrías implementar la lógica de borrado si falla
-      // if (liquidacionIdParaCatch) { ... }
     } finally {
       setLoading(false); 
     }
-  }; // <--- Cierre de handleEjecutar
+  }; 
 
-  // --- RENDER CON MUI (Asumiendo que aplicaste mi sugerencia anterior) ---
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Módulo de Liquidación de Expensas
       </Typography>
 
-      {/* --- Formulario de Parámetros --- */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           1. Parámetros del Período
         </Typography>
         <Box component="form" onSubmit={handlePreview}>
           <Grid container spacing={3}>
+            {/* Fila 1 */}
             <Grid item xs={12} sm={8}>
-              <TextField
-                label="Nombre Período"
-                placeholder="Ej: Octubre 2025"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-                fullWidth
-                required
-              />
+              <TextField label="Nombre Período" value={nombre} onChange={(e) => setNombre(e.target.value)} fullWidth required />
             </Grid>
             <Grid item xs={12} sm={4}>
+              <TextField label="% Fondo Reserva (s/Ord.)" type="number" value={pctFondo} onChange={(e) => setPctFondo(e.target.value)} fullWidth required InputProps={{ inputProps: { step: '0.1' } }} />
+            </Grid>
+            {/* Fila 2 */}
+            <Grid item xs={12} sm={4}>
+              <TextField label="Fecha 1er Vencimiento" type="date" value={fechaVenc1} onChange={(e) => setFechaVenc1(e.target.value)} fullWidth required InputLabelProps={{ shrink: true }} />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField label="% Recargo 2do Venc." type="number" value={pctRecargo} onChange={(e) => setPctRecargo(e.target.value)} fullWidth required InputProps={{ inputProps: { step: '0.1' } }} />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField label="Fecha 2do Vencimiento" type="date" value={fechaVenc2} onChange={(e) => setFechaVenc2(e.target.value)} fullWidth required InputLabelProps={{ shrink: true }} />
+            </Grid>
+
+            {/* Campo de Comentarios */}
+            <Grid item xs={12}>
               <TextField
-                label="% Fondo Reserva (s/Ord.)"
-                type="number"
-                value={pctFondo}
-                onChange={(e) => setPctFondo(e.target.value)}
+                label="Comentarios para el Cupón de Pago (Opcional)"
+                placeholder="Ej: Medios de pago: CBU 1: XXXX - CBU 2: YYYY - Alias: ZZZZ"
+                multiline
+                rows={3}
                 fullWidth
-                required
-                InputProps={{ inputProps: { step: '0.1' } }}
+                value={comentarios}
+                onChange={(e) => setComentarios(e.target.value)}
               />
             </Grid>
 
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="Fecha 1er Vencimiento"
-                type="date"
-                value={fechaVenc1}
-                onChange={(e) => setFechaVenc1(e.target.value)}
-                fullWidth
-                required
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="% Recargo 2do Venc."
-                type="number"
-                value={pctRecargo}
-                onChange={(e) => setPctRecargo(e.target.value)}
-                fullWidth
-                required
-                InputProps={{ inputProps: { step: '0.1' } }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField
-                label="Fecha 2do Vencimiento"
-                type="date"
-                value={fechaVenc2}
-                onChange={(e) => setFechaVenc2(e.target.value)}
-                fullWidth
-                required
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
             <Grid item xs={12}>
               <Button type="submit" variant="contained" disabled={loading} fullWidth size="large">
                 {loading ? <CircularProgress size={24} /> : '1. Calcular Previsualización'}
@@ -269,14 +223,12 @@ function LiquidacionPage() {
         </Box>
       </Paper>
 
-      {/* --- Zona de Error General --- */}
+      {/* Zona de Error y Previsualización */}
       {error && (
           <Alert severity={loading ? "info" : "error"} sx={{ mt: 2 }}> 
              {error}
           </Alert>
       )}
-
-      {/* --- Zona de Previsualización (Asumiendo mi código anterior) --- */}
       {preview && !error && (
         <Paper sx={{ p: 3, mt: 2, background: '#f9f9f9' }}>
           <Typography variant="h6" gutterBottom>
@@ -289,16 +241,6 @@ function LiquidacionPage() {
               </Alert>
           )}
 
-          {/* Si estás usando la PREVIEW VIEJA (antes de mi sugerencia anterior) */}
-          {/* Descomenta esto y comenta la sección de Grid de abajo */}
-          {/*
-          <TotalRow label="Total Gastos Ordinarios:" value={preview.totalGastos} />
-          <TotalRow label={`(+) Fondo de Reserva (${pctFondo}%):`} value={preview.montoFondo} />
-          <Divider sx={{ my: 1 }} />
-          <TotalRow label="TOTAL A PRORRATEAR:" value={preview.totalAProrratear} isTotal />
-          */}
-
-          {/* Si estás usando la PREVIEW NUEVA (con mi sugerencia anterior) */}
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>Desglose de Gastos y Aportes</Typography>
@@ -319,7 +261,7 @@ function LiquidacionPage() {
               <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>Impacto en Fondo de Reserva</Typography>
               <TotalRow label="Saldo Inicial del Fondo:" value={preview.saldoFondoInicial} />
               <TotalRow label="(-) Gastos cubiertos por Fondo:" value={formatCurrency(preview.totalGastosExtraFondo)} color="error.main" />
-              <TotalRow label="(+) Aporte de este período:" value={formatCurrency(preview.montoFondoReservaCalculado)} color="success.main" />
+              <TotalRow label="(+) Aporte (Aún no cobrado):" value={formatCurrency(preview.montoFondoReservaCalculado)} color="text.secondary" />
               <Divider sx={{ my: 1 }} />
               <TotalRow label="SALDO FINAL ESTIMADO:" value={preview.saldoFondoFinal} isTotal />
             </Grid>
@@ -345,8 +287,7 @@ function LiquidacionPage() {
 
 // --- Componente helper para las filas de totales ---
 const TotalRow = ({ label, value, isTotal = false, small = false, color = "text.primary" }) => {
-  const formattedValue = typeof value === 'number' ? formatCurrency(value) : (value || formatCurrency(0)); // Default a 0
-  
+  const formattedValue = typeof value === 'number' ? formatCurrency(value) : (value || formatCurrency(0));
   const variant = isTotal ? "subtitle1" : (small ? "body2" : "body1");
   const fontWeight = isTotal ? 'bold' : 'normal';
 

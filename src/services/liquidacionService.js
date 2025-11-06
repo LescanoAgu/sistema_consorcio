@@ -4,20 +4,19 @@ import {
   collection, addDoc, doc, runTransaction,
   serverTimestamp, Timestamp, updateDoc,
   onSnapshot, query, orderBy, where, getDocs,
-  getDoc // <-- Importación clave
+  getDoc, deleteDoc
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getGastosNoLiquidados } from './gastosService';
 import { getTodasUnidades } from './propietariosService';
+import { registrarMovimientoFondo } from './fondoService';
 
-// --- Helper de formato (para la advertencia del fondo) ---
 const formatCurrency = (value) => {
   const numValue = Number(value);
   if (isNaN(numValue)) return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(0);
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(numValue);
 };
 
-// --- NUEVA VERSIÓN DE calcularPreviewLiquidacion ---
 export const calcularPreviewLiquidacion = async (porcentajeFondoReserva) => {
   console.log("Calculando preview con % fondo:", porcentajeFondoReserva);
 
@@ -93,31 +92,30 @@ export const calcularPreviewLiquidacion = async (porcentajeFondoReserva) => {
   const totalAProrratearGeneral = totalGastosOrdinarios + montoFondoReservaCalculado + totalGastosExtraProrrateo;
 
   // 6. Calcular saldo final estimado del fondo
-  const saldoFondoFinal = saldoFondoInicial - totalGastosExtraFondo + montoFondoReservaCalculado;
+  // EL APORTE (montoFondoReservaCalculado) YA NO SE SUMA AQUÍ
+  const saldoFondoFinal = saldoFondoInicial - totalGastosExtraFondo;
 
   // 7. Verificar si el fondo es suficiente
   let errorFondo = '';
-   if (saldoFondoFinal < 0) {
-    errorFondo = `El Fondo de Reserva quedaría negativo (${formatCurrency(saldoFondoFinal)}). Se necesitan ${formatCurrency(Math.abs(saldoFondoFinal))} adicionales para cubrir los gastos extraordinarios asignados.`;
-    console.warn(errorFondo);
-  } else if (totalGastosExtraFondo > saldoFondoInicial) {
+   if (totalGastosExtraFondo > saldoFondoInicial) {
      errorFondo = `Saldo inicial del Fondo (${formatCurrency(saldoFondoInicial)}) es insuficiente para cubrir los gastos Extraordinarios asignados (${formatCurrency(totalGastosExtraFondo)}).`;
      console.warn(errorFondo);
-  }
+   }
+
 
   // 8. Devolver el objeto completo
   const previewCompleta = {
     gastosIncluidos,
     totalGastosOrdinarios,
-    montoFondoReservaCalculado,
+    montoFondoReservaCalculado, // El aporte A FACTURAR
     totalGastosExtraProrrateo,
     totalAProrratearGeneral,
     totalGastosExtraUnidades,
-    totalGastosExtraFondo,
+    totalGastosExtraFondo, // El gasto A EJECUTAR
     saldoFondoInicial,
-    saldoFondoFinal,
+    saldoFondoFinal: saldoFondoFinal, // <-- Devolvemos el saldo real (solo con egresos)
     errorFondo,
-    pctRecargo: 0.10 // Valor fijo por ahora, puedes tomarlo de params si lo mueves
+    pctRecargo: 0.10 // Valor fijo
   };
 
   console.log("Preview final a devolver:", previewCompleta);
@@ -125,7 +123,7 @@ export const calcularPreviewLiquidacion = async (porcentajeFondoReserva) => {
 };
 
 
-// --- ejecutarLiquidacion (LA QUE FALTABA) ---
+// --- ejecutarLiquidacion (VERSIÓN ALINEADA A LA NUEVA LÓGICA) ---
 export const ejecutarLiquidacion = async (params, preview) => {
 
   const { nombre, fechaVenc1, pctRecargo, fechaVenc2 } = params;
@@ -133,19 +131,23 @@ export const ejecutarLiquidacion = async (params, preview) => {
     gastosIncluidos,
     totalAProrratearGeneral,
     totalGastosOrdinarios,
-    montoFondoReservaCalculado,
-    saldoFondoInicial, saldoFondoFinal,
-    totalGastosExtraProrrateo, totalGastosExtraUnidades, totalGastosExtraFondo
+    montoFondoReservaCalculado, // Aporte (a facturar)
+    saldoFondoInicial, 
+    // saldoFondoFinal, // Se recalcula
+    totalGastosExtraProrrateo,
+    totalGastosExtraFondo // Gasto (Egreso real)
   } = preview;
 
-  const unidades = await getTodasUnidades(); //
+  // Recalculamos el saldo final real aquí
+  const saldoFondoFinalReal = saldoFondoInicial - totalGastosExtraFondo;
 
+  const unidades = await getTodasUnidades();
   const sumaPorcentajes = unidades.reduce((acc, u) => acc + u.porcentaje, 0);
   if (Math.abs(1 - sumaPorcentajes) > 0.0001) {
     throw new Error(`La suma de porcentajes no es 1 (100%). Suma actual: ${(sumaPorcentajes * 100).toFixed(4)}%`);
   }
 
-  // 1. Preparamos el documento de liquidación (Sin cambios)
+  // 1. Preparamos el documento de liquidación
   const liquidacionRef = collection(db, "liquidaciones");
   const nuevaLiquidacion = {
     nombre,
@@ -157,20 +159,19 @@ export const ejecutarLiquidacion = async (params, preview) => {
     totalGastosExtraUnidades,
     totalGastosExtraFondo,
     saldoFondoInicial,
-    saldoFondoFinal,
+    saldoFondoFinal: saldoFondoFinalReal, // Guardamos el saldo real post-egresos
     gastosIds: gastosIncluidos.map(g => g.id),
-    unidadesIds: unidades.map(u => u.id)
+    unidadesIds: unidades.map(u => u.id),
+    comentarios: params.comentarios || "" // Guardamos los comentarios
   };
 
-  // 2. Creamos el documento principal (Sin cambios)
+  // 2. Creamos el documento principal
   const liquidacionDoc = await addDoc(liquidacionRef, nuevaLiquidacion);
   const liquidacionId = liquidacionDoc.id;
 
-  // 3. Preparamos arrays (Sin cambios)
+  // 3. Preparamos arrays
   const itemsCtaCteGenerados = [];
   const detalleUnidades = [];
-
-  // <-- Filtramos los gastos específicos UNA SOLA VEZ fuera del bucle -->
   const gastosEspecificos = gastosIncluidos.filter(g => 
       g.tipo === 'Extraordinario' && g.distribucion === 'UnidadesEspecificas'
   );
@@ -179,7 +180,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
     // --- 4. INICIA LA TRANSACCIÓN ---
     await runTransaction(db, async (transaction) => {
 
-      // --- PASO 1: LEER DATOS (Sin cambios) ---
+      // --- PASO 1: LEER DATOS ---
       const saldosUnidades = [];
       for (const unidad of unidades) {
         const unidadRef = doc(db, "unidades", unidad.id);
@@ -192,12 +193,12 @@ export const ejecutarLiquidacion = async (params, preview) => {
       const configDoc = await transaction.get(configRef);
       if (!configDoc.exists()) {
          console.warn("Documento 'configuracion/general' no encontrado en transacción, se creará.");
-         transaction.set(configRef, { saldoFondoReserva: saldoFondoFinal || 0 });
+         transaction.set(configRef, { saldoFondoReserva: saldoFondoFinalReal || 0 });
       }
-
+      
       // --- PASO 2: ESCRIBIR DATOS ---
       
-      // A. Actualizar GASTOS (Sin cambios)
+      // A. Actualizar GASTOS
       for (const gasto of gastosIncluidos) {
         const gastoRef = doc(db, "gastos", gasto.id);
         transaction.update(gastoRef, {
@@ -206,40 +207,31 @@ export const ejecutarLiquidacion = async (params, preview) => {
         });
       }
 
-      // B. Actualizar UNIDADES y Cta. Cte. (LÓGICA MODIFICADA)
+      // B. Actualizar UNIDADES y Cta. Cte.
       for (const dataUnidad of saldosUnidades) {
         const { unidadRef, saldoAnterior, unidad } = dataUnidad;
 
-        // Monto por prorrateo (Ordinarios + Aporte Fondo + Extra Prorrateo)
-        const montoProrrateado = totalAProrratearGeneral * unidad.porcentaje;
-
-        // --- INICIO DE LA CORRECCIÓN ---
-        // Calcular si le toca algo de gastos específicos (DIVISIÓN POR IGUALES)
-        
+        // Desglose
+        const montoOrdProrrateado = (totalGastosOrdinarios || 0) * unidad.porcentaje;
+        const montoAporteFondo = (montoFondoReservaCalculado || 0) * unidad.porcentaje;
+        const montoExtraProrrateado = (totalGastosExtraProrrateo || 0) * unidad.porcentaje;
         let montoEspecifico = 0;
-        
-        // Iteramos sobre los gastos que ya filtramos
         for (const gasto of gastosEspecificos) {
-          // Chequeamos si esta unidad está en la lista de ese gasto
           if (gasto.unidadesAfectadas && gasto.unidadesAfectadas.includes(unidad.id)) {
-            
             const cantidadUnidadesAfectadas = gasto.unidadesAfectadas.length;
-            
             if (cantidadUnidadesAfectadas > 0) {
-              // Dividimos el monto del gasto por la cantidad de unidades
               montoEspecifico += (Number(gasto.monto) / cantidadUnidadesAfectadas);
             }
           }
         }
-        // --- FIN DE LA CORRECCIÓN ---
-
-        const montoTotalLiquidadoUnidad = montoProrrateado + montoEspecifico;
+        
+        const montoTotalLiquidadoUnidad = montoOrdProrrateado + montoAporteFondo + montoExtraProrrateo + montoEspecifico;
         const saldoResultante = saldoAnterior - montoTotalLiquidadoUnidad;
 
         // 1. Actualizar saldo unidad
         transaction.update(unidadRef, { saldo: saldoResultante });
 
-        // 2. Crear item Cta. Cte. (Sin cambios en el item)
+        // 2. Crear item Cta. Cte. (CON DESGLOSE)
         const ctaCteRef = doc(collection(db, `unidades/${unidad.id}/cuentaCorriente`));
         const itemCtaCte = {
           fecha: Timestamp.now(),
@@ -251,33 +243,67 @@ export const ejecutarLiquidacion = async (params, preview) => {
           montoVencimiento1: montoTotalLiquidadoUnidad,
           vencimiento2: fechaVenc2,
           montoVencimiento2: montoTotalLiquidadoUnidad * (1 + pctRecargo),
-          unidadId: unidad.id
+          unidadId: unidad.id,
+          desglose: {
+            ordinario: montoOrdProrrateado,
+            extraProrrateo: montoExtraProrrateado,
+            extraEspecifico: montoEspecifico,
+            aporteFondo: montoAporteFondo
+          },
+          montoAplicado: 0,
+          pagado: false
         };
         transaction.set(ctaCteRef, itemCtaCte);
 
-        // 3. Guardar data para return (Sin cambios)
+        // 3. Guardar data para return
         itemsCtaCteGenerados.push({ ...itemCtaCte, id: ctaCteRef.id });
 
-        // 4. Guardar data para snapshot (Actualizado con el nuevo monto)
+        // 4. Guardar data para snapshot
         detalleUnidades.push({
           unidadId: unidad.id,
           nombre: unidad.nombre,
           propietario: unidad.propietario,
           porcentaje: unidad.porcentaje,
           saldoAnterior: saldoAnterior,
-          montoLiquidadoOrdinario: -(totalGastosOrdinarios * unidad.porcentaje),
-          montoLiquidadoFondo: -(montoFondoReservaCalculado * unidad.porcentaje),
-          montoLiquidadoExtraProrrateo: -(totalGastosExtraProrrateo * unidad.porcentaje),
-          montoLiquidadoExtraEspecifico: -montoEspecifico, // <-- USA EL VALOR CORREGIDO
-          montoLiquidado: -montoTotalLiquidadoUnidad, // <-- USA EL VALOR CORREGIDO
+          montoLiquidadoOrdinario: -montoOrdProrrateado,
+          montoLiquidadoFondo: -montoAporteFondo,
+          montoLiquidadoExtraProrrateo: -montoExtraProrrateado,
+          montoLiquidadoExtraEspecifico: -montoEspecifico,
+          montoLiquidado: -montoTotalLiquidadoUnidad,
           saldoResultante: saldoResultante
         });
       }
 
-       // C. Actualizar Saldo del Fondo de Reserva (Sin cambios)
+       // C. Actualizar Saldo del Fondo de Reserva (SOLO EGRESOS)
        if (configDoc.exists()) {
-           transaction.update(configRef, { saldoFondoReserva: saldoFondoFinal });
+           transaction.update(configRef, { saldoFondoReserva: saldoFondoFinalReal });
+       } else {
+            transaction.set(configRef, { saldoFondoReserva: saldoFondoFinalReal || 0 });
        }
+
+       // D. Registrar Movimientos del Fondo (SOLO EGRESOS)
+       
+       // 1. (El bloque de INGRESO fue removido)
+       
+       // 2. Registrar los EGRESOS
+       const gastosDeFondo = gastosIncluidos.filter (g => g.distribucion === 'FondoDeReserva' );
+       let saldoAcumulado = saldoFondoInicial; 
+
+       for (const gasto of gastosDeFondo){
+         saldoAcumulado -= gasto.monto;
+         
+         transaction.set(doc(collection(db, "historicoFondoReserva")),{
+            fecha: Timestamp.now(),
+            // --- ¡BUG CORREGIDO! Ya no se añade "Gasto:" ---
+            concepto : gasto.concepto, 
+            monto: -gasto.monto,
+            saldoResultante: saldoAcumulado,
+            liquidacionId: liquidacionId,
+            gastoId: gasto.id
+         });
+       }
+       // --- FIN LÓGICA MODIFICADA ---
+
     }); // --- FIN DE LA TRANSACCIÓN ---
 
     console.log("¡Transacción de liquidación completada!");
@@ -290,7 +316,8 @@ export const ejecutarLiquidacion = async (params, preview) => {
 };
 
 
-// --- uploadCuponPDF (LA QUE FALTABA) ---
+// --- OTRAS FUNCIONES (Sin cambios) ---
+
 export const uploadCuponPDF = async (pdfBlob, liquidacionNombre, unidadNombre) => {
   const safeLiquidacionNombre = liquidacionNombre.replace(/ /g, '_');
   const safeUnidadNombre = unidadNombre.replace(/ /g, '_');
@@ -305,7 +332,6 @@ export const uploadCuponPDF = async (pdfBlob, liquidacionNombre, unidadNombre) =
   return downloadURL;
 };
 
-// --- guardarURLCupon (LA QUE FALTABA) ---
 export const guardarURLCupon = async (unidadId, ctaCteId, url) => {
   const ctaCteRef = doc(db, `unidades/${unidadId}/cuentaCorriente`, ctaCteId);
   
@@ -315,7 +341,6 @@ export const guardarURLCupon = async (unidadId, ctaCteId, url) => {
   console.log(`URL guardada para ctaCteId: ${ctaCteId}`);
 };
 
-// --- getLiquidaciones (LA QUE FALTABA) ---
 export const getLiquidaciones = (callback) => {
   const q = query(collection(db, "liquidaciones"), orderBy("fechaCreada", "desc"));
 
@@ -352,7 +377,6 @@ export const resetearTodasLasLiquidaciones = async () => {
     return 0;
   }
 
-  // Borramos los documentos en paralelo
   const promesasDelete = liquidacionesSnapshot.docs.map(async (liqDoc) => {
     try {
       await deleteDoc(liqDoc.ref);

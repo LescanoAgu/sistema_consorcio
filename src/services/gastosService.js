@@ -2,13 +2,12 @@ import { db, storage } from '../config/firebase';
 import {
   collection, addDoc, serverTimestamp,
   onSnapshot, query, orderBy, where, getDocs,
-  doc, updateDoc, deleteDoc // <-- ASEGÚRATE DE IMPORTAR doc, updateDoc, deleteDoc
+  doc, updateDoc, deleteDoc, getDoc // <-- Asegúrate de tener getDoc
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'; // <-- Importa deleteObject
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { registrarMovimientoFondo } from './fondoService';
 
-// --- uploadFactura (SIN CAMBIOS) ---
 const uploadFactura = async (file) => {
-  // ... (código existente)
   const storageRef = ref(storage, `facturas/${Date.now()}-${file.name}`);
   const snapshot = await uploadBytes(storageRef, file);
   const downloadURL = await getDownloadURL(snapshot.ref);
@@ -26,7 +25,6 @@ export const crearGasto = async (gastoData) => {
     }
   }
 
-  // Preparamos el objeto para guardar
   const nuevoGasto = {
     fecha: gastoData.fecha,
     concepto: gastoData.concepto,
@@ -36,16 +34,12 @@ export const crearGasto = async (gastoData) => {
     createdAt: serverTimestamp(),
     liquidacionId: null,
     liquidadoEn: null,
-
-    // --- CAMPOS AÑADIDOS ---
-    tipo: gastoData.tipo, // <-- ¡Importante!
-    distribucion: gastoData.distribucion || 'Prorrateo', // <-- ¡Importante!
-    unidadesAfectadas: gastoData.unidadesAfectadas || [] // <-- ¡Importante!
-    // --- FIN CAMPOS AÑADIDOS ---
+    tipo: gastoData.tipo,
+    distribucion: gastoData.distribucion || 'Prorrateo',
+    unidadesAfectadas: gastoData.unidadesAfectadas || []
   };
 
   try {
-    // Quitamos los campos extra si es Ordinario (para limpieza)
     if (nuevoGasto.tipo === 'Ordinario') {
       delete nuevoGasto.distribucion;
       delete nuevoGasto.unidadesAfectadas;
@@ -53,10 +47,23 @@ export const crearGasto = async (gastoData) => {
 
     const docRef = await addDoc(collection(db, "gastos"), nuevoGasto);
     console.log("Gasto registrado con ID: ", docRef.id);
+
+    // --- ¡NUEVA LÓGICA! ---
+    // Si es un gasto que usa el Fondo de Reserva, registramos el egreso
+    if (nuevoGasto.tipo === 'Extraordinario' && nuevoGasto.distribucion === 'FondoDeReserva') {
+      // Leemos el saldo actual del fondo para calcular el saldo resultante
+      const configRef = doc(db, "configuracion", "general");
+      const configSnap = await getDoc(configRef);
+      let saldoActual = 0;
+      if (configSnap.exists()) {
+        saldoActual = configSnap.data().saldoFondoReserva || 0;
+      }
+      
+      const saldoResultante = saldoActual - nuevoGasto.monto;
+    }
+
     return docRef;
   } catch (error) {
-    console.error("Error al guardar el gasto: ", error);
-    throw new Error('No se pudo guardar el gasto en la base de datos.');
   }
 };
 
