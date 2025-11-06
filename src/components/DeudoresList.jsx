@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getUnidades } from '../services/propietariosService'; // Importamos el servicio
-
+import { naturalSort } from '../utils/helpers';
 // --- IMPORTACIONES DE MUI ---
 import {
   Paper, Table, TableBody, TableCell,
@@ -14,16 +14,19 @@ function DeudoresList() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Nos suscribimos a TODAS las unidades
-    const unsubscribe = getUnidades((unidadesNuevas) => {
-      // Filtramos aquí para quedarnos solo con los saldos negativos
-      const unidadesDeudoras = unidadesNuevas.filter(unidad => unidad.saldo < 0);
-      setDeudores(unidadesDeudoras);
+    const unsubscribe = getUnidades((unidadesNuevas, err) => { // <-- Añadir err por si acaso
+      if (err) {
+        console.error("Error al obtener unidades para deudores:", err);
+      } else {
+        const unidadesDeudoras = unidadesNuevas.filter(unidad => unidad.saldo < 0);
+        // <-- Usar naturalSort -->
+        unidadesDeudoras.sort((a, b) => naturalSort(a.nombre, b.nombre));
+        setDeudores(unidadesDeudoras);
+      }
       setLoading(false);
     });
-    // Nos desuscribimos al desmontar el componente
     return () => unsubscribe();
-  }, []); // El array vacío asegura que se ejecute solo una vez al montar
+  }, []);
 
   // Función para formatear moneda (igual que en PropietariosList)
   const formatCurrency = (value) => {

@@ -5,6 +5,7 @@ import {
   Box, Button, TextField, Typography, Paper, Alert, CircularProgress, Grid,
   Autocomplete
 } from '@mui/material';
+import { naturalSort } from '../../utils/helpers';
 
 function CobranzasPage() {
   const [unidades, setUnidades] = useState([]);
@@ -21,7 +22,7 @@ function CobranzasPage() {
       setLoadingUnidades(true);
       try {
         const unidadesObtenidas = await getTodasUnidades();
-        unidadesObtenidas.sort((a, b) => a.nombre.localeCompare(b.nombre));
+        unidadesObtenidas.sort((a, b) => naturalSort(a.nombre, b.nombre));
         setUnidades(unidadesObtenidas);
       } catch (error) {
         setMessage('Error al cargar la lista de unidades.');

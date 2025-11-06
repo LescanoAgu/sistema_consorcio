@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { getUnidades } from '../services/propietariosService';
 import { Link as RouterLink } from 'react-router-dom';
+import { naturalSort } from '../utils/helpers';
 
 // --- IMPORTACIONES DE MUI ---
 import {
@@ -11,19 +12,17 @@ import {
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 // --- FIN IMPORTACIONES MUI ---
 
-
-function PropietariosList() {
+  function PropietariosList() {
   const [unidades, setUnidades] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = getUnidades((unidadesNuevas, err) => { // Capturar posible error
+    const unsubscribe = getUnidades((unidadesNuevas, err) => {
         if (err) {
             console.error("Error al obtener unidades:", err);
-            // Mostrar mensaje de error o manejarlo
         } else {
-             // Ordenar aquí
-             unidadesNuevas.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+             // <-- Usar naturalSort -->
+             unidadesNuevas.sort((a, b) => naturalSort(a.nombre, b.nombre));
              setUnidades(unidadesNuevas);
         }
         setLoading(false);

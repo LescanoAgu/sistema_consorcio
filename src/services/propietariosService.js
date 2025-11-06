@@ -233,3 +233,18 @@ export const resetearSaldosUnidades = async () => {
   }
   return { unidadesActualizadas, movimientosBorrados };
 };
+  
+export const resetearFondoReserva = async () => {
+  console.warn("Reseteando Saldo Fondo de Reserva a 0...");
+  const configRef = doc(db, "configuracion", "general");
+  try {
+    // Usamos setDoc con merge: true para crear el documento si no existe,
+    // o actualizarlo si ya existe.
+    await setDoc(configRef, { saldoFondoReserva: 0 }, { merge: true });
+    console.log("Saldo Fondo de Reserva reseteado a 0.");
+    return 1; // 1 documento actualizado/creado
+  } catch (error) {
+    console.error("Error al resetear fondo de reserva:", error);
+    throw new Error("No se pudo resetear el Fondo de Reserva.");
+  }
+};

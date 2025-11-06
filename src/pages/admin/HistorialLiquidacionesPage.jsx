@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { getLiquidaciones } from '../../services/liquidacionService';
 import { Link as RouterLink } from 'react-router-dom';
-
+import { naturalSort } from '../../utils/helpers';
 // --- IMPORTACIONES DE MUI ---
 import {
   Box, Typography, Paper, List, ListItem, ListItemButton, ListItemText,
@@ -86,11 +86,10 @@ function HistorialLiquidacionesPage() {
       );
     }
 
-    const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.detalleUnidades) && liquidacion.detalleUnidades.length > 0;
-
+const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.detalleUnidades) && liquidacion.detalleUnidades.length > 0;
     const detalleOrdenado = tieneDetalles
-       ? [...liquidacion.detalleUnidades].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
-       : [];
+        ? [...liquidacion.detalleUnidades].sort((a, b) => naturalSort(a.nombre, b.nombre))
+        : [];
 
     return (
       <Box>

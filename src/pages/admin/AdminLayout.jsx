@@ -1,14 +1,15 @@
-import React, { useState } from 'react'; // <-- CORREGIDO: Importar useState
-import { logout } from '../../services/authService';
+import React, { useState } from 'react';
+import { logout } from '../../services/authService'; //
 import { useNavigate, Link, Outlet, useLocation } from 'react-router-dom';
 import WarningIcon from '@mui/icons-material/Warning';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import HistoryIcon from '@mui/icons-material/History';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 
-// Importar los servicios de reseteo
-import { resetearTodosLosGastos } from '../../services/gastosService';
-import { resetearSaldosUnidades } from '../../services/propietariosService';
+// --- IMPORTACIONES DE RESETEO ACTUALIZADAS ---
+import { resetearTodosLosGastos } from '../../services/gastosService'; //
+import { resetearSaldosUnidades, resetearFondoReserva } from '../../services/propietariosService'; // <-- Añadido resetearFondoReserva
+import { resetearTodasLasLiquidaciones } from '../../services/liquidacionService'; // <-- ¡NUEVA IMPORTACIÓN!
 
 // --- IMPORTACIONES DE MUI ---
 import Box from '@mui/material/Box';
@@ -31,7 +32,6 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import PeopleIcon from '@mui/icons-material/People';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
 import LogoutIcon from '@mui/icons-material/Logout';
-// --- FIN IMPORTACIONES MUI ---
 
 const drawerWidth = 240;
 
@@ -63,17 +63,34 @@ function AdminLayout() {
     const handleResetTotal = async () => {
         setResetMessage('');
         setResetError(false);
-        if (!window.confirm("ADVERTENCIA EXTREMA:\n¿Está SEGURO de que desea borrar TODOS los gastos registrados?")) return;
-        if (!window.confirm("SEGUNDA ADVERTENCIA:\nEsta acción también intentará borrar los PDFs asociados en Storage. ¿Continuar?")) return;
-        if (!window.confirm("TERCERA ADVERTENCIA:\nAhora se resetearán los saldos de TODAS las unidades a CERO y se borrará TODO el historial de sus cuentas corrientes. ¿Continuar?")) return;
-        if (!window.confirm("¡¡¡ÚLTIMA CONFIRMACIÓN!!!\n¿Proceder con el reseteo TOTAL e IRREVERSIBLE de gastos y saldos?")) return;
+        // Advertencias actualizadas
+        if (!window.confirm("ADVERTENCIA EXTREMA:\n¿Está SEGURO de que desea borrar TODOS los gastos, liquidaciones, y saldos de unidades?")) return;
+        if (!window.confirm("SEGUNDA ADVERTENCIA:\nEsta acción borrará las facturas PDF asociadas a los gastos, pero NO los cupones PDF de las liquidaciones (eso debe hacerlo manual). ¿Continuar?")) return;
+        if (!window.confirm("¡¡¡ÚLTIMA CONFIRMACIÓN!!!\n¿Proceder con el reseteo TOTAL e IRREVERSIBLE de gastos, saldos, ctas. ctes., fondo de reserva y documentos de liquidación?")) return;
 
         setResetLoading(true);
         try {
+            // 1. Borra gastos Y sus PDFs de facturas
             const gastosBorrados = await resetearTodosLosGastos();
+            
+            // 2. Borra saldos de unidades Y sus ctas. ctes.
             const { unidadesActualizadas, movimientosBorrados } = await resetearSaldosUnidades();
-            setResetMessage(`¡RESETEO COMPLETADO! Gastos borrados: ${gastosBorrados}. Saldos reseteados: ${unidadesActualizadas}. Movimientos Cta. Cte. borrados: ${movimientosBorrados}. Refresca la página si es necesario.`);
+            
+            // 3. ¡NUEVO! Borra los documentos de liquidaciones
+            const liquidacionesBorradas = await resetearTodasLasLiquidaciones();
+
+            // 4. ¡NUEVO! Resetea el Fondo de Reserva a 0
+            const fondoReseteado = await resetearFondoReserva();
+
+            // Mensaje de éxito actualizado
+            setResetMessage(`¡RESETEO COMPLETADO! 
+                Gastos borrados: ${gastosBorrados}. 
+                Saldos reseteados: ${unidadesActualizadas}. 
+                Mov. Cta. Cte. borrados: ${movimientosBorrados}. 
+                Liquidaciones borradas: ${liquidacionesBorradas}. 
+                Fondo reseteado: ${fondoReseteado}.`);
             setResetError(false);
+
         } catch (err) {
             console.error("ERROR DURANTE EL RESETEO TOTAL:", err);
             setResetMessage(`ERROR DURANTE EL RESETEO: ${err.message}`);

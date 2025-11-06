@@ -118,8 +118,35 @@ function CargaGastosForm() {
     }
   };
 
-  const handleFileChange = (e) => { /* Sin cambios */ };
+const handleFileChange = (e) => {
+    // Comprueba si el usuario seleccionó un archivo
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      
+      // Opcional: Validar que sea PDF (aunque ya lo haces con 'accept')
+      if (file.type !== "application/pdf") {
+        setMessage("Error: Solo se permiten archivos PDF.");
+        setFacturaFile(null); // Limpiar si no es válido
+        e.target.value = null; // Limpiar el input
+        return;
+      }
+      
+      // Opcional: Validar tamaño (ej: max 5MB)
+      if (file.size > 5 * 1024 * 1024) { 
+        setMessage("Error: El archivo PDF es demasiado grande (max 5MB).");
+        setFacturaFile(null);
+        e.target.value = null;
+        return;
+      }
 
+      // Guardar el archivo en el estado
+      setFacturaFile(file);
+      setMessage(''); // Limpiar errores previos si los hubo
+    } else {
+      // El usuario canceló la selección
+      setFacturaFile(null);
+    }
+  };
   return (
     <Paper sx={{ p: 3, mb: 4 }}>
       <Typography variant="h6" gutterBottom>

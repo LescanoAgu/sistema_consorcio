@@ -138,14 +138,14 @@ export const ejecutarLiquidacion = async (params, preview) => {
     totalGastosExtraProrrateo, totalGastosExtraUnidades, totalGastosExtraFondo
   } = preview;
 
-  const unidades = await getTodasUnidades();
+  const unidades = await getTodasUnidades(); //
 
   const sumaPorcentajes = unidades.reduce((acc, u) => acc + u.porcentaje, 0);
   if (Math.abs(1 - sumaPorcentajes) > 0.0001) {
     throw new Error(`La suma de porcentajes no es 1 (100%). Suma actual: ${(sumaPorcentajes * 100).toFixed(4)}%`);
   }
 
-  // 1. Preparamos el documento de liquidación
+  // 1. Preparamos el documento de liquidación (Sin cambios)
   const liquidacionRef = collection(db, "liquidaciones");
   const nuevaLiquidacion = {
     nombre,
@@ -162,19 +162,24 @@ export const ejecutarLiquidacion = async (params, preview) => {
     unidadesIds: unidades.map(u => u.id)
   };
 
-  // 2. Creamos el documento principal
+  // 2. Creamos el documento principal (Sin cambios)
   const liquidacionDoc = await addDoc(liquidacionRef, nuevaLiquidacion);
   const liquidacionId = liquidacionDoc.id;
 
-  // 3. Preparamos arrays
+  // 3. Preparamos arrays (Sin cambios)
   const itemsCtaCteGenerados = [];
   const detalleUnidades = [];
+
+  // <-- Filtramos los gastos específicos UNA SOLA VEZ fuera del bucle -->
+  const gastosEspecificos = gastosIncluidos.filter(g => 
+      g.tipo === 'Extraordinario' && g.distribucion === 'UnidadesEspecificas'
+  );
 
   try {
     // --- 4. INICIA LA TRANSACCIÓN ---
     await runTransaction(db, async (transaction) => {
 
-      // --- PASO 1: LEER DATOS ---
+      // --- PASO 1: LEER DATOS (Sin cambios) ---
       const saldosUnidades = [];
       for (const unidad of unidades) {
         const unidadRef = doc(db, "unidades", unidad.id);
@@ -192,7 +197,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
 
       // --- PASO 2: ESCRIBIR DATOS ---
       
-      // A. Actualizar GASTOS
+      // A. Actualizar GASTOS (Sin cambios)
       for (const gasto of gastosIncluidos) {
         const gastoRef = doc(db, "gastos", gasto.id);
         transaction.update(gastoRef, {
@@ -201,14 +206,32 @@ export const ejecutarLiquidacion = async (params, preview) => {
         });
       }
 
-      // B. Actualizar UNIDADES y Cta. Cte.
+      // B. Actualizar UNIDADES y Cta. Cte. (LÓGICA MODIFICADA)
       for (const dataUnidad of saldosUnidades) {
         const { unidadRef, saldoAnterior, unidad } = dataUnidad;
 
+        // Monto por prorrateo (Ordinarios + Aporte Fondo + Extra Prorrateo)
         const montoProrrateado = totalAProrratearGeneral * unidad.porcentaje;
-        const montoEspecifico = gastosIncluidos
-            .filter(g => g.tipo === 'Extraordinario' && g.distribucion === 'UnidadesEspecificas' && g.unidadesAfectadas?.includes(unidad.id))
-            .reduce((sum, g) => sum + g.monto, 0);
+
+        // --- INICIO DE LA CORRECCIÓN ---
+        // Calcular si le toca algo de gastos específicos (DIVISIÓN POR IGUALES)
+        
+        let montoEspecifico = 0;
+        
+        // Iteramos sobre los gastos que ya filtramos
+        for (const gasto of gastosEspecificos) {
+          // Chequeamos si esta unidad está en la lista de ese gasto
+          if (gasto.unidadesAfectadas && gasto.unidadesAfectadas.includes(unidad.id)) {
+            
+            const cantidadUnidadesAfectadas = gasto.unidadesAfectadas.length;
+            
+            if (cantidadUnidadesAfectadas > 0) {
+              // Dividimos el monto del gasto por la cantidad de unidades
+              montoEspecifico += (Number(gasto.monto) / cantidadUnidadesAfectadas);
+            }
+          }
+        }
+        // --- FIN DE LA CORRECCIÓN ---
 
         const montoTotalLiquidadoUnidad = montoProrrateado + montoEspecifico;
         const saldoResultante = saldoAnterior - montoTotalLiquidadoUnidad;
@@ -216,7 +239,7 @@ export const ejecutarLiquidacion = async (params, preview) => {
         // 1. Actualizar saldo unidad
         transaction.update(unidadRef, { saldo: saldoResultante });
 
-        // 2. Crear item Cta. Cte.
+        // 2. Crear item Cta. Cte. (Sin cambios en el item)
         const ctaCteRef = doc(collection(db, `unidades/${unidad.id}/cuentaCorriente`));
         const itemCtaCte = {
           fecha: Timestamp.now(),
@@ -232,10 +255,10 @@ export const ejecutarLiquidacion = async (params, preview) => {
         };
         transaction.set(ctaCteRef, itemCtaCte);
 
-        // 3. Guardar data para return
+        // 3. Guardar data para return (Sin cambios)
         itemsCtaCteGenerados.push({ ...itemCtaCte, id: ctaCteRef.id });
 
-        // 4. Guardar data para snapshot
+        // 4. Guardar data para snapshot (Actualizado con el nuevo monto)
         detalleUnidades.push({
           unidadId: unidad.id,
           nombre: unidad.nombre,
@@ -245,13 +268,13 @@ export const ejecutarLiquidacion = async (params, preview) => {
           montoLiquidadoOrdinario: -(totalGastosOrdinarios * unidad.porcentaje),
           montoLiquidadoFondo: -(montoFondoReservaCalculado * unidad.porcentaje),
           montoLiquidadoExtraProrrateo: -(totalGastosExtraProrrateo * unidad.porcentaje),
-          montoLiquidadoExtraEspecifico: -montoEspecifico,
-          montoLiquidado: -montoTotalLiquidadoUnidad,
+          montoLiquidadoExtraEspecifico: -montoEspecifico, // <-- USA EL VALOR CORREGIDO
+          montoLiquidado: -montoTotalLiquidadoUnidad, // <-- USA EL VALOR CORREGIDO
           saldoResultante: saldoResultante
         });
       }
 
-       // C. Actualizar Saldo del Fondo de Reserva
+       // C. Actualizar Saldo del Fondo de Reserva (Sin cambios)
        if (configDoc.exists()) {
            transaction.update(configRef, { saldoFondoReserva: saldoFondoFinal });
        }
@@ -314,4 +337,37 @@ export const getLiquidaciones = (callback) => {
   });
 
   return unsubscribe;
+};
+
+export const resetearTodasLasLiquidaciones = async () => {
+  console.warn("Iniciando reseteo total de Liquidaciones (documentos)...");
+
+  const liquidacionesCollection = collection(db, "liquidaciones");
+  const liquidacionesSnapshot = await getDocs(liquidacionesCollection);
+  let contadorBorrados = 0;
+  let contadorErrores = 0;
+
+  if (liquidacionesSnapshot.empty) {
+    console.log("No hay documentos de liquidación para borrar.");
+    return 0;
+  }
+
+  // Borramos los documentos en paralelo
+  const promesasDelete = liquidacionesSnapshot.docs.map(async (liqDoc) => {
+    try {
+      await deleteDoc(liqDoc.ref);
+      contadorBorrados++;
+    } catch (error) {
+      console.error(`Error borrando liquidación ${liqDoc.id}:`, error);
+      contadorErrores++;
+    }
+  });
+
+  await Promise.all(promesasDelete);
+
+  console.warn(`Reseteo de Liquidaciones completado. Borrados: ${contadorBorrados}, Errores: ${contadorErrores}`);
+  if (contadorErrores > 0) {
+    throw new Error(`Ocurrieron ${contadorErrores} errores al borrar liquidaciones.`);
+  }
+  return contadorBorrados;
 };
