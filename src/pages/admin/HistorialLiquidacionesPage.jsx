@@ -1,9 +1,9 @@
 // src/pages/admin/HistorialLiquidacionesPage.jsx
 import React, { useState, useEffect } from 'react';
 import { getLiquidaciones } from '../../services/liquidacionService';
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 import { Link as RouterLink } from 'react-router-dom';
 import { naturalSort } from '../../utils/helpers';
-// --- IMPORTACIONES DE MUI ---
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import {
@@ -14,89 +14,86 @@ import {
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import DescriptionIcon from '@mui/icons-material/Description';
 import DownloadIcon from '@mui/icons-material/Download';
-// --- FIN IMPORTACIONES MUI ---
 
 function HistorialLiquidacionesPage() {
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
+  
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [liquidacionSeleccionada, setLiquidacionSeleccionada] = useState(null);
 
   useEffect(() => {
+    // 3. VALIDAR CONSORCIO
+    if (!consorcioId) {
+        setLoading(false);
+        setLiquidaciones([]);
+        setLiquidacionSeleccionada(null); // Limpiar selección si cambia el consorcio
+        return;
+    }
+    
     setLoading(true);
     setError('');
-    const unsubscribe = getLiquidaciones((liquidacionesNuevas, err) => {
+    
+    // 4. PASAR consorcioId AL SERVICIO
+    const unsubscribe = getLiquidaciones(consorcioId, (liquidacionesNuevas, err) => {
       if (err) {
         setError('Error al cargar el historial de liquidaciones.');
         console.error("Error en getLiquidaciones:", err);
         setLiquidaciones([]);
       } else {
         setLiquidaciones(liquidacionesNuevas);
+        // Si el consorcio cambió, limpiamos la selección
+        setLiquidacionSeleccionada(null);
       }
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+    
+  }, [consorcioId]); // <-- 5. AGREGAR consorcioId A DEPENDENCIAS
 
   const handleSelectLiquidacion = (liquidacion) => {
-    console.log("Liquidación seleccionada para ver detalles:", liquidacion);
-    if (liquidacion && liquidacion.detalleUnidades && Array.isArray(liquidacion.detalleUnidades)) {
-        console.log(` -> detalleUnidades tiene ${liquidacion.detalleUnidades.length} elementos.`);
-        // Log para verificar si viene la URL
-        if (liquidacion.detalleUnidades.length > 0) {
-            console.log("  > Verificando URL en primer item:", liquidacion.detalleUnidades[0].cuponURL);
-        }
-    } else {
-        console.warn(" -> La liquidación seleccionada NO tiene un array 'detalleUnidades' válido.");
-    }
     setLiquidacionSeleccionada(liquidacion);
   };
-
+  
+  // ... (formatCurrency y formatDate no cambian) ...
   const formatCurrency = (value) => {
     if (typeof value !== 'number' || isNaN(value)) return 'N/A';
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
   };
-
   const formatDate = (date) => {
     if (!date) return 'Fecha desconocida';
     if (!(date instanceof Date)) {
         if (date && typeof date.seconds === 'number') {
-            try {
-                date = date.toDate();
-            } catch (e) {
-                console.error("Error convirtiendo timestamp a Date:", e);
-                return 'Fecha inválida';
-            }
-        } else {
-             console.warn("formatDate recibió algo que no es Date ni Timestamp:", date);
-            return 'Fecha inválida';
-        }
+            try { date = date.toDate(); } catch (e) { return 'Fecha inválida'; }
+        } else { return 'Fecha inválida'; }
     }
-    return date.toLocaleDateString('es-AR', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
+    return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  // --- Componente Interno para Mostrar Detalles (MODIFICADO) ---
-  const DetalleLiquidacion = ({ liquidacion }) => {
 
-    // --- NUEVO ESTADO Y FUNCIÓN PARA EL ZIP ---
+  // --- Componente Interno para Mostrar Detalles (MODIFICADO) ---
+  // 6. PASAR consorcioId AL COMPONENTE INTERNO (para el ZIP)
+  const DetalleLiquidacion = ({ liquidacion, consorcioId }) => {
     const [zipLoading, setZipLoading] = useState(false);
 
     const handleDownloadZip = async () => {
-      if (!tieneDetalles) return;
+      // 7. VALIDAR consorcioId aquí también
+      if (!tieneDetalles || !consorcioId) {
+          setError("No se puede generar ZIP sin consorcio o sin detalles.");
+          return;
+      }
       setZipLoading(true);
 
       try {
         const zip = new JSZip();
         const safeLiquidacionNombre = (liquidacion.nombre || 'Liquidacion').replace(/[^a-z0-9]/gi, '_');
 
-        // 1. Crear un array de promesas de fetch
         const promises = detalleOrdenado.map(detalle => {
           if (!detalle.cuponURL) return Promise.resolve(null);
           
-          return fetch(detalle.cuponURL) // CORS debe permitir GET desde este origen
+          // Usamos 'fetch' que es nativo del navegador
+          return fetch(detalle.cuponURL) 
             .then(response => {
               if (!response.ok) {
                 throw new Error(`Error al descargar ${detalle.nombre}: ${response.statusText}`);
@@ -104,37 +101,29 @@ function HistorialLiquidacionesPage() {
               return response.blob();
             })
             .then(blob => {
-              // Limpiar nombre de archivo
               const safeUnidadNombre = (detalle.nombre || 'unidad').replace(/[^a-z0-9]/gi, '_');
               const fileName = `expensa_${safeUnidadNombre}.pdf`;
-              zip.file(fileName, blob); // Añadir archivo al zip
+              zip.file(fileName, blob);
             })
             .catch(err => {
               console.error(`Error procesando PDF para ${detalle.nombre}:`, err);
-              // Opcional: Añadir un txt de error al zip
               const safeUnidadNombre = (detalle.nombre || 'unidad_error').replace(/[^a-z0-9]/gi, '_');
               zip.file(`ERROR_${safeUnidadNombre}.txt`, `No se pudo descargar el PDF: ${err.message}`);
             });
         });
 
-        // 2. Esperar que todas las descargas terminen
         await Promise.all(promises);
-
-        // 3. Generar el ZIP
         const zipBlob = await zip.generateAsync({ type: 'blob' });
-
-        // 4. Guardar el ZIP
         saveAs(zipBlob, `Liquidacion_${safeLiquidacionNombre}_Cupones.zip`);
 
       } catch (error) {
         console.error("Error al generar el ZIP:", error);
-        // Aquí podrías usar un Alert de MUI para mostrar el error al usuario
+        setError(`Error al generar ZIP: ${error.message}`); // Mostrar error en la UI
       } finally {
         setZipLoading(false);
       }
     };
     // --- FIN LÓGICA ZIP ---
-
 
     if (!liquidacion) {
       return (
@@ -145,9 +134,8 @@ function HistorialLiquidacionesPage() {
     }
 
     const tieneDetalles = liquidacion.detalleUnidades && Array.isArray(liquidacion.detalleUnidades) && liquidacion.detalleUnidades.length > 0;
-
     const detalleOrdenado = tieneDetalles
-       ? [...liquidacion.detalleUnidades].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
+       ? [...liquidacion.detalleUnidades].sort((a, b) => naturalSort(a, b, 'nombre'))
        : [];
 
     return (
@@ -155,7 +143,7 @@ function HistorialLiquidacionesPage() {
         <Typography variant="h5" gutterBottom>Detalles de: {liquidacion.nombre || 'Liquidación sin nombre'}</Typography>
         <Typography variant="body2" color="textSecondary" gutterBottom>Generada el: {formatDate(liquidacion.fechaCreada)}</Typography>
 
-        {/* Resumen de Totales (Sin cambios) */}
+        {/* Resumen de Totales */}
         <Paper variant="outlined" sx={{ p: 2, my: 2 }}>
            <Typography variant="h6" gutterBottom>Resumen General</Typography>
            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
@@ -173,26 +161,23 @@ function HistorialLiquidacionesPage() {
            </Box>
         </Paper>
 
-        {/* --- CABECERA DE LA TABLA CON BOTÓN ZIP --- */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, mb: 1 }}>
           <Typography variant="h6" gutterBottom sx={{ mb: 0 }}>
             Detalle por Unidad (Snapshot)
           </Typography>
           <Button
             variant="contained"
-            color="secondary" // Un color que destaque
+            color="secondary"
             size="small"
             startIcon={zipLoading ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
-            disabled={!tieneDetalles || zipLoading}
+            disabled={!tieneDetalles || zipLoading || !consorcioId} // 8. Deshabilitar si no hay consorcioId
             onClick={handleDownloadZip}
           >
             {zipLoading ? 'Generando ZIP...' : 'Descargar Todos (ZIP)'}
           </Button>
         </Box>
-        {/* --- FIN CABECERA TABLA --- */}
 
-
-        {/* Tabla Detalle por Unidad (Snapshot) (Sin cambios) */}
+        {/* Tabla Detalle por Unidad (Snapshot) */}
         {tieneDetalles ? (
           <>
             <TableContainer component={Paper}>
@@ -261,19 +246,25 @@ function HistorialLiquidacionesPage() {
           </>
         ) : (
           <Typography sx={{ color: 'text.secondary', mt: 2 }}>
-            No se encontró el detalle por unidad para esta liquidación (puede ser antigua o hubo un error al guardarlo).
+            No se encontró el detalle por unidad para esta liquidación.
           </Typography>
         )}
       </Box>
     );
   };
 
-  // --- Render principal de la página (SIN CAMBIOS) ---
+  // --- Render principal de la página ---
   return (
     <Box sx={{ width: '100%' }}>
       <Typography variant="h4" gutterBottom>
         Historial de Liquidaciones
       </Typography>
+      
+      {/* 9. Mensaje si no hay consorcio */}
+      {!consorcioId && (
+          <Alert severity="warning">Seleccione un consorcio para ver el historial.</Alert>
+      )}
+      
       <Grid container spacing={3}>
         {/* Columna Izquierda */}
         <Grid item xs={12} md={4}>
@@ -283,7 +274,9 @@ function HistorialLiquidacionesPage() {
             </Typography>
             {loading ? ( <Box sx={{ display: 'flex', justifyContent: 'center', my: 3 }}><CircularProgress /></Box>
             ) : error ? ( <Alert severity="error">{error}</Alert>
-            ) : liquidaciones.length === 0 ? ( <Typography sx={{mt:2}}>No hay liquidaciones registradas.</Typography>
+            ) : liquidaciones.length === 0 ? ( <Typography sx={{mt:2}}>
+                {consorcioId ? 'No hay liquidaciones registradas para este consorcio.' : 'Seleccione un consorcio.'}
+                </Typography>
             ) : (
               <List dense sx={{ pt: 0 }}>
                 {liquidaciones.map((liq, index) => (
@@ -309,7 +302,11 @@ function HistorialLiquidacionesPage() {
         {/* Columna Derecha */}
         <Grid item xs={12} md={8}>
           <Paper sx={{ p: 3, minHeight: '300px' }}>
-            <DetalleLiquidacion liquidacion={liquidacionSeleccionada} />
+            {/* 10. PASAR consorcioId AL DETALLE */}
+            <DetalleLiquidacion 
+              liquidacion={liquidacionSeleccionada} 
+              consorcioId={consorcioId} 
+            />
           </Paper>
         </Grid>
       </Grid>

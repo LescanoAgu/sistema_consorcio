@@ -3,18 +3,24 @@ import { db } from '../config/firebase';
 import {
   collection, addDoc, serverTimestamp,
   onSnapshot, query, orderBy,
-  getDocs, deleteDoc // <-- Asegurarse que getDocs y deleteDoc estén
+  getDocs, deleteDoc
 } from 'firebase/firestore';
 
 /**
- * Registra un nuevo movimiento en el historial del fondo de reserva.
+ * Registra un nuevo movimiento en el historial del fondo de reserva DE UN CONSORCIO.
+ * @param {string} consorcioId ID del consorcio.
  * @param {string} concepto Descripción (Ej: "Aporte Liq. Nov/25" o "Gasto Bomba de Agua")
  * @param {number} monto Monto del movimiento (Positivo para ingresos, Negativo para egresos)
  * @param {number} saldoResultante El saldo final del fondo después de este movimiento.
  * @param {string|null} liquidacionId ID de la liquidación (si es un aporte)
  * @param {string|null} gastoId ID del gasto (si es un egreso)
  */
-export const registrarMovimientoFondo = async (concepto, monto, saldoResultante, liquidacionId = null, gastoId = null, facturaURL = null) => {
+export const registrarMovimientoFondo = async (consorcioId, concepto, monto, saldoResultante, liquidacionId = null, gastoId = null, facturaURL = null) => {
+  if (!consorcioId) {
+    console.error("Error: consorcioId es requerido para registrar movimiento de fondo.");
+    return; // No registrar si no hay consorcio
+  }
+  
   try {
     const nuevoMovimiento = {
       fecha: serverTimestamp(),
@@ -25,8 +31,12 @@ export const registrarMovimientoFondo = async (concepto, monto, saldoResultante,
       gastoId,
       facturaURL: facturaURL || null
     };
-    await addDoc(collection(db, "historicoFondoReserva"), nuevoMovimiento);
-    console.log("Movimiento de fondo registrado:", concepto, monto);
+    
+    // RUTA MODIFICADA: apunta a la sub-colección del consorcio
+    const historialCollectionRef = collection(db, `consorcios/${consorcioId}/historicoFondoReserva`);
+    
+    await addDoc(historialCollectionRef, nuevoMovimiento);
+    console.log("Movimiento de fondo registrado en consorcio:", consorcioId, concepto, monto);
   } catch (error) {
     console.error("Error al registrar movimiento de fondo:", error);
     // No lanzamos error para no frenar la liquidación/gasto si esto falla
@@ -34,12 +44,20 @@ export const registrarMovimientoFondo = async (concepto, monto, saldoResultante,
 };
 
 /**
- * Obtiene el historial de movimientos del fondo en tiempo real.
+ * Obtiene el historial de movimientos del fondo (de un consorcio) en tiempo real.
+ * @param {string} consorcioId ID del consorcio.
  * @param {function} callback Función que recibe los movimientos.
  * @returns {function} Función para desuscribirse.
  */
-export const getHistorialFondo = (callback) => {
-  const q = query(collection(db, "historicoFondoReserva"), orderBy("fecha", "desc"));
+export const getHistorialFondo = (consorcioId, callback) => {
+  if (!consorcioId) {
+    callback([], new Error("consorcioId no fue provisto a getHistorialFondo"));
+    return () => {}; // Devuelve una función de desuscripción vacía
+  }
+  
+  // RUTA MODIFICADA
+  const historialCollectionRef = collection(db, `consorcios/${consorcioId}/historicoFondoReserva`);
+  const q = query(historialCollectionRef, orderBy("fecha", "desc"));
 
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
     const movimientos = [];
@@ -60,13 +78,17 @@ export const getHistorialFondo = (callback) => {
   return unsubscribe;
 };
 
-// --- ¡NUEVA FUNCIÓN AÑADIDA! ---
 /**
- * Borra todos los documentos de la colección 'historicoFondoReserva'.
+ * Borra todos los documentos de la colección 'historicoFondoReserva' DE UN CONSORCIO.
+ * @param {string} consorcioId ID del consorcio.
  */
-export const resetearHistorialFondo = async () => {
-  console.warn("Iniciando reseteo del Historial del Fondo de Reserva...");
-  const historialCollection = collection(db, "historicoFondoReserva");
+export const resetearHistorialFondo = async (consorcioId) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para resetear historial.");
+  
+  console.warn(`Iniciando reseteo del Historial del Fondo de Reserva para consorcio ${consorcioId}...`);
+  
+  // RUTA MODIFICADA
+  const historialCollection = collection(db, `consorcios/${consorcioId}/historicoFondoReserva`);
   const historialSnapshot = await getDocs(historialCollection);
   let contadorBorrados = 0;
   let contadorErrores = 0;

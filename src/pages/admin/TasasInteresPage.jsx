@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getTasaMoraProlongada, setTasaMoraProlongada } from '../../services/propietariosService';
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 
 import {
   Box, Typography, Paper, TextField, Button, Alert, CircularProgress, Grid
@@ -8,26 +9,46 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import SaveIcon from '@mui/icons-material/Save';
 
 function TasasInteresPage() {
-  const [tasaActual, setTasaActual] = useState(0.07); // Muestra la tasa actual
-  const [tasaInput, setTasaInput] = useState(''); // Valor del input (en porcentaje)
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
+
+  const [tasaActual, setTasaActual] = useState(0.07);
+  const [tasaInput, setTasaInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
   // 1. Cargar tasa actual al inicio
   useEffect(() => {
+    // 3. VALIDAR CONSORCIO
+    if (!consorcioId) {
+      setLoading(false);
+      setTasaActual(0.07); // Valor por defecto si no hay consorcio
+      setTasaInput('7.00');
+      return;
+    }
+    
     setLoading(true);
-    const unsubscribe = getTasaMoraProlongada((tasa) => {
+    
+    // 4. PASAR consorcioId AL SERVICIO
+    const unsubscribe = getTasaMoraProlongada(consorcioId, (tasa) => {
       setTasaActual(tasa);
-      setTasaInput((tasa * 100).toFixed(2)); // Mostrar en porcentaje en el input
+      setTasaInput((tasa * 100).toFixed(2));
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+    
+  }, [consorcioId]); // <-- 5. AGREGAR consorcioId A DEPENDENCIAS
 
   // 2. Manejar el guardado
   const handleSave = async (e) => {
     e.preventDefault();
+    
+    // 6. VALIDAR CONSORCIO ANTES DE GUARDAR
+    if (!consorcioId) {
+      setMessage("Error al guardar: No hay un consorcio seleccionado.");
+      return;
+    }
+    
     setSaving(true);
     setMessage('');
     
@@ -38,7 +59,9 @@ function TasasInteresPage() {
       }
       
       const tasaDecimal = tasaPorcentaje / 100;
-      await setTasaMoraProlongada(tasaDecimal);
+      
+      // 7. PASAR consorcioId AL SERVICIO
+      await setTasaMoraProlongada(consorcioId, tasaDecimal);
       
       setMessage(`Tasa BNA actualizada exitosamente a ${tasaPorcentaje.toFixed(2)}%!`);
     } catch (error) {
@@ -47,6 +70,8 @@ function TasasInteresPage() {
       setSaving(false);
     }
   };
+
+  const formDisabled = loading || saving || !consorcioId;
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -59,7 +84,10 @@ function TasasInteresPage() {
           Tasa BNA (Mora Prolongada) <AttachMoneyIcon sx={{ ml: 1, color: 'green' }} />
         </Typography>
         
-        {loading ? (
+        {/* 8. Mensaje si no hay consorcio */}
+        {!consorcioId ? (
+           <Alert severity="warning">Seleccione un consorcio para configurar las tasas.</Alert>
+        ) : loading ? (
           <CircularProgress />
         ) : (
           <>
@@ -82,7 +110,7 @@ function TasasInteresPage() {
                         inputProps: { step: '0.01', min: '0', max: '100' },
                         endAdornment: '%' 
                     }}
-                    disabled={saving}
+                    disabled={formDisabled}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -91,7 +119,7 @@ function TasasInteresPage() {
                     variant="contained"
                     color="primary"
                     fullWidth
-                    disabled={saving}
+                    disabled={formDisabled}
                     startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
                   >
                     Guardar Tasa BNA

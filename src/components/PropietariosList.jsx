@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { getUnidades } from '../services/propietariosService';
 import { Link as RouterLink } from 'react-router-dom';
 import { naturalSort } from '../utils/helpers';
+import { useConsorcio } from '../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 
 // --- IMPORTACIONES DE MUI ---
 import {
@@ -13,22 +14,33 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 // --- FIN IMPORTACIONES MUI ---
 
   function PropietariosList() {
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
   const [unidades, setUnidades] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = getUnidades((unidadesNuevas, err) => {
+    // 3. VALIDAR QUE HAYA UN CONSORCIO
+    if (!consorcioId) {
+      setLoading(false);
+      setUnidades([]); // Limpiar unidades si no hay consorcio
+      return;
+    }
+    
+    setLoading(true);
+    
+    // 4. PASAR EL consorcioId AL SERVICIO
+    const unsubscribe = getUnidades(consorcioId, (unidadesNuevas, err) => {
         if (err) {
             console.error("Error al obtener unidades:", err);
         } else {
-             // <-- Usar naturalSort -->
              unidadesNuevas.sort((a, b) => naturalSort(a.nombre, b.nombre));
              setUnidades(unidadesNuevas);
         }
         setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+    
+  }, [consorcioId]); // <-- 5. AGREGAR consorcioId A LAS DEPENDENCIAS
 
   const formatCurrency = (value) => {
     if (typeof value !== 'number' || isNaN(value)) return 'N/A';
@@ -48,6 +60,17 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
       </Paper>
     );
   }
+  
+  // 6. Mensaje si no hay consorcio seleccionado
+  if (!consorcioId) {
+     return (
+      <Paper sx={{ p: 3, textAlign: 'center', mt: 4 }}>
+        <Typography variant="h6" color="text.secondary">
+          Por favor, seleccione un consorcio desde el menú superior para ver las unidades.
+        </Typography>
+      </Paper>
+    );
+  }
 
   return (
     <Paper sx={{ p: 3, mt: 4 }}>
@@ -55,7 +78,6 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
         Unidades Cargadas
       </Typography>
       <TableContainer>
-        {/* SIN ESPACIOS ENTRE ESTAS ETIQUETAS */}
         <Table sx={{ minWidth: 650 }} aria-label="tabla de unidades">
           <TableHead sx={{ '& th': { fontWeight: 'bold' } }}>
             <TableRow>
@@ -67,31 +89,40 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
             </TableRow>
           </TableHead>
           <TableBody>
-            {unidades.map((unidad) => (
-              <TableRow
-                key={unidad.id}
-                sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-              >
-                <TableCell component="th" scope="row">{unidad.nombre}</TableCell>
-                <TableCell>{unidad.propietario}</TableCell>
-                <TableCell align="right">{formatPercent(unidad.porcentaje)}</TableCell>
-                <TableCell align="right" sx={{ color: unidad.saldo < 0 ? 'error.main' : 'inherit', fontWeight: unidad.saldo < 0 ? 'bold' : 'normal' }}> {/* Usar color de tema */}
-                  {formatCurrency(unidad.saldo)}
-                </TableCell>
-                <TableCell align="center">
-                  <Button
-                    component={RouterLink}
-                    to={`/admin/cuenta-corriente/${unidad.id}`}
-                    variant="outlined"
-                    size="small"
-                    startIcon={<AccountBalanceWalletIcon />}
-                    sx={{ minWidth: 'auto', px: 1 }} // Más compacto
+            {/* 7. Mensaje si no hay unidades en este consorcio */}
+            {unidades.length === 0 ? (
+                 <TableRow>
+                   <TableCell colSpan={5} align="center">
+                     No hay unidades cargadas para este consorcio.
+                   </TableCell>
+                 </TableRow>
+            ) : (
+                unidades.map((unidad) => (
+                  <TableRow
+                    key={unidad.id}
+                    sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                   >
-                    Cta. Cte.
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+                    <TableCell component="th" scope="row">{unidad.nombre}</TableCell>
+                    <TableCell>{unidad.propietario}</TableCell>
+                    <TableCell align="right">{formatPercent(unidad.porcentaje)}</TableCell>
+                    <TableCell align="right" sx={{ color: unidad.saldo < 0 ? 'error.main' : 'inherit', fontWeight: unidad.saldo < 0 ? 'bold' : 'normal' }}>
+                      {formatCurrency(unidad.saldo)}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Button
+                        component={RouterLink}
+                        to={`/admin/cuenta-corriente/${unidad.id}`}
+                        variant="outlined"
+                        size="small"
+                        startIcon={<AccountBalanceWalletIcon />}
+                        sx={{ minWidth: 'auto', px: 1 }}
+                      >
+                        Cta. Cte.
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+            )}
           </TableBody>
         </Table>
       </TableContainer>

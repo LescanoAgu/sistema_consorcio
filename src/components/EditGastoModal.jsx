@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { updateGasto } from '../services/gastosService';
+import { useConsorcio } from '../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 
 // --- IMPORTACIONES DE MUI ---
 import { Box, Button, TextField, Typography, Grid, Modal, Paper, Alert, CircularProgress } from '@mui/material';
@@ -25,6 +26,8 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER ID
+
   useEffect(() => {
     if (gastoToEdit) {
       setFecha(gastoToEdit.fecha || '');
@@ -44,7 +47,13 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
       if (!gastoToEdit || !gastoToEdit.id) {
           throw new Error("No se ha seleccionado un gasto para editar.");
       }
-      await updateGasto(gastoToEdit.id, { fecha, concepto, proveedor, monto });
+      if (!consorcioId) { // <-- 3. VALIDAR ID
+           throw new Error("No hay un consorcio activo seleccionado.");
+      }
+      
+      // 4. PASAR ID AL SERVICIO
+      await updateGasto(consorcioId, gastoToEdit.id, { fecha, concepto, proveedor, monto });
+      
       setMessage('¡Gasto actualizado exitosamente!');
       setTimeout(() => {
         onClose();
@@ -71,9 +80,8 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
           Editar Gasto
         </Typography>
         <Box component="form" onSubmit={handleSubmit}>
-          {/* Usamos Grid v2: Las props xs/sm van directamente en los <Grid> hijos */}
           <Grid container spacing={2}>
-            <Grid xs={12} sm={4}> {/* <- xs/sm aquí */}
+            <Grid xs={12} sm={4}>
               <TextField
                 label="Fecha"
                 type="date"
@@ -85,7 +93,7 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
                 required
               />
             </Grid>
-            <Grid xs={12} sm={8}> {/* <- xs/sm aquí */}
+            <Grid xs={12} sm={8}>
               <TextField
                 label="Concepto"
                 fullWidth
@@ -95,7 +103,7 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
                 required
               />
             </Grid>
-            <Grid xs={12} sm={8}> {/* <- xs/sm aquí */}
+            <Grid xs={12} sm={8}>
               <TextField
                 label="Proveedor"
                 fullWidth
@@ -104,7 +112,7 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
                 onChange={(e) => setProveedor(e.target.value)}
               />
             </Grid>
-            <Grid xs={12} sm={4}> {/* <- xs/sm aquí */}
+            <Grid xs={12} sm={4}>
               <TextField
                 label="Monto"
                 type="number"
@@ -115,17 +123,17 @@ function EditGastoModal({ open, onClose, gastoToEdit }) {
                 required
               />
             </Grid>
-            <Grid xs={12}> {/* <- xs aquí */}
+            <Grid xs={12}>
               <Typography variant="caption" color="textSecondary">
                 La edición no permite cambiar el archivo PDF adjunto.
               </Typography>
             </Grid>
-            <Grid xs={12} sm={6}> {/* <- xs/sm aquí */}
+            <Grid xs={12} sm={6}>
                <Button onClick={onClose} fullWidth variant="outlined">
                  Cancelar
                </Button>
             </Grid>
-            <Grid xs={12} sm={6}> {/* <- xs/sm aquí */}
+            <Grid xs={12} sm={6}>
               <Button
                 type="submit"
                 variant="contained"

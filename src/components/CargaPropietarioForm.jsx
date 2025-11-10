@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { crearUnidad } from '../services/propietariosService';
+import { useConsorcio } from '../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 
 function CargaPropietarioForm() {
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
+  
   const [nombre, setNombre] = useState('');
   const [propietario, setPropietario] = useState('');
   const [porcentaje, setPorcentaje] = useState('');
@@ -14,15 +17,21 @@ function CargaPropietarioForm() {
     setLoading(true);
     setMessage('');
 
+    // 3. VALIDAR QUE HAYA UN CONSORCIO
+    if (!consorcioId) {
+      setMessage('Error: No hay un consorcio activo seleccionado.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      // El porcentaje de tu planilla (0.1188...) es un decimal.
-      // Lo convertimos a número antes de enviarlo.
       const porcentajeNum = parseFloat(porcentaje.replace(',', '.'));
       if (isNaN(porcentajeNum)) {
         throw new Error('El porcentaje debe ser un número válido.');
       }
 
-      await crearUnidad({ nombre, propietario, porcentaje: porcentajeNum });
+      // 4. PASAR EL consorcioId AL SERVICIO
+      await crearUnidad(consorcioId, { nombre, propietario, porcentaje: porcentajeNum });
       
       setMessage('¡Unidad cargada exitosamente!');
       setNombre('');
@@ -35,6 +44,9 @@ function CargaPropietarioForm() {
       setLoading(false);
     }
   };
+
+  // 5. Deshabilitar formulario si no hay consorcio
+  const formDisabled = loading || !consorcioId;
 
   return (
     <div style={{ padding: '20px', border: '1px solid #ddd', borderRadius: '8px' }}>
@@ -50,6 +62,7 @@ function CargaPropietarioForm() {
               onChange={(e) => setNombre(e.target.value)}
               style={{ width: '100%', padding: '8px' }}
               required
+              disabled={formDisabled}
             />
           </div>
           <div style={{ flex: 2 }}>
@@ -61,26 +74,28 @@ function CargaPropietarioForm() {
               onChange={(e) => setPropietario(e.target.value)}
               style={{ width: '100%', padding: '8px' }}
               required
+              disabled={formDisabled}
             />
           </div>
           <div style={{ flex: 1 }}>
             <label>Porcentaje (%)</label>
             <input
               type="number"
-              // Usamos alta precisión para los decimales
               step="0.000000000000001" 
               placeholder="Ej: 0.11883"
               value={porcentaje}
               onChange={(e) => setPorcentaje(e.target.value)}
               style={{ width: '100%', padding: '8px' }}
               required
+              disabled={formDisabled}
             />
           </div>
         </div>
         
-        <button type="submit" disabled={loading} style={{ padding: '10px 20px' }}>
+        <button type="submit" disabled={formDisabled} style={{ padding: '10px 20px' }}>
           {loading ? 'Cargando...' : 'Guardar Unidad'}
         </button>
+        {!consorcioId && <p style={{ color: 'red' }}>Por favor, seleccione un consorcio para continuar.</p>}
         {message && <p style={{ color: message.startsWith('Error') ? 'red' : 'green' }}>{message}</p>}
       </form>
     </div>

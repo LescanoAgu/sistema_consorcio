@@ -1,24 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, Link as RouterLink } from 'react-router-dom';
 import { getCuentaCorriente, eliminarMovimientoDebito } from '../../services/propietariosService';
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 import { generarPDFEstadoDeuda } from '../../utils/pdfGenerator';
 import { saveAs } from 'file-saver';
-import GestionMoraModal from '../../components/GestionMoraModal'; // <-- IMPORTAMOS EL NUEVO MODAL
+import GestionMoraModal from '../../components/GestionMoraModal';
 
 // --- IMPORTACIONES DE MUI ---
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, Link,
   TableContainer, TableHead, TableRow, CircularProgress, Alert, Button,
-  IconButton, Tooltip // <-- Para los botones de acción
+  IconButton, Tooltip
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'; // Icono para "Aplicar Interés"
-import DeleteIcon from '@mui/icons-material/Delete'; // Icono para "Eliminar"
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import DeleteIcon from '@mui/icons-material/Delete';
 // --- FIN IMPORTACIONES MUI ---
 
 function CuentaCorrientePage() {
   const { unidadId } = useParams();
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
 
   const [unidad, setUnidad] = useState(null);
   const [movimientos, setMovimientos] = useState([]);
@@ -26,20 +28,21 @@ function CuentaCorrientePage() {
   const [error, setError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
   
-  // --- Estados para el Modal ---
   const [modalOpen, setModalOpen] = useState(false);
-  const [mesOrigenSeleccionado, setMesOrigenSeleccionado] = useState(null); // <-- Ahora guardamos el MES
+  const [mesOrigenSeleccionado, setMesOrigenSeleccionado] = useState(null);
 
   useEffect(() => {
-    if (!unidadId) {
-      setError("No se especificó un ID de unidad.");
+    // 3. VALIDAR AMBOS IDs
+    if (!consorcioId || !unidadId) {
+      setError("No se especificó un consorcio o ID de unidad.");
       setLoading(false);
       return;
     }
     setLoading(true);
     setError('');
 
-    const unsubscribe = getCuentaCorriente(unidadId, (data, err) => {
+    // 4. PASAR consorcioId AL SERVICIO
+    const unsubscribe = getCuentaCorriente(consorcioId, unidadId, (data, err) => {
       if (err) {
         setError(err.message || 'Error al cargar la cuenta corriente.');
         setUnidad(null);
@@ -52,54 +55,39 @@ function CuentaCorrientePage() {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [unidadId]); 
+    
+  }, [consorcioId, unidadId]); // <-- 5. AGREGAR consorcioId A DEPENDENCIAS
 
-  // --- Agrupamos movimientos para la tabla (Tu Punto 3) ---
+  // ... (useMemo de movimientosAgrupados no cambia) ...
   const movimientosAgrupados = useMemo(() => {
-    const grupos = {}; // { "2025-02": [movBase, movInteres1, movInteres2] }
+    const grupos = {};
     const pagosYAntiguos = [];
-
     movimientos.forEach(mov => {
-      // Si es un débito CON mes_origen (Base o Interés)
       if (mov.monto < 0 && mov.mes_origen) {
         if (!grupos[mov.mes_origen]) grupos[mov.mes_origen] = [];
-        
-        // --- INICIO DE LA CORRECCIÓN ---
-        grupos[mov.mes_origen].push(mov); // <-- ANTES: grupos[mov.mes_origen][mov.mes_origen].push(mov);
-        // --- FIN DE LA CORRECCIÓN ---
-
+        grupos[mov.mes_origen].push(mov);
       } 
-      // Si es un Pago o Deuda Antigua (sin mes_origen)
       else {
         pagosYAntiguos.push(mov);
       }
     });
-
-    // Ordenamos los items dentro de cada grupo por fecha
     Object.values(grupos).forEach(grupo => {
       grupo.sort((a, b) => a.fecha - b.fecha);
     });
-
-    // Creamos la lista final: primero los items agrupados, luego el resto
-    // Y ordenamos todo por la fecha del primer movimiento del grupo o la fecha del item
     const itemsFinales = [
-      ...Object.values(grupos), // Array de arrays
-      ...pagosYAntiguos // Array de items
+      ...Object.values(grupos),
+      ...pagosYAntiguos
     ];
-
     return itemsFinales.sort((a, b) => {
-      const fechaA = Array.isArray(a) ? (a[0] ? a[0].fecha : 0) : a.fecha; // Añadimos chequeo por si el grupo está vacío
+      const fechaA = Array.isArray(a) ? (a[0] ? a[0].fecha : 0) : a.fecha;
       const fechaB = Array.isArray(b) ? (b[0] ? b[0].fecha : 0) : b.fecha;
       return fechaA - fechaB;
     });
-
   }, [movimientos]);
-
   
   // --- Handlers para Acciones ---
 
   const handleOpenModal = (mesOrigen) => {
-    // Si la deuda es antigua y no tiene mes_origen, usamos 'Historico'
     setMesOrigenSeleccionado(mesOrigen || 'Historico');
     setModalOpen(true);
   };
@@ -107,17 +95,21 @@ function CuentaCorrientePage() {
   const handleCloseModal = () => {
     setMesOrigenSeleccionado(null);
     setModalOpen(false);
-    // No necesitamos recargar datos, el listener de 'getCuentaCorriente' lo hará automáticamente
   };
 
   const handleDeleteMovimiento = async (movimiento) => {
+    if (!consorcioId) { // Validar consorcio
+      setError("Error: No hay consorcio seleccionado.");
+      return;
+    }
     if (!window.confirm(`¿Está seguro de eliminar el movimiento "${movimiento.concepto}" por ${formatCurrency(movimiento.monto)}?\n\nEsta acción NO se puede deshacer y afectará el saldo.`)) {
       return;
     }
-    setLoading(true); // Usamos el loading principal
+    setLoading(true);
     setError('');
     try {
-      await eliminarMovimientoDebito(unidadId, movimiento.id);
+      // 6. PASAR consorcioId AL SERVICIO
+      await eliminarMovimientoDebito(consorcioId, unidadId, movimiento.id);
     } catch (error) {
       setError(error.message);
     } finally {
@@ -126,18 +118,15 @@ function CuentaCorrientePage() {
   };
 
   const handleGenerarPDFDeuda = async () => {
+    // ... (esta función no necesita consorcioId, ya tiene los datos) ...
     if (!unidad || !movimientos) {
       setError("No se pueden generar el PDF sin datos.");
       return;
     }
     setPdfLoading(true);
     setError(''); 
-
     try {
-      const pdfBlob = await generarPDFEstadoDeuda(
-        unidad,
-        movimientos // Le pasamos los movimientos reales
-      );
+      const pdfBlob = await generarPDFEstadoDeuda(unidad, movimientos);
       const safeNombre = unidad.nombre.replace(/ /g, '_');
       saveAs(pdfBlob, `EstadoDeuda_${safeNombre}_${new Date().toISOString().split('T')[0]}.pdf`);
     } catch (err) {
@@ -173,19 +162,15 @@ function CuentaCorrientePage() {
     return <Alert severity="warning">No se encontró la unidad especificada.</Alert>;
   }
 
-  // --- Render de Fila (Helper) ---
+  // ... (renderRow helper no cambia) ...
   const renderRow = (mov, isGroupChild = false) => {
     const esBase = mov.tipo && mov.tipo.includes('_BASE');
     const esInteres = mov.tipo === 'INTERES_10' || mov.tipo === 'INTERES_BNA';
     const esPago = mov.tipo === 'PAGO_RECIBIDO';
-    const esAntiguo = !mov.tipo && mov.monto < 0; // Deuda antigua
-
-    // Estilo para indentar intereses (hijos del grupo)
+    const esAntiguo = !mov.tipo && mov.monto < 0;
     const cellStyle = isGroupChild ? { pl: 4, fontStyle: 'italic', color: '#555' } : {};
     const rowStyle = esPago ? '#f0fff0' : (esBase || esAntiguo ? '#fff0f0' : (esInteres ? '#fff9e6' : 'inherit'));
-
     const puedeBorrar = (esInteres || (esAntiguo && !mov.pagado)) && (mov.montoAplicado || 0) === 0;
-
     return (
       <TableRow
         key={mov.id}
@@ -203,7 +188,6 @@ function CuentaCorrientePage() {
           {formatCurrency(mov.saldoResultante)}
         </TableCell>
         <TableCell align="center">
-          {/* 1. Botón Aplicar Interés (solo a deudas base o antiguas) */}
           {(esBase || esAntiguo) && !isGroupChild && !mov.pagado && (
             <Tooltip title={`Gestionar Mora de ${mov.mes_origen || 'Historico'}`}>
               <IconButton onClick={() => handleOpenModal(mov.mes_origen || 'Historico')} size="small" color="primary" disabled={loading}>
@@ -211,7 +195,6 @@ function CuentaCorrientePage() {
               </IconButton>
             </Tooltip>
           )}
-          {/* 2. Botón Eliminar (solo a intereses no pagados o deudas antiguas) */}
           {puedeBorrar && (
             <Tooltip title="Eliminar Movimiento Manual">
               <IconButton onClick={() => handleDeleteMovimiento(mov)} size="small" color="error" disabled={loading}>
@@ -219,7 +202,6 @@ function CuentaCorrientePage() {
               </IconButton>
             </Tooltip>
           )}
-          {/* 3. Cupón PDF */}
           {mov.cuponURL && (
             <Tooltip title="Ver Cupón PDF">
               <IconButton href={mov.cuponURL} target="_blank" rel="noopener noreferrer" size="small" disabled={loading}>
@@ -232,9 +214,10 @@ function CuentaCorrientePage() {
     );
   };
 
+
   return (
     <Box sx={{ width: '100%' }}>
-      {/* --- TÍTULO CON BOTÓN PDF --- */}
+      {/* ... (Título y Datos de Unidad no cambian) ... */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
         <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
           Cuenta Corriente
@@ -250,8 +233,6 @@ function CuentaCorrientePage() {
           {pdfLoading ? 'Generando...' : 'Informe de Deuda'}
         </Button>
       </Box>
-
-      {/* Datos de la Unidad */}
       <Paper sx={{ p: 2, mb: 3, backgroundColor: '#f0f0f0' }}>
         <Typography variant="h6">{unidad.nombre}</Typography>
         <Typography variant="body1">Propietario: {unidad.propietario}</Typography>
@@ -260,7 +241,7 @@ function CuentaCorrientePage() {
         </Typography>
       </Paper>
 
-      {/* Tabla de Movimientos */}
+      {/* ... (Tabla de Movimientos no cambia) ... */}
       <Paper sx={{ p: 2 }}>
         <Typography variant="h6" gutterBottom>Historial de Movimientos</Typography>
         <TableContainer>
@@ -284,15 +265,11 @@ function CuentaCorrientePage() {
                 </TableRow>
               ) : (
                 movimientosAgrupados.map((item) => {
-                  // Si es un grupo de movimientos (Base + Intereses)
                   if (Array.isArray(item)) {
                     return item.map((mov, index) => {
-                      // El primer item (index 0) es el padre (Base)
-                      // Los siguientes (index > 0) son los hijos (Intereses)
                       return renderRow(mov, index > 0);
                     });
                   }
-                  // Si es un item suelto (Pago o Deuda Antigua)
                   else {
                     return renderRow(item, false);
                   }
@@ -303,13 +280,14 @@ function CuentaCorrientePage() {
         </TableContainer>
       </Paper>
 
-      {/* El Modal para aplicar interés */}
+      {/* 7. PASAR consorcioId AL MODAL */}
       <GestionMoraModal
         open={modalOpen}
         onClose={handleCloseModal}
+        consorcioId={consorcioId} 
         unidadId={unidadId}
         mesOrigen={mesOrigenSeleccionado}
-        todosMovimientos={movimientos} // Pasamos todos los movimientos al modal
+        todosMovimientos={movimientos}
       />
     </Box>
   );

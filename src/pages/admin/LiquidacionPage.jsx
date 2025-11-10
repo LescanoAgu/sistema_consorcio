@@ -7,12 +7,13 @@ import {
   guardarURLCupon
 } from '../../services/liquidacionService';
 import { generarPDFLiquidacion } from '../../utils/pdfGenerator';
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 import {
   Box, Button, TextField, Typography, Paper, Alert,
   CircularProgress, Grid, Divider
 } from '@mui/material';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../config/firebase'; // <-- ¡RUTA CORREGIDA!
+import { db } from '../../config/firebase';
 
 const formatCurrency = (value) => {
     if (typeof value !== 'number' || isNaN(value)) return 'N/A';
@@ -20,13 +21,15 @@ const formatCurrency = (value) => {
   };
 
 function LiquidacionPage() {
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
+  
   // --- Estados del Formulario ---
   const [nombre, setNombre] = useState('');
   const [pctFondo, setPctFondo] = useState('3');
   const [fechaVenc1, setFechaVenc1] = useState('');
   const [pctRecargo, setPctRecargo] = useState('10');
   const [fechaVenc2, setFechaVenc2] = useState('');
-  const [comentarios, setComentarios] = useState(''); // Para el PDF
+  const [comentarios, setComentarios] = useState('');
 
   // --- Estados de la App ---
   const [loading, setLoading] = useState(false);
@@ -40,13 +43,22 @@ function LiquidacionPage() {
     setError('');
     setPreviewError('');
     setPreview(null);
+    
+    // 3. VALIDAR CONSORCIO
+    if (!consorcioId) {
+        setError("Error: No hay un consorcio activo seleccionado.");
+        setLoading(false);
+        return;
+    }
 
     try {
       const porcentajeFondo = parseFloat(pctFondo) / 100;
       if (isNaN(porcentajeFondo)) {
         throw new Error("El % de Fondo de Reserva es inválido.");
       }
-      const previewData = await calcularPreviewLiquidacion(porcentajeFondo);
+      
+      // 4. PASAR consorcioId AL SERVICIO
+      const previewData = await calcularPreviewLiquidacion(consorcioId, porcentajeFondo);
       setPreview(previewData);
 
       if (previewData.errorFondo) {
@@ -61,6 +73,11 @@ function LiquidacionPage() {
   };
 
   const handleEjecutar = async () => {
+    // 5. VALIDAR CONSORCIO
+    if (!consorcioId) {
+      setError("Error: No hay un consorcio activo seleccionado.");
+      return;
+    }
     if (!preview) {
       setError("Primero debes calcular la previsualización.");
       return;
@@ -90,13 +107,12 @@ function LiquidacionPage() {
         comentarios: comentarios 
       };
 
-      // 1. Ejecutar transacción
+      // 6. PASAR consorcioId AL SERVICIO
       const { liquidacionId, unidades, itemsCtaCteGenerados, detalleUnidades } =
-        await ejecutarLiquidacion(params, preview);
+        await ejecutarLiquidacion(consorcioId, params, preview);
       
       liquidacionIdParaCatch = liquidacionId; 
 
-      // 2. Preparar datos para PDFs
       const gastosParaPDF = preview.gastosIncluidos || [];
       const liquidacionData = {
         nombre: nombre,
@@ -112,29 +128,29 @@ function LiquidacionPage() {
 
         if (itemCtaCte && itemCtaCte.id) {
           
-          // A. Generar el PDF (¡AHORA ES ASÍNCRONO!)
+          // 7. PASAR consorcioId a los helpers de PDF y Storage
           const pdfBlob = await generarPDFLiquidacion(
+            consorcioId, // <-- ID pasado aquí
             unidad,
             liquidacionData,
             gastosParaPDF,
             itemCtaCte
           );
 
-          // B. Subir el Blob
           const downloadURL = await uploadCuponPDF(
+            consorcioId, // <-- ID pasado aquí
             pdfBlob,
             nombre, 
             unidad.nombre 
           );
 
-          // C. Guardar la URL en Cta. Cte.
           await guardarURLCupon(
+            consorcioId, // <-- ID pasado aquí
             unidad.id,
             itemCtaCte.id,
             downloadURL
           );
 
-          // D. Actualizar snapshot local con URL
           const detalle = detalleUnidades.find(d => d.unidadId === unidad.id);
           if (detalle) {
             detalle.cuponURL = downloadURL;
@@ -145,16 +161,15 @@ function LiquidacionPage() {
         }
       }
 
-      // 3. Actualizar Doc Liquidación
+      // 8. Actualizar Doc Liquidación (con ruta correcta)
       console.log("Guardando snapshot final con URLs...");
-      const liquidacionDocRef = doc(db, "liquidaciones", liquidacionId);
+      const liquidacionDocRef = doc(db, `consorcios/${consorcioId}/liquidaciones`, liquidacionId);
       await updateDoc(liquidacionDocRef, {
         detalleUnidades: detalleUnidades,
-        comentarios: comentarios 
+        comentarios: comentarios
       });
       console.log("Snapshot final guardado.");
 
-      // 4. Limpiar formulario
       alert(`¡Proceso completado! Se generaron y subieron ${contador} cupones PDF.`);
       setPreview(null);
       setNombre('');
@@ -170,6 +185,9 @@ function LiquidacionPage() {
       setLoading(false); 
     }
   }; 
+  
+  // 9. Deshabilitar formulario si no hay consorcio
+  const formDisabled = loading || !consorcioId;
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -181,49 +199,55 @@ function LiquidacionPage() {
         <Typography variant="h6" gutterBottom>
           1. Parámetros del Período
         </Typography>
-        <Box component="form" onSubmit={handlePreview}>
-          <Grid container spacing={3}>
-            {/* Fila 1 */}
-            <Grid item xs={12} sm={8}>
-              <TextField label="Nombre Período" value={nombre} onChange={(e) => setNombre(e.target.value)} fullWidth required />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="% Fondo Reserva (s/Ord.)" type="number" value={pctFondo} onChange={(e) => setPctFondo(e.target.value)} fullWidth required InputProps={{ inputProps: { step: '0.1' } }} />
-            </Grid>
-            {/* Fila 2 */}
-            <Grid item xs={12} sm={4}>
-              <TextField label="Fecha 1er Vencimiento" type="date" value={fechaVenc1} onChange={(e) => setFechaVenc1(e.target.value)} fullWidth required InputLabelProps={{ shrink: true }} />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="% Recargo 2do Venc." type="number" value={pctRecargo} onChange={(e) => setPctRecargo(e.target.value)} fullWidth required InputProps={{ inputProps: { step: '0.1' } }} />
-            </Grid>
-            <Grid item xs={12} sm={4}>
-              <TextField label="Fecha 2do Vencimiento" type="date" value={fechaVenc2} onChange={(e) => setFechaVenc2(e.target.value)} fullWidth required InputLabelProps={{ shrink: true }} />
-            </Grid>
-
-            {/* Campo de Comentarios */}
-            <Grid item xs={12}>
-              <TextField
-                label="Comentarios para el Cupón de Pago (Opcional)"
-                placeholder="Ej: Medios de pago: CBU 1: XXXX - CBU 2: YYYY - Alias: ZZZZ"
-                multiline
-                rows={3}
-                fullWidth
-                value={comentarios}
-                onChange={(e) => setComentarios(e.target.value)}
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <Button type="submit" variant="contained" disabled={loading} fullWidth size="large">
-                {loading ? <CircularProgress size={24} /> : '1. Calcular Previsualización'}
-              </Button>
-            </Grid>
-          </Grid>
-        </Box>
+        
+        {!consorcioId ? (
+            <Alert severity="warning">Seleccione un consorcio para generar liquidaciones.</Alert>
+        ) : (
+            <Box component="form" onSubmit={handlePreview}>
+              <Grid container spacing={3}>
+                {/* Fila 1 */}
+                <Grid item xs={12} sm={8}>
+                  <TextField label="Nombre Período" value={nombre} onChange={(e) => setNombre(e.target.value)} fullWidth required disabled={formDisabled} />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField label="% Fondo Reserva (s/Ord.)" type="number" value={pctFondo} onChange={(e) => setPctFondo(e.target.value)} fullWidth required InputProps={{ inputProps: { step: '0.1' } }} disabled={formDisabled} />
+                </Grid>
+                {/* Fila 2 */}
+                <Grid item xs={12} sm={4}>
+                  <TextField label="Fecha 1er Vencimiento" type="date" value={fechaVenc1} onChange={(e) => setFechaVenc1(e.target.value)} fullWidth required InputLabelProps={{ shrink: true }} disabled={formDisabled} />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField label="% Recargo 2do Venc." type="number" value={pctRecargo} onChange={(e) => setPctRecargo(e.target.value)} fullWidth required InputProps={{ inputProps: { step: '0.1' } }} disabled={formDisabled} />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField label="Fecha 2do Vencimiento" type="date" value={fechaVenc2} onChange={(e) => setFechaVenc2(e.target.value)} fullWidth required InputLabelProps={{ shrink: true }} disabled={formDisabled} />
+                </Grid>
+    
+                {/* Campo de Comentarios */}
+                <Grid item xs={12}>
+                  <TextField
+                    label="Comentarios para el Cupón de Pago (Opcional)"
+                    placeholder="Ej: Medios de pago: CBU 1: XXXX - CBU 2: YYYY - Alias: ZZZZ"
+                    multiline
+                    rows={3}
+                    fullWidth
+                    value={comentarios}
+                    onChange={(e) => setComentarios(e.target.value)}
+                    disabled={formDisabled}
+                  />
+                </Grid>
+    
+                <Grid item xs={12}>
+                  <Button type="submit" variant="contained" disabled={formDisabled} fullWidth size="large">
+                    {loading ? <CircularProgress size={24} /> : '1. Calcular Previsualización'}
+                  </Button>
+                </Grid>
+              </Grid>
+            </Box>
+        )}
       </Paper>
 
-      {/* Zona de Error y Previsualización */}
+      {/* ... (Zona de Error y Previsualización no cambia su lógica interna) ... */}
       {error && (
           <Alert severity={loading ? "info" : "error"} sx={{ mt: 2 }}> 
              {error}
@@ -271,7 +295,7 @@ function LiquidacionPage() {
 
           <Button 
             onClick={handleEjecutar} 
-            disabled={loading || !nombre || !fechaVenc1 || !fechaVenc2} 
+            disabled={formDisabled || !nombre || !fechaVenc1 || !fechaVenc2} // Deshabilitado si el form lo está
             variant="contained" 
             color="success" 
             fullWidth 
@@ -285,12 +309,11 @@ function LiquidacionPage() {
   );
 } 
 
-// --- Componente helper para las filas de totales ---
+// ... (Componente TotalRow no cambia) ...
 const TotalRow = ({ label, value, isTotal = false, small = false, color = "text.primary" }) => {
   const formattedValue = typeof value === 'number' ? formatCurrency(value) : (value || formatCurrency(0));
   const variant = isTotal ? "subtitle1" : (small ? "body2" : "body1");
   const fontWeight = isTotal ? 'bold' : 'normal';
-
   return (
     <Box sx={{ display: 'flex', justifyContent: 'space-between', my: 0.5 }}>
       <Typography variant={variant} fontWeight={fontWeight} sx={{ color: color }}>

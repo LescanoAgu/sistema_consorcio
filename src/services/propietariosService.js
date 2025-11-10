@@ -6,10 +6,12 @@ import {
   runTransaction, doc, Timestamp, where,
   updateDoc, deleteDoc, setDoc
 } from 'firebase/firestore';
-import { registrarMovimientoFondo } from './fondoService';
+import { registrarMovimientoFondo } from './fondoService'; // Importamos el servicio ya refactorizado
 
-// --- crearUnidad (Sin cambios) ---
-export const crearUnidad = async (unidadData) => {
+// --- crearUnidad ---
+export const crearUnidad = async (consorcioId, unidadData) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para crear unidad.");
+  
   const { nombre, propietario, porcentaje } = unidadData;
   const nuevaUnidad = {
     nombre,
@@ -19,8 +21,11 @@ export const crearUnidad = async (unidadData) => {
     createdAt: serverTimestamp()
   };
   try {
-    const docRef = await addDoc(collection(db, "unidades"), nuevaUnidad);
-    console.log("Unidad registrada con ID: ", docRef.id);
+    // RUTA MODIFICADA
+    const unidadesCollectionRef = collection(db, `consorcios/${consorcioId}/unidades`);
+    const docRef = await addDoc(unidadesCollectionRef, nuevaUnidad);
+    
+    console.log("Unidad registrada con ID: ", docRef.id, "en consorcio:", consorcioId);
     return docRef;
   } catch (error) {
     console.error("Error al guardar la unidad: ", error);
@@ -28,22 +33,36 @@ export const crearUnidad = async (unidadData) => {
   }
 };
 
-// --- getUnidades (Sin cambios) ---
-export const getUnidades = (callback) => {
-  const q = query(collection(db, "unidades"), orderBy("nombre", "asc"));
+// --- getUnidades ---
+export const getUnidades = (consorcioId, callback) => {
+  if (!consorcioId) {
+    callback([], new Error("consorcioId no fue provisto a getUnidades"));
+    return () => {};
+  }
+  
+  // RUTA MODIFICADA
+  const unidadesCollectionRef = collection(db, `consorcios/${consorcioId}/unidades`);
+  const q = query(unidadesCollectionRef, orderBy("nombre", "asc"));
+  
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
     const unidades = [];
     querySnapshot.forEach((doc) => {
       unidades.push({ id: doc.id, ...doc.data() });
     });
     callback(unidades);
+  }, (error) => {
+      console.error(`Error obteniendo unidades para consorcio ${consorcioId}:`, error);
+      callback([], error);
   });
   return unsubscribe;
 };
 
-// --- getTodasUnidades (Sin cambios) ---
-export const getTodasUnidades = async () => {
-  const q = query(collection(db, "unidades"));
+// --- getTodasUnidades ---
+export const getTodasUnidades = async (consorcioId) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para getTodasUnidades.");
+  
+  // RUTA MODIFICADA
+  const q = query(collection(db, `consorcios/${consorcioId}/unidades`));
   const querySnapshot = await getDocs(q);
   const unidades = [];
   querySnapshot.forEach((doc) => {
@@ -52,17 +71,20 @@ export const getTodasUnidades = async () => {
   return unidades;
 };
 
-// --- registrarPago (Sin cambios) ---
-export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPago) => {
+// --- registrarPago ---
+export const registrarPago = async (consorcioId, unidadId, montoPagado, fechaPago, conceptoPago) => {
+  if (!consorcioId) throw new Error("Se requiere el ID del consorcio.");
   if (!unidadId) throw new Error("Se requiere el ID de la unidad.");
   if (!montoPagado || montoPagado <= 0) throw new Error("El monto pagado debe ser un número positivo.");
   if (!fechaPago) throw new Error("La fecha de pago es obligatoria.");
   if (!conceptoPago || conceptoPago.trim() === '') throw new Error("El concepto del pago es obligatorio.");
 
   const fechaTimestamp = Timestamp.fromDate(new Date(`${fechaPago}T00:00:00Z`));
-  const unidadRef = doc(db, "unidades", unidadId);
-  const configRef = doc(db, "configuracion", "general");
-  const ctaCteCollectionRef = collection(db, `unidades/${unidadId}/cuentaCorriente`);
+  
+  // RUTAS MODIFICADAS
+  const unidadRef = doc(db, `consorcios/${consorcioId}/unidades`, unidadId);
+  const configRef = doc(db, `consorcios/${consorcioId}/configuracion`, "general");
+  const ctaCteCollectionRef = collection(db, `consorcios/${consorcioId}/unidades/${unidadId}/cuentaCorriente`);
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -72,12 +94,12 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
 
       // 1. Leer saldo actual de la unidad
       const unidadDoc = await transaction.get(unidadRef);
-      if (!unidadDoc.exists()) throw new Error(`La unidad con ID ${unidadId} no existe.`);
+      if (!unidadDoc.exists()) throw new Error(`La unidad con ID ${unidadId} no existe en consorcio ${consorcioId}.`);
       const saldoAnteriorUnidad = unidadDoc.data().saldo;
 
       // 2. Buscar deudas pendientes (monto < 0) y no pagadas, ordenadas por fecha
       const deudasQuery = query(
-        ctaCteCollectionRef,
+        ctaCteCollectionRef, // RUTA YA MODIFICADA
         where("monto", "<", 0),
         where("pagado", "==", false),
         orderBy("fecha", "asc")
@@ -127,7 +149,9 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
 
       // 3. Crear el registro del pago (Crédito)
       const saldoResultanteUnidad = saldoAnteriorUnidad + montoPagado;
-      const ctaCtePagoRef = doc(collection(db, `unidades/${unidadId}/cuentaCorriente`));
+      
+      // RUTA MODIFICADA (para el nuevo doc de pago)
+      const ctaCtePagoRef = doc(collection(db, `consorcios/${consorcioId}/unidades/${unidadId}/cuentaCorriente`));
       
       let conceptoFinalPago = conceptoPago;
       if (conceptosDeudasPagadas.length > 0) {
@@ -151,20 +175,25 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
 
       // 5. Actualizar el Fondo de Reserva si recaudamos algo
       if (totalFondoRecaudado > 0) {
-        const configDoc = await transaction.get(configRef);
+        const configDoc = await transaction.get(configRef); // RUTA YA MODIFICADA
         const saldoActualFondo = configDoc.exists() ? (configDoc.data().saldoFondoReserva || 0) : 0;
         const saldoNuevoFondo = saldoActualFondo + totalFondoRecaudado;
 
         transaction.update(configRef, { saldoFondoReserva: saldoNuevoFondo });
 
-        transaction.set(doc(collection(db, "historicoFondoReserva")), {
+        // Preparamos los datos para el servicio de fondo
+        const movimientoFondoData = {
           fecha: fechaTimestamp,
           concepto: `Cobro aporte s/pago ${unidadDoc.data().nombre}`,
           monto: totalFondoRecaudado,
           saldoResultante: saldoNuevoFondo,
           liquidacionId: null,
           gastoId: null
-        });
+        };
+        
+        // RUTA MODIFICADA (para el historial del fondo)
+        const historialFondoRef = doc(collection(db, `consorcios/${consorcioId}/historicoFondoReserva`));
+        transaction.set(historialFondoRef, movimientoFondoData);
       }
     });
 
@@ -175,16 +204,23 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
   }
 };
 
-// --- getCuentaCorriente (Sin cambios) ---
-export const getCuentaCorriente = (unidadId, callback) => {
+// --- getCuentaCorriente ---
+export const getCuentaCorriente = (consorcioId, unidadId, callback) => {
+    if (!consorcioId) {
+        callback(null, new Error("Falta el ID del consorcio."));
+        return () => {};
+    }
     if (!unidadId) {
         callback(null, new Error("Falta el ID de la unidad."));
         return () => {};
     }
+    
     let unidadData = null, movimientosData = null;
     let unsubscribeUnidad = null, unsubscribeMovimientos = null;
 
-    const unidadRef = doc(db, "unidades", unidadId);
+    // RUTA MODIFICADA
+    const unidadRef = doc(db, `consorcios/${consorcioId}/unidades`, unidadId);
+    
     unsubscribeUnidad = onSnapshot(unidadRef, (docSnap) => {
         if (docSnap.exists()) {
             unidadData = { id: docSnap.id, ...docSnap.data() };
@@ -194,8 +230,10 @@ export const getCuentaCorriente = (unidadId, callback) => {
         }
     }, (error) => callback(null, error));
 
-    const ctaCteCollection = collection(db, `unidades/${unidadId}/cuentaCorriente`);
+    // RUTA MODIFICADA
+    const ctaCteCollection = collection(db, `consorcios/${consorcioId}/unidades/${unidadId}/cuentaCorriente`);
     const q = query(ctaCteCollection, orderBy("fecha", "asc"));
+    
     unsubscribeMovimientos = onSnapshot(q, (querySnapshot) => {
         const movimientos = [];
         querySnapshot.forEach((doc) => {
@@ -212,16 +250,22 @@ export const getCuentaCorriente = (unidadId, callback) => {
     };
 };
 
-// --- getSaldoFondoActual (Sin cambios) ---
-export const getSaldoFondoActual = (callback) => {
-  const configRef = doc(db, "configuracion", "general");
+// --- getSaldoFondoActual ---
+export const getSaldoFondoActual = (consorcioId, callback) => {
+  if (!consorcioId) {
+    callback(0, new Error("consorcioId no fue provisto a getSaldoFondoActual"));
+    return () => {};
+  }
+  
+  // RUTA MODIFICADA
+  const configRef = doc(db, `consorcios/${consorcioId}/configuracion`, "general");
 
   const unsubscribe = onSnapshot(configRef, (docSnap) => {
     if (docSnap.exists()) {
       const saldo = docSnap.data().saldoFondoReserva || 0;
       callback(saldo, null);
     } else {
-      console.warn("Documento 'configuracion/general' no encontrado.");
+      console.warn(`Documento 'configuracion/general' no encontrado para consorcio ${consorcioId}.`);
       callback(0, null);
     }
   }, (error) => {
@@ -234,14 +278,23 @@ export const getSaldoFondoActual = (callback) => {
 
 // --- FUNCIONES PARA TASA DE MORA ---
 
-const TASA_MORA_DOC_REF = doc(db, "configuracion", "tasas_mora");
+// RUTA MODIFICADA (constante)
+const getTasaMoraDocRef = (consorcioId) => doc(db, `consorcios/${consorcioId}/configuracion`, "tasas_mora");
 
-export const getTasaMoraProlongada = (callback) => {
+export const getTasaMoraProlongada = (consorcioId, callback) => {
+  if (!consorcioId) {
+    callback(0.07, new Error("consorcioId no fue provisto a getTasaMoraProlongada"));
+    return () => {};
+  }
+  
+  const TASA_MORA_DOC_REF = getTasaMoraDocRef(consorcioId);
+  
   const unsubscribe = onSnapshot(TASA_MORA_DOC_REF, (docSnap) => {
     if (docSnap.exists()) {
       const tasa = docSnap.data().tasaBNA || 0.07;
       callback(tasa);
     } else {
+      // Si no existe, lo creamos para este consorcio
       setDoc(TASA_MORA_DOC_REF, { tasaBNA: 0.07 }, { merge: true });
       callback(0.07);
     }
@@ -253,16 +306,20 @@ export const getTasaMoraProlongada = (callback) => {
   return unsubscribe;
 };
 
-export const setTasaMoraProlongada = async (tasaDecimal) => {
+export const setTasaMoraProlongada = async (consorcioId, tasaDecimal) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para setTasaMoraProlongada.");
   if (typeof tasaDecimal !== 'number' || isNaN(tasaDecimal) || tasaDecimal < 0) {
     throw new Error("La tasa debe ser un número positivo.");
   }
+  
+  const TASA_MORA_DOC_REF = getTasaMoraDocRef(consorcioId);
+
   try {
     await setDoc(TASA_MORA_DOC_REF, { 
       tasaBNA: tasaDecimal, 
       ultimaActualizacion: serverTimestamp() 
     }, { merge: true });
-    console.log("Tasa BNA actualizada a:", tasaDecimal);
+    console.log(`Tasa BNA actualizada a: ${tasaDecimal} para consorcio ${consorcioId}`);
   } catch (error) {
     console.error("Error al establecer tasa BNA:", error);
     throw new Error("No se pudo actualizar la tasa de mora.");
@@ -271,12 +328,8 @@ export const setTasaMoraProlongada = async (tasaDecimal) => {
 
 
 // --- ¡APLICAR INTERÉS MANUAL! ---
-
-/**
- * Aplica un cargo de interés manual a la cta cte de una unidad.
- * Es transaccional.
- */
-export const aplicarInteresManual = async (unidadId, mesOrigen, montoInteres, tipoInteres, conceptoManual, tasaAplicada, parentId = null) => {
+export const aplicarInteresManual = async (consorcioId, unidadId, mesOrigen, montoInteres, tipoInteres, conceptoManual, tasaAplicada, parentId = null) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido.");
   if (!unidadId || !mesOrigen || !montoInteres || !tipoInteres || !conceptoManual) {
     throw new Error("Faltan datos para aplicar el interés.");
   }
@@ -284,9 +337,11 @@ export const aplicarInteresManual = async (unidadId, mesOrigen, montoInteres, ti
     throw new Error("El monto del interés debe ser un número positivo.");
   }
 
-  const unidadRef = doc(db, "unidades", unidadId);
-  const ctaCteRef = doc(collection(db, `unidades/${unidadId}/cuentaCorriente`));
-  const montoDebito = -Math.abs(montoInteres); // El interés es un débito
+  // RUTAS MODIFICADAS
+  const unidadRef = doc(db, `consorcios/${consorcioId}/unidades`, unidadId);
+  const ctaCteRef = doc(collection(db, `consorcios/${consorcioId}/unidades/${unidadId}/cuentaCorriente`));
+  
+  const montoDebito = -Math.abs(montoInteres);
   const mesAplicacion = new Date().toISOString().substring(0, 7); // YYYY-MM
 
   try {
@@ -304,16 +359,13 @@ export const aplicarInteresManual = async (unidadId, mesOrigen, montoInteres, ti
         concepto: conceptoManual,
         monto: montoDebito,
         saldoResultante: saldoResultante,
-        
-        liquidacionId: null, // Es manual
+        liquidacionId: null,
         unidadId: unidadId,
-        
         tipo: tipoInteres,
         mes_origen: mesOrigen,
         mes_aplicacion: mesAplicacion,
         tasa_aplicada: tasaAplicada || null,
-        parentId: parentId, // Vincula al movimiento padre
-        
+        parentId: parentId,
         pagado: false,
         montoAplicado: 0
       };
@@ -325,7 +377,7 @@ export const aplicarInteresManual = async (unidadId, mesOrigen, montoInteres, ti
       transaction.update(unidadRef, { saldo: saldoResultante });
     });
     
-    console.log(`Interés manual registrado para ${unidadId}.`);
+    console.log(`Interés manual registrado para ${unidadId} en consorcio ${consorcioId}.`);
     
   } catch (error) {
     console.error("¡FALLÓ LA TRANSACCIÓN (Interés Manual)! ", error);
@@ -333,17 +385,15 @@ export const aplicarInteresManual = async (unidadId, mesOrigen, montoInteres, ti
   }
 };
 
-/**
- * Elimina un movimiento de débito (interés o base) que no haya sido pagado.
- * Es transaccional.
- */
-export const eliminarMovimientoDebito = async (unidadId, movimientoId) => {
-  if (!unidadId || !movimientoId) {
+// --- eliminarMovimientoDebito ---
+export const eliminarMovimientoDebito = async (consorcioId, unidadId, movimientoId) => {
+  if (!consorcioId || !unidadId || !movimientoId) {
     throw new Error("Faltan IDs para eliminar el movimiento.");
   }
 
-  const unidadRef = doc(db, "unidades", unidadId);
-  const ctaCteRef = doc(db, `unidades/${unidadId}/cuentaCorriente`, movimientoId);
+  // RUTAS MODIFICADAS
+  const unidadRef = doc(db, `consorcios/${consorcioId}/unidades`, unidadId);
+  const ctaCteRef = doc(db, `consorcios/${consorcioId}/unidades/${unidadId}/cuentaCorriente`, movimientoId);
 
   try {
     await runTransaction(db, async (transaction) => {
@@ -353,32 +403,29 @@ export const eliminarMovimientoDebito = async (unidadId, movimientoId) => {
       
       const movData = movDoc.data();
       
-      // 2. Validar que no esté pagado
+      // 2. Validar
       if (movData.pagado === true || (movData.montoAplicado || 0) > 0) {
         throw new Error("No se puede eliminar un movimiento que ya tiene pagos aplicados.");
       }
-      
-      // 3. Validar que sea un débito (monto < 0)
       if (movData.monto >= 0) {
         throw new Error("No se puede eliminar un movimiento de crédito (pago).");
       }
 
-      // 4. Leer el saldo actual de la unidad
+      // 3. Leer el saldo actual de la unidad
       const unidadDoc = await transaction.get(unidadRef);
       if (!unidadDoc.exists()) throw new Error("La unidad no existe.");
       
       const saldoAnterior = unidadDoc.data().saldo || 0;
-      // Revertimos el débito (sumamos el valor absoluto)
       const saldoResultante = saldoAnterior + Math.abs(movData.monto); 
 
-      // 5. Eliminar el movimiento
+      // 4. Eliminar el movimiento
       transaction.delete(ctaCteRef);
       
-      // 6. Actualizar el saldo principal de la unidad
+      // 5. Actualizar el saldo principal de la unidad
       transaction.update(unidadRef, { saldo: saldoResultante });
     });
     
-    console.log(`Movimiento ${movimientoId} eliminado exitosamente de ${unidadId}.`);
+    console.log(`Movimiento ${movimientoId} eliminado de ${unidadId} en consorcio ${consorcioId}.`);
 
   } catch (error) {
     console.error("¡FALLÓ LA TRANSACCIÓN (Eliminar Movimiento)! ", error);
@@ -387,10 +434,14 @@ export const eliminarMovimientoDebito = async (unidadId, movimientoId) => {
 };
 
 
-// --- resetearSaldosUnidades (Sin cambios) ---
-export const resetearSaldosUnidades = async () => {
-  console.warn(" Iniciando reseteo total de saldos y cuentas corrientes...");
-  const unidadesCollection = collection(db, "unidades");
+// --- resetearSaldosUnidades ---
+export const resetearSaldosUnidades = async (consorcioId) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para resetear saldos.");
+  
+  console.warn(`Iniciando reseteo total de saldos y ctas corrientes para consorcio ${consorcioId}...`);
+  
+  // RUTA MODIFICADA
+  const unidadesCollection = collection(db, `consorcios/${consorcioId}/unidades`);
   const unidadesSnapshot = await getDocs(unidadesCollection);
   let unidadesActualizadas = 0;
   let movimientosBorrados = 0;
@@ -406,7 +457,8 @@ export const resetearSaldosUnidades = async () => {
       await updateDoc(unidadRef, { saldo: 0 });
       unidadesActualizadas++;
 
-      const ctaCteCollectionRef = collection(db, `unidades/${unidadDoc.id}/cuentaCorriente`);
+      // RUTA MODIFICADA
+      const ctaCteCollectionRef = collection(db, `consorcios/${consorcioId}/unidades/${unidadDoc.id}/cuentaCorriente`);
       const ctaCteSnapshot = await getDocs(ctaCteCollectionRef);
       console.log(`    Encontrados ${ctaCteSnapshot.docs.length} movimientos en Cta. Cte. para borrar en ${unidadDoc.id}.`);
 
@@ -434,10 +486,14 @@ export const resetearSaldosUnidades = async () => {
   return { unidadesActualizadas, movimientosBorrados };
 };
 
-// --- resetearFondoReserva (Sin cambios) ---
-export const resetearFondoReserva = async () => {
-  console.warn("Reseteando Saldo Fondo de Reserva a 0...");
-  const configRef = doc(db, "configuracion", "general");
+// --- resetearFondoReserva ---
+export const resetearFondoReserva = async (consorcioId) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para resetear fondo.");
+
+  console.warn(`Reseteando Saldo Fondo de Reserva a 0 para consorcio ${consorcioId}...`);
+  
+  // RUTA MODIFICADA
+  const configRef = doc(db, `consorcios/${consorcioId}/configuracion`, "general");
   try {
     await setDoc(configRef, { saldoFondoReserva: 0 }, { merge: true });
     console.log("Saldo Fondo de Reserva reseteado a 0.");

@@ -4,7 +4,7 @@ import {
   Box, Button, TextField, Typography, Modal, Paper, Alert, 
   CircularProgress, Grid, FormControl, InputLabel, Select, MenuItem,
   Table, TableBody, TableCell, TableHead, TableRow, IconButton, Tooltip, Divider,
-  TableContainer // <-- ¡CORRECCIÓN! Esta línea fue añadida.
+  TableContainer
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
@@ -15,7 +15,7 @@ const style = {
   top: '50%',
   left: '50%',
   transform: 'translate(-50%, -50%)',
-  width: 700, // Más ancho
+  width: 700,
   maxHeight: '90vh',
   overflowY: 'auto',
   bgcolor: 'background.paper',
@@ -30,7 +30,6 @@ const formatCurrency = (value) => {
 
 const formatDate = (date) => {
   if (!date) return 'N/A';
-  // El modal muestra la hora, así que usamos toLocaleString
   return date.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
 };
 
@@ -38,9 +37,10 @@ const formatDate = (date) => {
  * Este es el modal de gestión de mora.
  * Permite ver el histórico de intereses de un mes de origen y aplicar nuevos.
  */
-function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos }) {
+// 1. RECIBIR consorcioId COMO PROP
+function GestionMoraModal({ open, onClose, consorcioId, unidadId, mesOrigen, todosMovimientos }) {
   // Estados del formulario
-  const [tasaPct, setTasaPct] = useState('10'); // Tasa en %
+  const [tasaPct, setTasaPct] = useState('10');
   const [tipoInteres, setTipoInteres] = useState('INTERES_10');
   const [conceptoManual, setConceptoManual] = useState('');
   
@@ -48,38 +48,30 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  // 1. Filtrar y calcular movimientos relacionados con este mes_origen
+  // ... (useMemo para calcular movimientos no cambia) ...
   const { movimientosDelMes, totalBasePendiente, totalInteresPendiente, totalPendienteMes } = useMemo(() => {
     if (!mesOrigen || !todosMovimientos) {
       return { movimientosDelMes: [], totalBasePendiente: 0, totalInteresPendiente: 0, totalPendienteMes: 0 };
     }
-    
     let movimientosFiltrados = [];
     let basePendiente = 0;
     let interesPendiente = 0;
-
-    // CORRECCIÓN: Manejar deuda antigua (mes_origen = 'Historico')
     if (mesOrigen === 'Historico') {
         const antiguos = todosMovimientos.filter(m => !m.mes_origen && m.monto < 0);
         antiguos.forEach(mov => {
             const pendiente = Math.abs(mov.monto) - (mov.montoAplicado || 0);
-            basePendiente += pendiente; // La deuda antigua cuenta como base
+            basePendiente += pendiente;
         });
-        // Incluimos los intereses aplicados a la deuda antigua
         const interesesAntiguos = todosMovimientos.filter(m => m.mes_origen === 'Historico' && (m.tipo === 'INTERES_10' || m.tipo === 'INTERES_BNA'));
         interesesAntiguos.forEach(mov => {
             const pendiente = Math.abs(mov.monto) - (mov.montoAplicado || 0);
             interesPendiente += pendiente;
         });
-        
         movimientosFiltrados = [...antiguos, ...interesesAntiguos].sort((a, b) => a.fecha - b.fecha);
-
     } else {
-        // Lógica normal para meses con mes_origen
         movimientosFiltrados = todosMovimientos.filter(
           m => m.mes_origen === mesOrigen && m.monto < 0
         ).sort((a, b) => a.fecha - b.fecha);
-        
         movimientosFiltrados.forEach(mov => {
           const pendiente = Math.abs(mov.monto) - (mov.montoAplicado || 0);
           if (mov.tipo && mov.tipo.includes('_BASE')) {
@@ -89,24 +81,22 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
           }
         });
     }
-
     return { 
       movimientosDelMes: movimientosFiltrados,
       totalBasePendiente: basePendiente,
       totalInteresPendiente: interesPendiente,
-      totalPendienteMes: basePendiente + interesPendiente // <-- CÁLCULO COMPUESTO
+      totalPendienteMes: basePendiente + interesPendiente
     };
-  }, [mesOrigen, todosMovimientos, open]); // Recalcular cuando se abre o cambian los datos
+  }, [mesOrigen, todosMovimientos, open]);
 
-  // 2. Calcular el monto del nuevo interés
+  // ... (useMemo para montoInteresCalculado no cambia) ...
   const montoInteresCalculado = useMemo(() => {
     const tasa = parseFloat(tasaPct.replace(',', '.')) / 100;
     if (isNaN(tasa) || !totalPendienteMes) return 0;
-    // Aplicamos interés sobre el total pendiente (Capital + Intereses previos)
     return totalPendienteMes * tasa; 
   }, [tasaPct, totalPendienteMes]);
 
-  // 3. Limpiar formulario al abrir
+  // ... (useEffect para limpiar formulario no cambia) ...
   useEffect(() => {
     if (open) {
       setMessage('');
@@ -117,7 +107,7 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
     }
   }, [open]);
   
-  // 3b. Actualizar concepto automático
+  // ... (useEffect para concepto automático no cambia) ...
   useEffect(() => {
       if (mesOrigen) {
         const conceptoBase = `s/ Deuda ${mesOrigen}`;
@@ -138,25 +128,27 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
     setError('');
 
     try {
-      if (!unidadId || !mesOrigen) throw new Error("Faltan IDs.");
+      // 2. VALIDAR consorcioId
+      if (!consorcioId || !unidadId || !mesOrigen) throw new Error("Faltan IDs de Consorcio, Unidad o Mes de Origen.");
       if (montoInteresCalculado <= 0) {
         throw new Error("El interés calculado debe ser mayor a 0.");
       }
       
       const tasaDecimal = parseFloat(tasaPct.replace(',', '.')) / 100;
 
+      // 3. PASAR consorcioId AL SERVICIO
       await aplicarInteresManual(
+        consorcioId,
         unidadId, 
         mesOrigen, 
         montoInteresCalculado, 
         tipoInteres, 
         conceptoManual,
         tasaDecimal,
-        null // No estamos atando a un parentId específico, sino al mes_origen
+        null
       );
       
       setMessage('¡Interés aplicado exitosamente!');
-      // No cerramos el modal, para que pueda aplicar otro o borrar
       
     } catch (error) {
       setError(`Error al aplicar interés: ${error.message}`);
@@ -170,11 +162,19 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
     if (!window.confirm(`¿Seguro de eliminar el interés "${movimiento.concepto}" por ${formatCurrency(movimiento.monto)}?`)) {
       return;
     }
+    
+    // 4. VALIDAR consorcioId
+    if (!consorcioId) {
+      setError("Error: No se encontró el ID del consorcio.");
+      return;
+    }
+    
     setLoading(true);
     setMessage('');
     setError('');
     try {
-      await eliminarMovimientoDebito(unidadId, movimiento.id);
+      // 5. PASAR consorcioId AL SERVICIO
+      await eliminarMovimientoDebito(consorcioId, unidadId, movimiento.id);
       setMessage('Movimiento de interés eliminado.');
     } catch (error) {
       setError(error.message);
@@ -189,16 +189,17 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
   return (
     <Modal open={open} onClose={onClose}>
       <Box sx={style}>
+        {/* ... (Todo el JSX/HTML del modal no cambia) ... */}
+        
         <Typography variant="h6" component="h2" gutterBottom>
           Gestionar Mora de: <strong>{mesOrigen}</strong>
         </Typography>
         
-        {/* Sección 1: Historial de Deuda del Mes */}
         <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
           <Typography variant="body1" gutterBottom>
             Historial de Deuda (Mes Origen: {mesOrigen})
           </Typography>
-          <TableContainer> {/* <-- COMPONENTE QUE FALTABA */}
+          <TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -211,7 +212,7 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
               <TableBody>
                 {movimientosDelMes.map(mov => {
                   const esInteres = mov.tipo === 'INTERES_10' || mov.tipo === 'INTERES_BNA';
-                  const esBase = (mov.tipo && mov.tipo.includes('_BASE')) || !mov.tipo; // Base o antiguo
+                  const esBase = (mov.tipo && mov.tipo.includes('_BASE')) || !mov.tipo;
                   const pendiente = Math.abs(mov.monto) - (mov.montoAplicado || 0);
                   const puedeBorrar = esInteres && (mov.montoAplicado || 0) === 0;
                   return (
@@ -246,7 +247,7 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
                 })}
               </TableBody>
             </Table>
-          </TableContainer> {/* <-- COMPONENTE QUE FALTABA */}
+          </TableContainer>
           <Box sx={{ p: 2, textAlign: 'right', borderTop: '1px solid #eee' }}>
             <Typography variant="body2">Total Base Pendiente: {formatCurrency(-totalBasePendiente)}</Typography>
             <Typography variant="body2">Total Interés Pendiente: {formatCurrency(-totalInteresPendiente)}</Typography>
@@ -256,7 +257,6 @@ function GestionMoraModal({ open, onClose, unidadId, mesOrigen, todosMovimientos
         
         <Divider sx={{ my: 2 }} />
 
-        {/* Sección 2: Aplicar Nuevo Interés */}
         <Typography variant="h6" gutterBottom>
           Aplicar Nuevo Interés (Compuesto)
         </Typography>

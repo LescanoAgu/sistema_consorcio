@@ -1,24 +1,29 @@
+// src/services/gastosService.js
 import { db, storage } from '../config/firebase';
 import {
   collection, addDoc, serverTimestamp,
   onSnapshot, query, orderBy, where, getDocs,
-  doc, updateDoc, deleteDoc, getDoc // <-- Asegúrate de tener getDoc
+  doc, updateDoc, deleteDoc, getDoc
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { registrarMovimientoFondo } from './fondoService';
+// No necesitamos registrarMovimientoFondo aquí, eso se hace en liquidacionService
 
-const uploadFactura = async (file) => {
-  const storageRef = ref(storage, `facturas/${Date.now()}-${file.name}`);
+const uploadFactura = async (consorcioId, file) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para subir factura.");
+  // Agregamos el consorcioId a la ruta de Storage para evitar colisiones
+  const storageRef = ref(storage, `consorcios/${consorcioId}/facturas/${Date.now()}-${file.name}`);
   const snapshot = await uploadBytes(storageRef, file);
   const downloadURL = await getDownloadURL(snapshot.ref);
   return downloadURL;
 };
 
-export const crearGasto = async (gastoData) => {
+export const crearGasto = async (consorcioId, gastoData) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para crear gasto.");
+  
   let facturaURL = '';
   if (gastoData.facturaFile) {
     try {
-      facturaURL = await uploadFactura(gastoData.facturaFile);
+      facturaURL = await uploadFactura(consorcioId, gastoData.facturaFile);
     } catch (error) {
       console.error("Error al subir la factura: ", error);
       throw new Error('No se pudo subir el archivo.');
@@ -45,47 +50,46 @@ export const crearGasto = async (gastoData) => {
       delete nuevoGasto.unidadesAfectadas;
     }
 
-    const docRef = await addDoc(collection(db, "gastos"), nuevoGasto);
-    console.log("Gasto registrado con ID: ", docRef.id);
+    // RUTA MODIFICADA
+    const gastosCollectionRef = collection(db, `consorcios/${consorcioId}/gastos`);
+    const docRef = await addDoc(gastosCollectionRef, nuevoGasto);
+    console.log("Gasto registrado con ID: ", docRef.id, "en consorcio:", consorcioId);
 
-    // --- ¡NUEVA LÓGICA! ---
-    // Si es un gasto que usa el Fondo de Reserva, registramos el egreso
-    if (nuevoGasto.tipo === 'Extraordinario' && nuevoGasto.distribucion === 'FondoDeReserva') {
-      // Leemos el saldo actual del fondo para calcular el saldo resultante
-      const configRef = doc(db, "configuracion", "general");
-      const configSnap = await getDoc(configRef);
-      let saldoActual = 0;
-      if (configSnap.exists()) {
-        saldoActual = configSnap.data().saldoFondoReserva || 0;
-      }
-      
-      const saldoResultante = saldoActual - nuevoGasto.monto;
-    }
+    // NOTA: La lógica de descontar del fondo de reserva al *crear* el gasto se eliminó.
+    // El fondo SÓLO debe descontarse al *ejecutar la liquidación* que incluye ese gasto.
+    // Esto previene inconsistencias si el gasto se borra antes de liquidar.
+    // El 'gastoService' solo crea el gasto; 'liquidacionService' maneja la contabilidad.
 
     return docRef;
   } catch (error) {
+     console.error("Error al crear gasto:", error);
+     throw new Error('No se pudo registrar el gasto.');
   }
 };
 
 
 /**
- * Obtiene los gastos en tiempo real, con opción de filtro.
+ * Obtiene los gastos (de un consorcio) en tiempo real.
+ * @param {string} consorcioId ID del consorcio.
  * @param {function} callback Función que recibe los gastos.
- * @param {string} filtro 'pendientes', 'todos', o el nombre de una liquidación (liquidadoEn).
+ * @param {string} filtro 'pendientes', 'todos', o el nombre de una liquidación.
  * @returns {function} Función para desuscribirse.
  */
-export const getGastos = (callback, filtro = 'pendientes') => {
+export const getGastos = (consorcioId, callback, filtro = 'pendientes') => {
+  if (!consorcioId) {
+    callback([], new Error("consorcioId no fue provisto a getGastos"));
+    return () => {};
+  }
+  
   let q;
-  const gastosCollection = collection(db, "gastos");
+  // RUTA MODIFICADA
+  const gastosCollection = collection(db, `consorcios/${consorcioId}/gastos`);
 
   if (filtro === 'pendientes') {
-    // Solo gastos con liquidacionId === null, ordenados por fecha de creación desc
     q = query(gastosCollection, where("liquidacionId", "==", null), orderBy("createdAt", "desc"));
   } else if (filtro === 'todos') {
-    // Todos los gastos, ordenados por fecha de creación desc
     q = query(gastosCollection, orderBy("createdAt", "desc"));
   } else {
-    // Gastos de una liquidación específica, ordenados por fecha de creación desc
     q = query(gastosCollection, where("liquidadoEn", "==", filtro), orderBy("createdAt", "desc"));
   }
 
@@ -97,18 +101,18 @@ export const getGastos = (callback, filtro = 'pendientes') => {
     callback(gastos);
   }, (error) => {
     console.error("Error al obtener gastos:", error);
-    // Podrías llamar al callback con un array vacío o un error
     callback([], error);
   });
 
   return unsubscribe;
 };
 
-// --- getGastosNoLiquidados (SIN CAMBIOS - se usa en liquidación) ---
-export const getGastosNoLiquidados = async () => {
-    // ... (código existente)
-      // Creamos una query que filtra por liquidacionId == null
-  const q = query(collection(db, "gastos"), where("liquidacionId", "==", null));
+// --- getGastosNoLiquidados ---
+export const getGastosNoLiquidados = async (consorcioId) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para getGastosNoLiquidados.");
+
+  // RUTA MODIFICADA
+  const q = query(collection(db, `consorcios/${consorcioId}/gastos`), where("liquidacionId", "==", null));
 
   const querySnapshot = await getDocs(q);
 
@@ -118,68 +122,77 @@ export const getGastosNoLiquidados = async () => {
   querySnapshot.forEach((doc) => {
     const data = doc.data();
     gastos.push({ id: doc.id, ...data });
-    total += data.monto; // Sumamos el total
+    total += data.monto;
   });
 
-  // Devolvemos la lista de gastos y el total sumado
   return { gastos, total };
 };
 
-// --- ¡NUEVA FUNCIÓN! ---
-/**
- * Actualiza un documento de gasto existente en Firestore.
- * NO permite actualizar si el gasto ya fue liquidado.
- * @param {string} id ID del gasto a actualizar.
- * @param {object} gastoData Nuevos datos { fecha, concepto, proveedor, monto }.
- */
-export const updateGasto = async (id, gastoData) => {
-  const gastoRef = doc(db, "gastos", id);
+// --- updateGasto ---
+export const updateGasto = async (consorcioId, id, gastoData) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para updateGasto.");
 
-  // Preparamos los datos a actualizar
+  // RUTA MODIFICADA
+  const gastoRef = doc(db, `consorcios/${consorcioId}/gastos`, id);
+
   const datosActualizados = {
     fecha: gastoData.fecha,
     concepto: gastoData.concepto,
     proveedor: gastoData.proveedor,
     monto: parseFloat(gastoData.monto),
-    // NO actualizamos facturaURL aquí, eso sería más complejo (borrar anterior, subir nueva)
-    // NO actualizamos createdAt, liquidacionId, liquidadoEn
+    // Tipo, Distribucion y UnidadesAfectadas también deberían poder editarse
+    tipo: gastoData.tipo,
+    distribucion: gastoData.distribucion || 'Prorrateo',
+    unidadesAfectadas: gastoData.unidadesAfectadas || []
   };
+  
+  // Limpieza si es Ordinario
+  if (datosActualizados.tipo === 'Ordinario') {
+      delete datosActualizados.distribucion;
+      delete datosActualizados.unidadesAfectadas;
+  }
 
   try {
-    // IMPORTANTE: Idealmente, deberíamos verificar aquí (o con reglas de seguridad)
-    // que el gasto NO esté liquidado antes de permitir la actualización.
-    // Por simplicidad, confiaremos en que la UI deshabilita el botón.
+    // Verificación (opcional pero recomendada):
+    const gastoSnap = await getDoc(gastoRef);
+    if (gastoSnap.exists() && gastoSnap.data().liquidacionId) {
+        throw new Error("No se puede modificar un gasto que ya ha sido liquidado.");
+    }
+
     await updateDoc(gastoRef, datosActualizados);
     console.log("Gasto actualizado con ID: ", id);
   } catch (error) {
     console.error("Error al actualizar el gasto: ", error);
-    throw new Error('No se pudo actualizar el gasto.');
+    throw new Error(`No se pudo actualizar el gasto: ${error.message}`);
   }
 };
 
-// --- ¡NUEVA FUNCIÓN! ---
-/**
- * Elimina un documento de gasto de Firestore y su archivo asociado en Storage (si existe).
- * NO permite eliminar si el gasto ya fue liquidado.
- * @param {string} id ID del gasto a eliminar.
- * @param {string} facturaURL URL del archivo PDF asociado (si existe).
- */
-export const deleteGasto = async (id, facturaURL) => {
-  const gastoRef = doc(db, "gastos", id);
+// --- deleteGasto ---
+export const deleteGasto = async (consorcioId, id, facturaURL) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para deleteGasto.");
+  
+  // RUTA MODIFICADA
+  const gastoRef = doc(db, `consorcios/${consorcioId}/gastos`, id);
 
   try {
-    // IMPORTANTE: Verificar que no esté liquidado antes de borrar.
-    // Confiaremos en la UI por ahora.
-
+    // Verificación:
+    const gastoSnap = await getDoc(gastoRef);
+    if (gastoSnap.exists() && gastoSnap.data().liquidacionId) {
+        throw new Error("No se puede eliminar un gasto que ya ha sido liquidado.");
+    }
+    
     // 1. Eliminar el archivo de Storage (si existe)
     if (facturaURL) {
       try {
-        const fileRef = ref(storage, facturaURL); // Obtenemos la referencia desde la URL
+        const fileRef = ref(storage, facturaURL);
         await deleteObject(fileRef);
         console.log("Archivo PDF eliminado de Storage");
       } catch (storageError) {
-        // Si falla borrar el archivo (ej: no existe, permisos), registramos pero continuamos
-        console.warn("No se pudo eliminar el archivo PDF de Storage:", storageError);
+        if (storageError.code === 'storage/object-not-found') {
+            console.warn("El archivo PDF no se encontró en Storage (quizás ya fue borrado).");
+        } else {
+            console.warn("No se pudo eliminar el archivo PDF de Storage:", storageError);
+        }
       }
     }
 
@@ -189,37 +202,38 @@ export const deleteGasto = async (id, facturaURL) => {
 
   } catch (error) {
     console.error("Error al eliminar el gasto: ", error);
-    throw new Error('No se pudo eliminar el gasto.');
+    throw new Error(`No se pudo eliminar el gasto: ${error.message}`);
   }
 };
 
-export const resetearTodosLosGastos = async () => {
-  console.warn("Iniciando reseteo total de gastos...");
-  const gastosCollection = collection(db, "gastos");
+// --- resetearTodosLosGastos ---
+export const resetearTodosLosGastos = async (consorcioId) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para resetear gastos.");
+  
+  console.warn(`Iniciando reseteo total de gastos para consorcio ${consorcioId}...`);
+  
+  // RUTA MODIFICADA
+  const gastosCollection = collection(db, `consorcios/${consorcioId}/gastos`);
   const gastosSnapshot = await getDocs(gastosCollection);
   let contadorBorrados = 0;
   let contadorErrores = 0;
 
-  // Usamos Promise.all para manejar las eliminaciones en paralelo (más rápido)
   const promesasDelete = gastosSnapshot.docs.map(async (gastoDoc) => {
     const gastoData = gastoDoc.data();
-    const gastoRef = gastoDoc.ref; // Referencia al documento
+    const gastoRef = gastoDoc.ref;
 
-    // 1. Intentar borrar PDF si existe
     if (gastoData.facturaURL) {
       try {
         const fileRef = ref(storage, gastoData.facturaURL);
         await deleteObject(fileRef);
         console.log(`PDF eliminado: ${gastoData.facturaURL}`);
       } catch (storageError) {
-        // Ignoramos errores si el archivo no existe, pero logueamos otros
         if (storageError.code !== 'storage/object-not-found') {
             console.warn(`No se pudo eliminar PDF ${gastoData.facturaURL}:`, storageError);
         }
       }
     }
 
-    // 2. Borrar documento de Firestore
     try {
       await deleteDoc(gastoRef);
       contadorBorrados++;
@@ -229,7 +243,7 @@ export const resetearTodosLosGastos = async () => {
     }
   });
 
-  await Promise.all(promesasDelete); // Espera a que todas las promesas terminen
+  await Promise.all(promesasDelete);
 
   console.warn(`Reseteo de gastos completado. Borrados: ${contadorBorrados}, Errores: ${contadorErrores}`);
   if (contadorErrores > 0) {

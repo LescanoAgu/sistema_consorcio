@@ -1,28 +1,31 @@
 // src/pages/admin/FondoReservaPage.jsx
 import React, { useState, useEffect } from 'react';
 import { getHistorialFondo } from '../../services/fondoService';
-import { getSaldoFondoActual } from '../../services/propietariosService'; // Necesitamos crear esta función
+import { getSaldoFondoActual } from '../../services/propietariosService';
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 import {
   Box, Typography, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, CircularProgress, Alert,
   Button,
-  Link // <-- ¡AÑADIR ESTA LÍNEA QUE FALTABA!
+  Link
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import { Link as RouterLink } from 'react-router-dom';
 
-// Función de formato (podríamos moverla a helpers.js)
+// ... (funciones de formato no cambian) ...
 const formatCurrency = (value) => {
   if (typeof value !== 'number' || isNaN(value)) return 'N/A';
   return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
 };
-
 const formatDate = (date) => {
   if (!date) return 'N/A';
   return date.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
 };
 
+
 function FondoReservaPage() {
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
+  
   const [movimientos, setMovimientos] = useState([]);
   const [saldoActual, setSaldoActual] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -30,7 +33,15 @@ function FondoReservaPage() {
 
   // Cargar saldo actual
   useEffect(() => {
-    const unsubscribeSaldo = getSaldoFondoActual((saldo, err) => {
+    // 3. VALIDAR CONSORCIO
+    if (!consorcioId) {
+      setLoading(false);
+      setSaldoActual(0);
+      return;
+    }
+    
+    // 4. PASAR consorcioId AL SERVICIO
+    const unsubscribeSaldo = getSaldoFondoActual(consorcioId, (saldo, err) => {
       if (err) {
         setError('Error al cargar el saldo actual del fondo.');
       } else {
@@ -38,12 +49,22 @@ function FondoReservaPage() {
       }
     });
     return () => unsubscribeSaldo();
-  }, []);
+    
+  }, [consorcioId]); // <-- 5. AGREGAR consorcioId A DEPENDENCIAS
 
   // Cargar historial
   useEffect(() => {
+    // 3. VALIDAR CONSORCIO
+    if (!consorcioId) {
+      setLoading(false);
+      setMovimientos([]);
+      return;
+    }
+
     setLoading(true);
-    const unsubscribeHistorial = getHistorialFondo((historial, err) => {
+    
+    // 4. PASAR consorcioId AL SERVICIO
+    const unsubscribeHistorial = getHistorialFondo(consorcioId, (historial, err) => {
       if (err) {
         setError('Error al cargar el historial de movimientos.');
       } else {
@@ -52,18 +73,45 @@ function FondoReservaPage() {
       setLoading(false);
     });
     return () => unsubscribeHistorial();
-  }, []);
+    
+  }, [consorcioId]); // <-- 5. AGREGAR consorcioId A DEPENDENCIAS
+  
+  
+  // 6. Mensaje si no hay consorcio
+  if (!consorcioId) {
+     return (
+        <Box sx={{ width: '100%' }}>
+            <Typography variant="h4" gutterBottom>Fondo de Reserva</Typography>
+            <Alert severity="warning">
+                Por favor, seleccione un consorcio desde el menú superior para ver el fondo de reserva.
+            </Alert>
+        </Box>
+     );
+  }
 
   return (
     <Box sx={{ width: '100%' }}>
-      {/* ... (Títulos y Saldo Actual) */}
+      {/* Títulos y Saldo Actual */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h4" gutterBottom sx={{ mb: 0 }}>
+            Fondo de Reserva
+          </Typography>
+      </Box>
+      <Paper sx={{ p: 2, mb: 3, backgroundColor: '#f0f4f8' }}>
+        <Typography variant="h6">Saldo Actual del Fondo</Typography>
+        <Typography variant="h4" sx={{ mt: 1, color: saldoActual < 0 ? 'red' : 'green', fontWeight: 'bold' }}>
+          {formatCurrency(saldoActual)}
+        </Typography>
+        {loading && <CircularProgress size={20} sx={{mt: 1}} />}
+        {error && <Alert severity="error" sx={{mt: 1}}>{error}</Alert>}
+      </Paper>
       
+      {/* Historial de Movimientos */}
       <Paper sx={{ p: 2 }}>
         <Typography variant="h6" gutterBottom>Historial de Movimientos</Typography>
         <TableContainer>
           <Table stickyHeader sx={{ minWidth: 650 }} aria-label="historial fondo reserva">
             <TableHead sx={{ '& th': { fontWeight: 'bold' } }}>
-              {/* ... (Cabecera de la tabla sin cambios) */}
               <TableRow>
                 <TableCell>Fecha</TableCell>
                 <TableCell>Concepto</TableCell>
@@ -73,8 +121,7 @@ function FondoReservaPage() {
               </TableRow>
             </TableHead>
 
-            {/* --- TableBody CORREGIDO --- */}
-<TableBody>
+            <TableBody>
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center"><CircularProgress /></TableCell>
@@ -92,9 +139,7 @@ function FondoReservaPage() {
                     <TableCell>{formatDate(mov.fecha)}</TableCell>
                     <TableCell>{mov.concepto}</TableCell>
                     
-                    {/* --- CELDA CORREGIDA CON PRIORIDAD --- */}
                     <TableCell>
-                      {/* Prioridad 1: Si es Gasto y TIENE facturaURL */}
                       {mov.gastoId && mov.facturaURL ? (
                         <Button
                           variant="outlined"
@@ -109,24 +154,20 @@ function FondoReservaPage() {
                           Ver PDF
                         </Button>
                       
-                      // Prioridad 2: Si es Gasto pero NO tiene facturaURL (link a gastos)
                       ) : mov.gastoId ? (
                         <Link component={RouterLink} to={`/admin/liquidacion/gastos`} title={mov.gastoId} sx={{fontSize: '0.875rem'}}>
                           Ver Gasto
                         </Link>
 
-                      // Prioridad 3: Si es Liquidación (link a historial)
                       ) : mov.liquidacionId ? (
                         <Link component={RouterLink} to={`/admin/liquidacion/historial`} title={mov.liquidacionId} sx={{fontSize: '0.875rem'}}>
                           Ver Liq.
                         </Link>
 
-                      // Prioridad 4: Sin referencia
                       ) : (
                         '-' 
                       )}
                     </TableCell>
-                    {/* --- FIN CELDA CORREGIDA --- */}
 
                     <TableCell align="right" sx={{ color: mov.monto < 0 ? 'red' : 'green', fontWeight: '500' }}>
                       {formatCurrency(mov.monto)}
@@ -138,7 +179,6 @@ function FondoReservaPage() {
                 ))
               )}
             </TableBody>
-            {/* --- FIN TableBody CORREGIDO --- */}
 
           </Table>
         </TableContainer>

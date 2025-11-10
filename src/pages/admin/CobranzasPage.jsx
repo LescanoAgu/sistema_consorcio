@@ -1,6 +1,7 @@
 // src/pages/admin/CobranzasPage.jsx
 import React, { useState, useEffect } from 'react';
 import { getTodasUnidades, registrarPago } from '../../services/propietariosService';
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 import {
   Box, Button, TextField, Typography, Paper, Alert, CircularProgress, Grid,
   Autocomplete
@@ -8,6 +9,8 @@ import {
 import { naturalSort } from '../../utils/helpers';
 
 function CobranzasPage() {
+  const { consorcioId } = useConsorcio(); // <-- 2. OBTENER CONSORCIO ACTIVO
+
   const [unidades, setUnidades] = useState([]);
   const [loadingUnidades, setLoadingUnidades] = useState(true);
   const [unidadSeleccionada, setUnidadSeleccionada] = useState(null);
@@ -18,10 +21,18 @@ function CobranzasPage() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
+    // 3. VALIDAR QUE HAYA UN CONSORCIO
+    if (!consorcioId) {
+      setLoadingUnidades(false);
+      setUnidades([]);
+      return;
+    }
+    
     const cargarUnidades = async () => {
       setLoadingUnidades(true);
       try {
-        const unidadesObtenidas = await getTodasUnidades();
+        // 4. PASAR EL consorcioId AL SERVICIO
+        const unidadesObtenidas = await getTodasUnidades(consorcioId);
         unidadesObtenidas.sort((a, b) => naturalSort(a.nombre, b.nombre));
         setUnidades(unidadesObtenidas);
       } catch (error) {
@@ -32,7 +43,8 @@ function CobranzasPage() {
       }
     };
     cargarUnidades();
-  }, []);
+    
+  }, [consorcioId]); // <-- 5. AGREGAR consorcioId A LAS DEPENDENCIAS
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -40,6 +52,12 @@ function CobranzasPage() {
       setMessage('Error: Debes seleccionar una unidad.');
       return;
     }
+    // 6. VALIDAR CONSORCIO ANTES DE ENVIAR
+    if (!consorcioId) {
+      setMessage('Error: No hay un consorcio activo seleccionado.');
+      return;
+    }
+    
     setLoading(true);
     setMessage('');
     try {
@@ -47,15 +65,14 @@ function CobranzasPage() {
       if (isNaN(montoFloat) || montoFloat <= 0) {
         throw new Error('El monto debe ser un número positivo.');
       }
-      await registrarPago(unidadSeleccionada.id, montoFloat, fecha, concepto || `Pago ${unidadSeleccionada.nombre}`);
+      
+      // 7. PASAR EL consorcioId AL SERVICIO
+      await registrarPago(consorcioId, unidadSeleccionada.id, montoFloat, fecha, concepto || `Pago ${unidadSeleccionada.nombre}`);
+      
       setMessage(`¡Pago de ${formatCurrency(montoFloat)} registrado exitosamente para ${unidadSeleccionada.nombre}!`);
       setUnidadSeleccionada(null);
       setMonto('');
       setConcepto('');
-      // Forzar reseteo visual del Autocomplete si es necesario
-      // Puedes intentar limpiar el input directamente si setUnidadSeleccionada(null) no funciona
-      // const input = document.querySelector('#autocomplete-unidad input');
-      // if (input) input.value = '';
     } catch (error) {
       setMessage(`Error al registrar el pago: ${error.message}`);
       console.error(error);
@@ -79,17 +96,18 @@ function CobranzasPage() {
         <Typography variant="h6" gutterBottom>
           Registrar Nuevo Pago
         </Typography>
-        {loadingUnidades ? (
+        
+        {/* 8. Mensaje si no hay consorcio */}
+        {!consorcioId ? (
+           <Alert severity="warning">Seleccione un consorcio para registrar cobranzas.</Alert>
+        ) : loadingUnidades ? (
           <CircularProgress />
         ) : (
           <Box component="form" onSubmit={handleSubmit}>
-             {/* Usamos alignItems="flex-end" */}
             <Grid container spacing={3} alignItems="flex-end">
-
-              {/* Selector de Unidad - AÚN MÁS ANCHO */}
-              <Grid item xs={12} sm={12} md={6}> {/* <-- Ocupa todo en sm, mitad en md */}
+              <Grid item xs={12} sm={12} md={6}>
                 <Autocomplete
-                  id="autocomplete-unidad" // Añadir ID para posible manipulación manual (último recurso)
+                  id="autocomplete-unidad"
                   options={unidades}
                   getOptionLabel={(option) => `${option.nombre} (${option.propietario})`}
                   value={unidadSeleccionada}
@@ -101,13 +119,11 @@ function CobranzasPage() {
                     <TextField {...params} label="Seleccionar Unidad" required variant="standard" />
                   )}
                   disabled={loading}
-                  // Quitar la key puede ayudar a veces si causa problemas con el reset
-                  // key={unidadSeleccionada ? unidadSeleccionada.id : 'autocomplete-reset'}
                 />
               </Grid>
 
-              {/* Monto */}
-              <Grid item xs={12} sm={6} md={3}> {/* <-- Ajustado */}
+              {/* ... (resto de los campos no cambian) ... */}
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="Monto Pagado"
                   type="number"
@@ -121,9 +137,7 @@ function CobranzasPage() {
                   variant="standard"
                 />
               </Grid>
-
-              {/* Fecha */}
-              <Grid item xs={12} sm={6} md={3}> {/* <-- Ajustado */}
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="Fecha del Pago"
                   type="date"
@@ -136,9 +150,7 @@ function CobranzasPage() {
                   variant="standard"
                 />
               </Grid>
-
-              {/* Concepto (Opcional) */}
-              <Grid item xs={12} sm={9} md={9}> {/* <-- Más ancho */}
+              <Grid item xs={12} sm={9} md={9}>
                 <TextField
                   label="Concepto / Referencia (Opcional)"
                   fullWidth
@@ -149,9 +161,7 @@ function CobranzasPage() {
                   variant="standard"
                 />
               </Grid>
-
-              {/* Botón Guardar */}
-              <Grid item xs={12} sm={3} md={3}> {/* <-- Ajustado */}
+              <Grid item xs={12} sm={3} md={3}>
                 <Button
                   type="submit"
                   variant="contained"
