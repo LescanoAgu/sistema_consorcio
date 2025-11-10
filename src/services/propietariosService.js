@@ -4,7 +4,7 @@ import {
   collection, addDoc, serverTimestamp,
   onSnapshot, query, orderBy, getDocs,
   runTransaction, doc, Timestamp, where,
-  updateDoc, deleteDoc, setDoc
+  updateDoc, deleteDoc, setDoc, writeBatch
 } from 'firebase/firestore';
 import { registrarMovimientoFondo } from './fondoService'; // Importamos el servicio ya refactorizado
 
@@ -501,5 +501,56 @@ export const resetearFondoReserva = async (consorcioId) => {
   } catch (error) {
     console.error("Error al resetear fondo de reserva:", error);
     throw new Error("No se pudo resetear el Fondo de Reserva.");
+  }
+};
+
+export const crearUnidadesBatch = async (consorcioId, unidades) => {
+  if (!consorcioId) throw new Error("consorcioId es requerido para crear unidades batch.");
+  if (!unidades || unidades.length === 0) throw new Error("La lista de unidades está vacía.");
+
+  // 1. Obtener una referencia al batch
+  const batch = writeBatch(db);
+  
+  // 2. Obtener la referencia a la colección de unidades
+  const unidadesCollectionRef = collection(db, `consorcios/${consorcioId}/unidades`);
+
+  let unidadesProcesadas = 0;
+
+  unidades.forEach((unidad) => {
+    // 3. Validar datos básicos
+    const porcentajeNum = parseFloat(String(unidad.porcentaje).replace(',', '.'));
+    if (!unidad.nombre || !unidad.propietario || isNaN(porcentajeNum)) {
+      console.warn("Omitiendo fila inválida:", unidad);
+      return; // Omitir esta unidad y continuar con la siguiente
+    }
+
+    // 4. Crear una referencia de documento nuevo para cada unidad
+    const newUnidadRef = doc(unidadesCollectionRef);
+    
+    const nuevaUnidad = {
+      nombre: String(unidad.nombre),
+      propietario: String(unidad.propietario),
+      porcentaje: porcentajeNum,
+      saldo: 0,
+      createdAt: serverTimestamp()
+    };
+
+    // 5. Añadir la operación de 'set' al batch
+    batch.set(newUnidadRef, nuevaUnidad);
+    unidadesProcesadas++;
+  });
+
+  if (unidadesProcesadas === 0) {
+    throw new Error("No se encontraron unidades válidas para procesar.");
+  }
+
+  try {
+    // 6. Ejecutar el batch (esto escribe todo en la base de datos)
+    await batch.commit();
+    console.log(`¡Batch completado! ${unidadesProcesadas} unidades creadas.`);
+    return unidadesProcesadas;
+  } catch (error) {
+    console.error("Error al ejecutar el batch de unidades:", error);
+    throw new Error(`No se pudieron guardar las unidades: ${error.message}`);
   }
 };

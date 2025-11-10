@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { logout } from '../../services/authService';
 import { useNavigate, Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
-import { useConsorcio } from '../../hooks/useConsorcio'; // <-- NUEVO HOOK
+import { useConsorcio } from '../../hooks/useConsorcio'; // <-- 1. IMPORTAR HOOK
 
 // --- IMPORTACIONES DE MUI ---
 import {
   Box, Drawer, AppBar, Toolbar, List, Typography, Divider,
   ListItem, ListItemButton, ListItemIcon, ListItemText, Button,
   CircularProgress, Alert, Collapse,
-  Select, MenuItem, FormControl // <-- Para el selector
+  Select, MenuItem, FormControl
 } from '@mui/material';
 
 // --- Iconos ---
@@ -24,7 +24,7 @@ import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import SettingsIcon from '@mui/icons-material/Settings'; 
-import ApartmentIcon from '@mui/icons-material/Apartment'; // <-- Icono para Consorcio
+import ApartmentIcon from '@mui/icons-material/Apartment';
 
 // Importar los servicios de reseteo
 import { resetearTodosLosGastos } from '../../services/gastosService';
@@ -37,14 +37,91 @@ const drawerWidth = 240;
 function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { consorcioId, consorcios, setConsorcioId, consorcioActivo } = useConsorcio(); // <-- USAMOS EL HOOK
+  // 2. OBTENER CONSORCIO ACTIVO (ID Y OBJETO COMPLETO)
+  const { consorcioId, consorcios, setConsorcioId, consorcioActivo } = useConsorcio(); 
   
   const [openLiquidacion, setOpenLiquidacion] = useState(true);
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMessage, setResetMessage] = useState('');
   const [resetError, setResetError] = useState(false);
 
-  // ... (handleLogout, handleResetTotal, renderMenuItem sin cambios)
+  // 3. IMPLEMENTAR LOGOUT
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error);
+      alert('Error al cerrar sesión');
+    }
+  };
+
+  // 4. IMPLEMENTAR RESET TOTAL (CON TODAS LAS VALIDACIONES)
+  const handleResetTotal = async () => {
+    setResetLoading(true);
+    setResetMessage('');
+    setResetError(false);
+
+    if (!consorcioId || !consorcioActivo) {
+      setResetMessage('Error: No hay un consorcio seleccionado.');
+      setResetError(true);
+      setResetLoading(false);
+      return;
+    }
+
+    const consorcioNombre = consorcioActivo.nombre;
+    const confirm1 = window.prompt(`Está a punto de BORRAR TODOS LOS DATOS (Gastos, Liquidaciones, Cuentas Corrientes, Fondo) del consorcio "${consorcioNombre}". Esta acción no se puede deshacer. Escriba el nombre del consorcio para confirmar:`);
+
+    if (confirm1 !== consorcioNombre) {
+      setResetMessage('Cancelado. El nombre no coincide.');
+      setResetError(true);
+      setResetLoading(false);
+      return;
+    }
+    
+    const confirm2 = window.confirm("¡ADVERTENCIA FINAL! ¿Está ABSOLUTAMENTE seguro de que desea borrar todos los datos?");
+    if (!confirm2) {
+      setResetMessage('Cancelado.');
+      setResetLoading(false);
+      return;
+    }
+
+    try {
+      setResetMessage('Iniciando reseteo...');
+      
+      // El orden es importante para evitar errores de referencias
+      
+      // 1. Borrar Liquidaciones
+      setResetMessage('Borrando liquidaciones...');
+      const liqCount = await resetearTodasLasLiquidaciones(consorcioId);
+      
+      // 2. Borrar Gastos (y PDFs)
+      setResetMessage('Borrando gastos...');
+      const gastosCount = await resetearTodosLosGastos(consorcioId);
+      
+      // 3. Resetear Saldos de Unidades (borra cta. cte.)
+      setResetMessage('Reseteando saldos de unidades...');
+      const { unidadesActualizadas, movimientosBorrados } = await resetearSaldosUnidades(consorcioId);
+      
+      // 4. Borrar Historial del Fondo
+      setResetMessage('Borrando historial del fondo...');
+      const fondoHistCount = await resetearHistorialFondo(consorcioId);
+      
+      // 5. Resetear Saldo del Fondo a 0
+      setResetMessage('Reseteando saldo del fondo...');
+      await resetearFondoReserva(consorcioId);
+
+      setResetMessage(`¡Reseteo completado para ${consorcioNombre}! ${liqCount} liquidaciones, ${gastosCount} gastos, ${movimientosBorrados} movimientos y ${fondoHistCount} movimientos de fondo eliminados. ${unidadesActualizadas} unidades reseteadas a saldo $0.`);
+
+    } catch (error) {
+      console.error("Error en el reseteo total:", error);
+      setResetMessage(`Error: ${error.message}`);
+      setResetError(true);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
 
   // --- Render del Menú Desplegable ---
   const renderMenuItem = (text, icon, path, isChild = false) => (
@@ -66,7 +143,6 @@ function AdminLayout() {
   // Manejador del cambio de selector
   const handleChangeConsorcio = (event) => {
       setConsorcioId(event.target.value);
-      // Opcional: Redirigir a una página de inicio limpia después de cambiar
       navigate('/admin/propietarios'); 
   };
 
@@ -75,23 +151,30 @@ function AdminLayout() {
     <Box sx={{ display: 'flex' }}>
       <AppBar
         position="fixed"
-        // La AppBar se extiende para incluir el selector
         sx={{ width: `calc(100% - ${drawerWidth}px)`, ml: `${drawerWidth}px` }} 
       >
-        <Toolbar sx={{ justifyContent: 'space-between' }}> {/* <-- Añadimos justificado */}
+        <Toolbar sx={{ justifyContent: 'space-between' }}>
           <Typography variant="h6" noWrap component="div">
             Panel de Administración
           </Typography>
           
-          {/* --- SELECTOR DE CONSORCIO (NUEVO) --- */}
-          {consorcioActivo && consorcios.length > 1 && (
+          {/* --- SELECTOR DE CONSORCIO --- */}
+          {consorcioActivo && ( // Mostramos el selector incluso si solo hay 1
             <FormControl variant="standard" sx={{ m: 1, minWidth: 120 }}>
               <Select
                 value={consorcioId}
                 onChange={handleChangeConsorcio}
                 displayEmpty
                 inputProps={{ 'aria-label': 'Without label' }}
-                sx={{ color: 'white', '& .MuiSelect-icon': { color: 'white' } }}
+                sx={{ 
+                  color: 'white', 
+                  '& .MuiSelect-icon': { color: 'white' },
+                  '&:before': { borderColor: 'white' },
+                  '&:after': { borderColor: 'white' },
+                  '.MuiSelect-standard': {
+                    color: 'white'
+                  }
+                }}
               >
                 {consorcios.map((c) => (
                   <MenuItem key={c.id} value={c.id}>
@@ -121,7 +204,7 @@ function AdminLayout() {
       >
         <Toolbar>
           <Typography variant="h6" noWrap component="div">
-            {consorcioActivo ? consorcioActivo.nombre : 'Sistema Consorcio'} {/* <-- Mostramos el nombre */}
+            {consorcioActivo ? consorcioActivo.nombre : 'Cargando...'}
           </Typography>
         </Toolbar>
         <Divider />
@@ -130,7 +213,7 @@ function AdminLayout() {
         <List>
           {renderMenuItem('Propietarios', <PeopleIcon />, '/admin/propietarios')}
           <Divider sx={{ my: 1 }} />
-          {/* ... (Menú Liquidación sin cambios) ... */}
+          {/* ... (Menú Liquidación) ... */}
           <ListItemButton onClick={() => setOpenLiquidacion(!openLiquidacion)} sx={{ pl: 2 }}>
             <ListItemIcon sx={{ minWidth: 0, mr: 3, justifyContent: 'center' }}>
               <CalculateIcon />
@@ -152,15 +235,43 @@ function AdminLayout() {
           
           <Divider sx={{ my: 1 }} />
           {renderMenuItem('Configurar Tasas', <SettingsIcon />, '/admin/configuracion/tasas')}
-
         </List>
         {/* --- FIN LISTA DE MENÚ --- */}
         
         <Divider />
         
-        <Box sx={{ marginTop: 'auto', p: 1 }}>
-          {/* ... (Botones de Reseteo y Logout sin cambios) ... */}
+        {/* --- 5. ZONA DE BOTONES (AHORA FUNCIONAL) --- */}
+        <Box sx={{ marginTop: 'auto', p: 2 }}>
+          {/* Mensajes de Reseteo */}
+          {resetLoading && <CircularProgress size={20} />}
+          {resetMessage && (
+            <Alert severity={resetError ? 'error' : 'success'} sx={{ mb: 1 }}>
+              {resetMessage}
+            </Alert>
+          )}
+        
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<DeleteForeverIcon />}
+            fullWidth
+            onClick={handleResetTotal}
+            disabled={resetLoading || !consorcioId} // Deshabilitado si no hay consorcio
+            sx={{ mb: 1 }}
+          >
+            {resetLoading ? 'Reseteando...' : 'Reiniciar Consorcio'}
+          </Button>
+
+          <Button
+            variant="outlined"
+            startIcon={<LogoutIcon />}
+            fullWidth
+            onClick={handleLogout} // Conectar logout
+          >
+            Cerrar Sesión
+          </Button>
         </Box>
+        {/* --- FIN ZONA DE BOTONES --- */}
       </Drawer>
 
       <Box
@@ -168,7 +279,6 @@ function AdminLayout() {
         sx={{ flexGrow: 1, bgcolor: 'background.default', p: 3, maxWidth: '1400px' }}
       >
         <Toolbar />
-        {/* El Outlet renderizará las rutas anidadas */}
         <Outlet /> 
       </Box>
     </Box>

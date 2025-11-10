@@ -1,65 +1,106 @@
 import React, { createContext, useState, useEffect } from 'react';
 import { db } from '../config/firebase';
 import { collection, getDocs } from 'firebase/firestore';
+import { useAuth } from '../hooks/useAuth'; // <-- 1. IMPORTAR EL HOOK DE AUTH
 
 // 1. Crear el contexto
 export const ConsorcioContext = createContext();
 
 // 2. Crear el Proveedor (Provider)
-// Nota: Por simplicidad inicial, listaremos todos los consorcios
 export function ConsorcioProvider({ children }) {
-  const [consorcioId, setConsorcioId] = useState(null); // ID del consorcio activo
-  const [consorcios, setConsorcios] = useState([]); // Lista de todos los consorcios
+  const { user } = useAuth(); // <-- 2. OBTENER EL USUARIO DEL AUTHCONTEXT
+  
+  const [consorcioId, setConsorcioId] = useState(null);
+  const [consorcios, setConsorcios] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null); // <-- Estado de error
 
-  // Cargar lista de consorcios y establecer el primero como activo
+  // 3. Modificar el useEffect
   useEffect(() => {
     const fetchConsorcios = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        // Por ahora, asumimos que todos los documentos en 'consorcios' son consorcios
+        console.log("Intentando cargar consorcios (usuario autenticado)...");
         const consorciosCollection = collection(db, 'consorcios');
         const snapshot = await getDocs(consorciosCollection);
         
         const listaConsorcios = snapshot.docs.map(doc => ({
           id: doc.id,
-          nombre: doc.data().nombre || doc.id, // Usar el campo 'nombre' del consorcio
+          nombre: doc.data().nombre || doc.id,
         }));
         
         setConsorcios(listaConsorcios);
 
-        // Si hay consorcios, establece el primero como activo por defecto
         if (listaConsorcios.length > 0) {
-          setConsorcioId(listaConsorcios[0].id);
+          // Intentar mantener el ID si ya existía, o poner el primero
+          setConsorcioId(prevId => 
+            listaConsorcios.some(c => c.id === prevId) ? prevId : listaConsorcios[0].id
+          );
+        } else {
+          setError("No se encontraron consorcios. El administrador debe crear uno.");
+          setConsorcioId(null);
         }
       } catch (error) {
         console.error("Error al cargar consorcios:", error);
+        setError(error.message); // Guardar el error
       } finally {
         setLoading(false);
       }
     };
 
-    fetchConsorcios();
-  }, []);
+    // 4. LA CLAVE: Solo buscar consorcios SI el usuario está logueado
+    if (user) {
+      fetchConsorcios();
+    } else {
+      // Si el usuario se desloguea, limpiamos todo
+      setLoading(false);
+      setConsorcios([]);
+      setConsorcioId(null);
+      setError(null);
+    }
+    
+  }, [user]); // <-- 5. AGREGAR 'user' COMO DEPENDENCIA
 
   const value = {
     consorcioId,
     consorcios,
     loading,
-    setConsorcioId, // Función para cambiar el consorcio activo
-    consorcioActivo: consorcios.find(c => c.id === consorcioId) || { id: consorcioId, nombre: 'Cargando...' }
+    error, // <-- Exponer el error
+    setConsorcioId,
+    consorcioActivo: consorcios.find(c => c.id === consorcioId) || null
   };
 
-  // Si está cargando, esperamos (similar a AuthContext)
-  if (loading) {
-    return <h2>Cargando consorcios...</h2>;
+  // 6. Ajustar la lógica de carga
+  // El AuthContext ya muestra "Cargando..."
+  // No necesitamos mostrar otro spinner aquí mientras 'user' es null.
+  
+  // Si el usuario NO está logueado (ej: en /login), simplemente renderizamos 'children'
+  // y el contexto estará vacío, lo cual es correcto.
+  if (!user) {
+    return (
+      <ConsorcioContext.Provider value={value}>
+        {children}
+      </ConsorcioContext.Provider>
+    );
   }
   
-  // Si no hay consorcios, la aplicación no puede iniciar
-  if (!consorcioId && !loading) {
-     // Aquí deberíamos redirigir a una página para crear el primer consorcio
-     return <h2>Error: No se encontraron consorcios activos.</h2>;
+  // Si el usuario ESTÁ logueado pero estamos cargando consorcios
+  if (user && loading) {
+     return <h2>Cargando consorcios...</h2>; // Spinner de Consorcios
+  }
+  
+  // Si el usuario ESTÁ logueado y hubo un error al cargar consorcios
+  if (user && error) {
+     return <h2>Error al cargar consorcios: {error}</h2>;
+  }
+  
+  // Si el usuario ESTÁ logueado y NO hay consorcios
+  if (user && !loading && consorcios.length === 0 && !error) {
+     return <h2>No se encontraron consorcios. Contacte al administrador.</h2>;
   }
 
+  // Si todo está bien (usuario logueado, consorcios cargados)
   return (
     <ConsorcioContext.Provider value={value}>
       {children}

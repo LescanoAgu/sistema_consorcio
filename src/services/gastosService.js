@@ -58,7 +58,6 @@ export const crearGasto = async (consorcioId, gastoData) => {
     // NOTA: La lógica de descontar del fondo de reserva al *crear* el gasto se eliminó.
     // El fondo SÓLO debe descontarse al *ejecutar la liquidación* que incluye ese gasto.
     // Esto previene inconsistencias si el gasto se borra antes de liquidar.
-    // El 'gastoService' solo crea el gasto; 'liquidacionService' maneja la contabilidad.
 
     return docRef;
   } catch (error) {
@@ -140,7 +139,7 @@ export const updateGasto = async (consorcioId, id, gastoData) => {
     concepto: gastoData.concepto,
     proveedor: gastoData.proveedor,
     monto: parseFloat(gastoData.monto),
-    // Tipo, Distribucion y UnidadesAfectadas también deberían poder editarse
+    // Incluimos tipo, distribucion y unidades (como en tu modal)
     tipo: gastoData.tipo,
     distribucion: gastoData.distribucion || 'Prorrateo',
     unidadesAfectadas: gastoData.unidadesAfectadas || []
@@ -148,8 +147,8 @@ export const updateGasto = async (consorcioId, id, gastoData) => {
   
   // Limpieza si es Ordinario
   if (datosActualizados.tipo === 'Ordinario') {
-      delete datosActualizados.distribucion;
-      delete datosActualizados.unidadesAfectadas;
+      datosActualizados.distribucion = 'Prorrateo'; // Asegurar valor
+      datosActualizados.unidadesAfectadas = [];
   }
 
   try {
