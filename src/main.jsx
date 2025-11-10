@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
+import { ConsorcioProvider } from './context/ConsorcioContext'; // <-- NUEVA IMPORTACIÓN
 
 // --- IMPORTACIONES NUEVAS DE MUI ---
 import { ThemeProvider, createTheme } from '@mui/material/styles';
@@ -26,7 +27,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <ThemeProvider theme={theme}>
       <CssBaseline /> {/* Agrega el reseteo de CSS */}
       <AuthProvider>
-        <App />
+        <ConsorcioProvider> {/* <-- NUEVO PROVEEDOR (Debe estar DENTRO de AuthProvider) */}
+          <App />
+        </ConsorcioProvider>
       </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>

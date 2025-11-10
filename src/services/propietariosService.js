@@ -4,9 +4,9 @@ import {
   collection, addDoc, serverTimestamp,
   onSnapshot, query, orderBy, getDocs,
   runTransaction, doc, Timestamp, where,
-  updateDoc, deleteDoc, setDoc // <-- Asegurarse que setDoc esté importado
+  updateDoc, deleteDoc, setDoc
 } from 'firebase/firestore';
-import { registrarMovimientoFondo } from './fondoService'; // <-- Importamos el servicio del fondo
+import { registrarMovimientoFondo } from './fondoService';
 
 // --- crearUnidad (Sin cambios) ---
 export const crearUnidad = async (unidadData) => {
@@ -52,56 +52,7 @@ export const getTodasUnidades = async () => {
   return unidades;
 };
 
-// --- aplicarInteresesMoratorios (Sin cambios) ---
-export const aplicarInteresesMoratorios = async (tasaMensual, concepto) => {
-    if (!tasaMensual || tasaMensual <= 0) throw new Error("La tasa de interés debe ser un número positivo.");
-    if (!concepto || concepto.trim() === '') throw new Error("El concepto para el registro es obligatorio.");
-
-    const q = query(collection(db, "unidades"), where("saldo", "<", 0));
-    const deudoresSnapshot = await getDocs(q); // Esta consulta necesita un índice (crear desde el error de consola)
-
-    if (deudoresSnapshot.empty) {
-        console.log("No se encontraron deudores.");
-        return { unidadesActualizadas: 0, totalInteres: 0 };
-    }
-
-    let unidadesActualizadas = 0;
-    let totalInteres = 0;
-
-    try {
-        await runTransaction(db, async (transaction) => {
-            for (const unidadDoc of deudoresSnapshot.docs) {
-                const unidadRef = unidadDoc.ref;
-                const unidadData = unidadDoc.data();
-                const saldoAnterior = unidadData.saldo;
-                const montoInteres = - (Math.abs(saldoAnterior) * tasaMensual);
-                const saldoResultante = saldoAnterior + montoInteres;
-
-                transaction.update(unidadRef, { saldo: saldoResultante });
-
-                const ctaCteRef = doc(collection(db, `unidades/${unidadDoc.id}/cuentaCorriente`));
-                const itemCtaCte = {
-                    fecha: Timestamp.now(), concepto, monto: montoInteres, saldoResultante,
-                    liquidacionId: null, unidadId: unidadDoc.id,
-                    desglose: { ordinario: 0, extraProrrateo: 0, extraEspecifico: 0, aporteFondo: 0 },
-                    pagado: false, // Las deudas por interés nacen pendientes
-                    montoAplicado: 0
-                };
-                transaction.set(ctaCteRef, itemCtaCte);
-
-                unidadesActualizadas++;
-                totalInteres += montoInteres;
-            }
-        });
-        console.log(`Intereses aplicados a ${unidadesActualizadas} unidades.`);
-        return { unidadesActualizadas, totalInteres };
-    } catch (error) {
-        console.error("¡FALLÓ LA TRANSACCIÓN DE INTERESES! ", error);
-        throw new Error(`Error al aplicar intereses: ${error.message}`);
-    }
-};
-
-// --- registrarPago (¡NUEVA VERSIÓN INTELIGENTE!) ---
+// --- registrarPago (Sin cambios) ---
 export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPago) => {
   if (!unidadId) throw new Error("Se requiere el ID de la unidad.");
   if (!montoPagado || montoPagado <= 0) throw new Error("El monto pagado debe ser un número positivo.");
@@ -125,8 +76,6 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
       const saldoAnteriorUnidad = unidadDoc.data().saldo;
 
       // 2. Buscar deudas pendientes (monto < 0) y no pagadas, ordenadas por fecha
-      // IMPORTANTE: Esta consulta requiere un índice compuesto.
-      // (Crear desde el error de consola si aparece)
       const deudasQuery = query(
         ctaCteCollectionRef,
         where("monto", "<", 0),
@@ -134,11 +83,9 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
         orderBy("fecha", "asc")
       );
       
-      // Leemos las deudas FUERA de la transacción
       const deudasSnapshot = await getDocs(deudasQuery); 
       const deudasRefs = deudasSnapshot.docs.map(d => d.ref);
       
-      // Volvemos a leerlas DENTRO de la transacción para poder actualizarlas
       const deudasDocsEnTransaccion = await Promise.all(
         deudasRefs.map(ref => transaction.get(ref))
       );
@@ -147,18 +94,17 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
         console.log(`Encontradas ${deudasDocsEnTransaccion.length} deudas pendientes para ${unidadId}`);
         
         for (const deudaDoc of deudasDocsEnTransaccion) {
-          if (montoRestante <= 0) break; // Si ya aplicamos todo el pago, salimos
+          if (montoRestante <= 0) break;
 
           const deudaData = deudaDoc.data();
-          const montoDeudaTotal = Math.abs(deudaData.monto);
+          const montoDeudaTotal = Math.abs(deudaData.monto); 
           const montoDeudaPendiente = montoDeudaTotal - (deudaData.montoAplicado || 0);
 
-          // Determinar cuánto de este pago se aplica a esta deuda
           const montoAAplicar = Math.min(montoRestante, montoDeudaPendiente);
           
           if (montoAAplicar > 0) {
             const nuevoMontoAplicado = (deudaData.montoAplicado || 0) + montoAAplicar;
-            const estaPagadaCompleta = nuevoMontoAplicado >= montoDeudaTotal - 0.01; // Margen de centavos
+            const estaPagadaCompleta = nuevoMontoAplicado >= montoDeudaTotal - 0.01;
 
             transaction.update(deudaDoc.ref, {
               montoAplicado: nuevoMontoAplicado,
@@ -167,9 +113,7 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
 
             montoRestante -= montoAAplicar;
             
-            // Registrar fondo recaudado (basado en proporción pagada)
-            if (deudaData.desglose && deudaData.desglose.aporteFondo > 0) {
-              // Proporción del AporteFondo que se está pagando
+            if (deudaData.tipo && deudaData.tipo.includes('_BASE') && deudaData.desglose && deudaData.desglose.aporteFondo > 0) {
               const proporcionPagada = montoAAplicar / montoDeudaTotal;
               const fondoRecaudadoEstaDeuda = (deudaData.desglose.aporteFondo || 0) * proporcionPagada;
               totalFondoRecaudado += fondoRecaudadoEstaDeuda;
@@ -187,7 +131,6 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
       
       let conceptoFinalPago = conceptoPago;
       if (conceptosDeudasPagadas.length > 0) {
-         // Acortamos el concepto si paga muchas deudas
          conceptoFinalPago = `${conceptoPago} (Aplica a: ${conceptosDeudasPagadas.slice(0, 2).join(', ')}${conceptosDeudasPagadas.length > 2 ? ', ...' : ''})`;
       }
 
@@ -199,7 +142,8 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
         liquidacionId: null,
         unidadId: unidadId,
         pagado: true,
-        montoAplicado: montoPagado
+        montoAplicado: montoPagado,
+        tipo: "PAGO_RECIBIDO"
       });
 
       // 4. Actualizar el saldo total de la unidad
@@ -207,25 +151,22 @@ export const registrarPago = async (unidadId, montoPagado, fechaPago, conceptoPa
 
       // 5. Actualizar el Fondo de Reserva si recaudamos algo
       if (totalFondoRecaudado > 0) {
-        console.log(`Recaudados ${totalFondoRecaudado} para el fondo de reserva.`);
-        const configDoc = await transaction.get(configRef); // Leer config DENTRO de la tx
+        const configDoc = await transaction.get(configRef);
         const saldoActualFondo = configDoc.exists() ? (configDoc.data().saldoFondoReserva || 0) : 0;
         const saldoNuevoFondo = saldoActualFondo + totalFondoRecaudado;
 
-        // a. Actualizar el saldo general
         transaction.update(configRef, { saldoFondoReserva: saldoNuevoFondo });
 
-        // b. Registrar el INGRESO en el historial del fondo
         transaction.set(doc(collection(db, "historicoFondoReserva")), {
-          fecha: fechaTimestamp, // Usar la fecha del pago
+          fecha: fechaTimestamp,
           concepto: `Cobro aporte s/pago ${unidadDoc.data().nombre}`,
-          monto: totalFondoRecaudado, // Positivo
+          monto: totalFondoRecaudado,
           saldoResultante: saldoNuevoFondo,
           liquidacionId: null,
           gastoId: null
         });
       }
-    }); // --- FIN DE LA TRANSACCIÓN ---
+    });
 
     console.log(`Pago de ${montoPagado} registrado y aplicado para unidad ${unidadId}`);
   } catch (error) {
@@ -290,6 +231,161 @@ export const getSaldoFondoActual = (callback) => {
 
   return unsubscribe;
 };
+
+// --- FUNCIONES PARA TASA DE MORA ---
+
+const TASA_MORA_DOC_REF = doc(db, "configuracion", "tasas_mora");
+
+export const getTasaMoraProlongada = (callback) => {
+  const unsubscribe = onSnapshot(TASA_MORA_DOC_REF, (docSnap) => {
+    if (docSnap.exists()) {
+      const tasa = docSnap.data().tasaBNA || 0.07;
+      callback(tasa);
+    } else {
+      setDoc(TASA_MORA_DOC_REF, { tasaBNA: 0.07 }, { merge: true });
+      callback(0.07);
+    }
+  }, (error) => {
+    console.error("Error al obtener tasa de mora:", error);
+    callback(0.07);
+  });
+
+  return unsubscribe;
+};
+
+export const setTasaMoraProlongada = async (tasaDecimal) => {
+  if (typeof tasaDecimal !== 'number' || isNaN(tasaDecimal) || tasaDecimal < 0) {
+    throw new Error("La tasa debe ser un número positivo.");
+  }
+  try {
+    await setDoc(TASA_MORA_DOC_REF, { 
+      tasaBNA: tasaDecimal, 
+      ultimaActualizacion: serverTimestamp() 
+    }, { merge: true });
+    console.log("Tasa BNA actualizada a:", tasaDecimal);
+  } catch (error) {
+    console.error("Error al establecer tasa BNA:", error);
+    throw new Error("No se pudo actualizar la tasa de mora.");
+  }
+};
+
+
+// --- ¡APLICAR INTERÉS MANUAL! ---
+
+/**
+ * Aplica un cargo de interés manual a la cta cte de una unidad.
+ * Es transaccional.
+ */
+export const aplicarInteresManual = async (unidadId, mesOrigen, montoInteres, tipoInteres, conceptoManual, tasaAplicada, parentId = null) => {
+  if (!unidadId || !mesOrigen || !montoInteres || !tipoInteres || !conceptoManual) {
+    throw new Error("Faltan datos para aplicar el interés.");
+  }
+  if (montoInteres <= 0) {
+    throw new Error("El monto del interés debe ser un número positivo.");
+  }
+
+  const unidadRef = doc(db, "unidades", unidadId);
+  const ctaCteRef = doc(collection(db, `unidades/${unidadId}/cuentaCorriente`));
+  const montoDebito = -Math.abs(montoInteres); // El interés es un débito
+  const mesAplicacion = new Date().toISOString().substring(0, 7); // YYYY-MM
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      // 1. Leer saldo actual de la unidad
+      const unidadDoc = await transaction.get(unidadRef);
+      if (!unidadDoc.exists()) throw new Error("La unidad no existe.");
+      
+      const saldoAnterior = unidadDoc.data().saldo || 0;
+      const saldoResultante = saldoAnterior + montoDebito;
+
+      // 2. Crear el nuevo movimiento de interés
+      const nuevoMovimientoInteres = {
+        fecha: Timestamp.now(),
+        concepto: conceptoManual,
+        monto: montoDebito,
+        saldoResultante: saldoResultante,
+        
+        liquidacionId: null, // Es manual
+        unidadId: unidadId,
+        
+        tipo: tipoInteres,
+        mes_origen: mesOrigen,
+        mes_aplicacion: mesAplicacion,
+        tasa_aplicada: tasaAplicada || null,
+        parentId: parentId, // Vincula al movimiento padre
+        
+        pagado: false,
+        montoAplicado: 0
+      };
+
+      // 3. Escribir el nuevo movimiento
+      transaction.set(ctaCteRef, nuevoMovimientoInteres);
+      
+      // 4. Actualizar el saldo principal de la unidad
+      transaction.update(unidadRef, { saldo: saldoResultante });
+    });
+    
+    console.log(`Interés manual registrado para ${unidadId}.`);
+    
+  } catch (error) {
+    console.error("¡FALLÓ LA TRANSACCIÓN (Interés Manual)! ", error);
+    throw new Error(`Error al registrar el interés: ${error.message}`);
+  }
+};
+
+/**
+ * Elimina un movimiento de débito (interés o base) que no haya sido pagado.
+ * Es transaccional.
+ */
+export const eliminarMovimientoDebito = async (unidadId, movimientoId) => {
+  if (!unidadId || !movimientoId) {
+    throw new Error("Faltan IDs para eliminar el movimiento.");
+  }
+
+  const unidadRef = doc(db, "unidades", unidadId);
+  const ctaCteRef = doc(db, `unidades/${unidadId}/cuentaCorriente`, movimientoId);
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      // 1. Leer el movimiento a borrar
+      const movDoc = await transaction.get(ctaCteRef);
+      if (!movDoc.exists()) throw new Error("El movimiento a eliminar no existe.");
+      
+      const movData = movDoc.data();
+      
+      // 2. Validar que no esté pagado
+      if (movData.pagado === true || (movData.montoAplicado || 0) > 0) {
+        throw new Error("No se puede eliminar un movimiento que ya tiene pagos aplicados.");
+      }
+      
+      // 3. Validar que sea un débito (monto < 0)
+      if (movData.monto >= 0) {
+        throw new Error("No se puede eliminar un movimiento de crédito (pago).");
+      }
+
+      // 4. Leer el saldo actual de la unidad
+      const unidadDoc = await transaction.get(unidadRef);
+      if (!unidadDoc.exists()) throw new Error("La unidad no existe.");
+      
+      const saldoAnterior = unidadDoc.data().saldo || 0;
+      // Revertimos el débito (sumamos el valor absoluto)
+      const saldoResultante = saldoAnterior + Math.abs(movData.monto); 
+
+      // 5. Eliminar el movimiento
+      transaction.delete(ctaCteRef);
+      
+      // 6. Actualizar el saldo principal de la unidad
+      transaction.update(unidadRef, { saldo: saldoResultante });
+    });
+    
+    console.log(`Movimiento ${movimientoId} eliminado exitosamente de ${unidadId}.`);
+
+  } catch (error) {
+    console.error("¡FALLÓ LA TRANSACCIÓN (Eliminar Movimiento)! ", error);
+    throw new Error(`Error al eliminar: ${error.message}`);
+  }
+};
+
 
 // --- resetearSaldosUnidades (Sin cambios) ---
 export const resetearSaldosUnidades = async () => {

@@ -4,8 +4,11 @@ import { getHistorialFondo } from '../../services/fondoService';
 import { getSaldoFondoActual } from '../../services/propietariosService'; // Necesitamos crear esta función
 import {
   Box, Typography, Paper, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, CircularProgress, Alert
+  TableContainer, TableHead, TableRow, CircularProgress, Alert,
+  Button,
+  Link // <-- ¡AÑADIR ESTA LÍNEA QUE FALTABA!
 } from '@mui/material';
+import DescriptionIcon from '@mui/icons-material/Description';
 import { Link as RouterLink } from 'react-router-dom';
 
 // Función de formato (podríamos moverla a helpers.js)
@@ -91,17 +94,36 @@ function FondoReservaPage() {
                     
                     {/* --- CELDA CORREGIDA CON PRIORIDAD --- */}
                     <TableCell>
-                      {/* Si tiene gastoId, SIEMPRE mostramos el gasto (es un egreso) */}
-                      {mov.gastoId ? (
-                        <RouterLink to={`/admin/liquidacion/gastos`}>
-                          Gasto: {mov.gastoId.substring(0, 5)}...
-                        </RouterLink>
-                      ) : mov.liquidacionId ? ( // Si NO tiene gastoId, pero SÍ liqId (será un ingreso)
-                        <RouterLink to={`/admin/liquidacion/historial`}>
-                          Liq: {mov.liquidacionId.substring(0, 5)}...
-                        </RouterLink>
+                      {/* Prioridad 1: Si es Gasto y TIENE facturaURL */}
+                      {mov.gastoId && mov.facturaURL ? (
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          href={mov.facturaURL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          startIcon={<DescriptionIcon />}
+                          sx={{ minWidth: 'auto', px: 1 }}
+                          title="Ver Factura del Gasto"
+                        >
+                          Ver PDF
+                        </Button>
+                      
+                      // Prioridad 2: Si es Gasto pero NO tiene facturaURL (link a gastos)
+                      ) : mov.gastoId ? (
+                        <Link component={RouterLink} to={`/admin/liquidacion/gastos`} title={mov.gastoId} sx={{fontSize: '0.875rem'}}>
+                          Ver Gasto
+                        </Link>
+
+                      // Prioridad 3: Si es Liquidación (link a historial)
+                      ) : mov.liquidacionId ? (
+                        <Link component={RouterLink} to={`/admin/liquidacion/historial`} title={mov.liquidacionId} sx={{fontSize: '0.875rem'}}>
+                          Ver Liq.
+                        </Link>
+
+                      // Prioridad 4: Sin referencia
                       ) : (
-                        '-' // Si no tiene ninguno
+                        '-' 
                       )}
                     </TableCell>
                     {/* --- FIN CELDA CORREGIDA --- */}
