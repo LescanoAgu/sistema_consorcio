@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { updateGasto } from '../services/gastosService';
-import { getTodasUnidades } from '../services/propietariosService'; // Para editar unidades
+import { getTodasUnidades } from '../services/propietariosService';
+
 // --- IMPORTACIONES DE MUI ---
 import {
   Box, Button, TextField, Typography, Grid, Modal, Paper, Alert, CircularProgress,
   FormControl, InputLabel, Select, MenuItem,
   RadioGroup, FormControlLabel, Radio,
-  Autocomplete, Checkbox
+  Autocomplete, Checkbox,
+  Divider // <-- 1. CORRECCIÓN: Importar Divider
 } from '@mui/material';
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 import CheckBoxIcon from '@mui/icons-material/CheckBox';
@@ -28,7 +30,6 @@ const style = {
   p: 4,
 };
 
-// 1. RECIBIR consorcioId COMO PROP
 function EditGastoModal({ open, onClose, gastoToEdit, consorcioId }) {
   
   const [fecha, setFecha] = useState('');
@@ -36,7 +37,6 @@ function EditGastoModal({ open, onClose, gastoToEdit, consorcioId }) {
   const [proveedor, setProveedor] = useState('');
   const [monto, setMonto] = useState('');
   
-  // --- Estados para Edición Completa ---
   const [tipoGasto, setTipoGasto] = useState('Ordinario');
   const [distribucionExtra, setDistribucionExtra] = useState('Prorrateo');
   const [unidadesDisponibles, setUnidadesDisponibles] = useState([]);
@@ -46,7 +46,7 @@ function EditGastoModal({ open, onClose, gastoToEdit, consorcioId }) {
   const [loadingUnidades, setLoadingUnidades] = useState(false);
   const [message, setMessage] = useState('');
 
-  // 2. Efecto para cargar datos del gasto
+  // Efecto para cargar datos del gasto
   useEffect(() => {
     if (gastoToEdit) {
       setFecha(gastoToEdit.fecha || '');
@@ -65,7 +65,7 @@ function EditGastoModal({ open, onClose, gastoToEdit, consorcioId }) {
     }
   }, [gastoToEdit, open]);
 
-  // 3. Efecto para cargar unidades
+  // Efecto para cargar unidades
   useEffect(() => {
     const cargarUnidades = async () => {
       if (!consorcioId) {
@@ -161,6 +161,7 @@ function EditGastoModal({ open, onClose, gastoToEdit, consorcioId }) {
               <TextField label="Monto" type="number" fullWidth size="small" value={monto} onChange={(e) => setMonto(e.target.value)} required disabled={loading} InputProps={{ inputProps: { step: '0.01' } }}/>
             </Grid>
             
+            {/* Esta era la línea 183 del error */}
             <Grid item xs={12}><Divider sx={{my: 1}} /></Grid>
 
             {/* Campos de Distribución */}
@@ -206,12 +207,21 @@ function EditGastoModal({ open, onClose, gastoToEdit, consorcioId }) {
                       isOptionEqualToValue={(option, value) => option.id === value.id}
                       disableCloseOnSelect
                       disabled={loading || loadingUnidades}
-                      renderOption={(props, option, { selected }) => (
-                        <li {...props}>
-                          <Checkbox icon={icon} checkedIcon={checkedIcon} style={{ marginRight: 8 }} checked={selected} />
-                          {option.nombre} ({option.propietario})
-                        </li>
-                      )}
+                      
+                      // =================== INICIO DE LA CORRECCIÓN 2 ===================
+                      renderOption={(props, option, { selected }) => {
+                        // Separamos 'key' del resto de las props
+                        const { key, ...liProps } = props;
+                        return (
+                          // Usamos 'key' directamente en el 'li' y esparcimos el resto
+                          <li key={key} {...liProps}>
+                            <Checkbox icon={icon} checkedIcon={checkedIcon} style={{ marginRight: 8 }} checked={selected} />
+                            {option.nombre} ({option.propietario})
+                          </li>
+                        );
+                      }}
+                      // ==================== FIN DE LA CORRECCIÓN 2 ===================
+
                       renderInput={(params) => (
                         <TextField {...params} label="Seleccionar Unidades Afectadas" placeholder="Unidades" size="small" />
                       )}
