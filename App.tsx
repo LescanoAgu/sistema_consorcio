@@ -146,10 +146,17 @@ const App: React.FC = () => {
       case 'dashboard':
         return <Dashboard units={units} expenses={expenses} settings={settings} reserveHistory={reserveHistory} />;
       case 'units':
-        return <UnitsView units={units} setUnits={setUnits} />;
+                  return <UnitsView 
+                  units={units} 
+                  setUnits={setUnits} 
+                  consortiumId={selectedConsortium?.id || ''} // ✅ PASAR EL ID
+               />;
       case 'expenses':
-        // Pasamos setExpenses pero deberías actualizar ExpensesView para que llame a FirestoreService.addExpense
-        return <ExpensesView expenses={expenses} setExpenses={setExpenses} />;
+        return <ExpensesView 
+                  expenses={expenses} 
+                  setExpenses={setExpenses} 
+                  consortiumId={selectedConsortium?.id || ''} // ✅ PASAR EL ID
+               />;
       case 'settlement':
         return (
           <SettlementView 
