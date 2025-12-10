@@ -1,7 +1,9 @@
-
 import React, { useState } from 'react';
 import { Consortium, UserRole } from '../types';
-import { Building2, ArrowRight, LogOut, ShieldCheck, User, Code, PlusCircle, UserPlus, LogIn } from 'lucide-react';
+import { Building2, ArrowRight, LogOut, ShieldCheck, User, PlusCircle, UserPlus, LogIn, AlertCircle, Loader2 } from 'lucide-react';
+// ✅ IMPORTANTE: Importamos la autenticación real de Firebase
+import { auth } from '../src/config/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 interface AuthViewProps {
   isAuthenticated: boolean;
@@ -15,38 +17,74 @@ interface AuthViewProps {
 }
 
 const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, onSelectConsortium, consortiums, onCreateConsortium, onLogout, userRole, userEmail }) => {
+  // Login States
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   
   // Registration State
   const [isRegistering, setIsRegistering] = useState(false);
-  const [regName, setRegName] = useState('');
+  const [regName, setRegName] = useState(''); // (Nota: Firebase Auth básico usa solo email/pass, el nombre lo guardaremos local por ahora)
   const [regEmail, setRegEmail] = useState('');
-  const [regRole, setRegRole] = useState<UserRole>('USER');
+  const [regRole, setRegRole] = useState<UserRole>('ADMIN'); // Por defecto ADMIN para crear el primer consorcio
   const [regPassword, setRegPassword] = useState('');
 
+  // Create Consortium State
   const [isCreating, setIsCreating] = useState(false);
   const [newConsortium, setNewConsortium] = useState<Partial<Consortium>>({ name: '', address: '', cuit: '' });
 
   const step = isAuthenticated ? 'select' : 'login';
 
-  const handleSimulatedLogin = (role: UserRole) => {
-    let mockEmail = email;
-    if (!mockEmail) {
-        if (role === 'DEV') mockEmail = 'dev@sistema.com';
-        if (role === 'ADMIN') mockEmail = 'admin@consorcio.com';
-        if (role === 'USER') mockEmail = 'propietario@mail.com';
+  // --- LÓGICA DE AUTENTICACIÓN REAL ---
+
+  const handleRealLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // Si pasa, notificamos a la App (Asumimos ADMIN si entra por login directo para simplificar, o podrías guardar el rol en BD)
+      onLoginSuccess(email, 'ADMIN'); 
+    } catch (err: any) {
+      console.error(err);
+      setError('Error al iniciar sesión: Verifique sus credenciales.');
+    } finally {
+      setLoading(false);
     }
-    onLoginSuccess(mockEmail, role);
   };
 
-  const handleRegistration = (e: React.FormEvent) => {
-      e.preventDefault();
-      if(regName && regEmail && regPassword) {
-          alert("Usuario registrado con éxito. Ingresando...");
-          onLoginSuccess(regEmail, regRole);
+  const handleRealRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      await createUserWithEmailAndPassword(auth, regEmail, regPassword);
+      // Al registrarse, usamos el rol que seleccionó en el formulario
+      onLoginSuccess(regEmail, regRole);
+      alert("¡Cuenta creada con éxito! Ahora puedes crear tu primer consorcio.");
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('Este correo ya está registrado.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('La contraseña debe tener al menos 6 caracteres.');
+      } else {
+        setError('Error al registrarse. Intente nuevamente.');
       }
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleRealLogout = async () => {
+    await signOut(auth);
+    onLogout();
+  };
+
+  // --- LÓGICA DE CREACIÓN ---
 
   const handleCreate = () => {
       if(newConsortium.name && newConsortium.address) {
@@ -74,88 +112,69 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
                   </div>
                   <h1 className="text-2xl font-bold text-slate-800">Gestión Consorcio</h1>
                   <p className="text-slate-500">
-                      {isRegistering ? 'Crear una nueva cuenta' : 'Seleccione su perfil de acceso'}
+                      {isRegistering ? 'Crear Cuenta (Admin)' : 'Bienvenido al Sistema'}
                   </p>
               </div>
 
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center">
+                  <AlertCircle className="w-4 h-4 mr-2"/>
+                  {error}
+                </div>
+              )}
+
               {!isRegistering ? (
                 <>
-                  {/* Quick Login Buttons for Demo */}
-                  <div className="space-y-3">
-                     <button onClick={() => handleSimulatedLogin('ADMIN')} className="w-full flex items-center justify-between p-4 bg-white border border-slate-200 hover:border-indigo-500 rounded-xl group transition-all">
-                        <div className="flex items-center">
-                            <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg mr-3">
-                                <ShieldCheck className="w-5 h-5"/>
-                            </div>
-                            <div className="text-left">
-                                <p className="font-bold text-slate-700">Administrador</p>
-                                <p className="text-xs text-slate-400">admin@consorcio.com</p>
-                            </div>
-                        </div>
-                        <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500"/>
-                     </button>
-
-                     <button onClick={() => handleSimulatedLogin('USER')} className="w-full flex items-center justify-between p-4 bg-white border border-slate-200 hover:border-emerald-500 rounded-xl group transition-all">
-                        <div className="flex items-center">
-                            <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg mr-3">
-                                <User className="w-5 h-5"/>
-                            </div>
-                            <div className="text-left">
-                                <p className="font-bold text-slate-700">Propietario / Inquilino</p>
-                                <p className="text-xs text-slate-400">propietario@mail.com</p>
-                            </div>
-                        </div>
-                        <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-emerald-500"/>
-                     </button>
-
-                     <button onClick={() => handleSimulatedLogin('DEV')} className="w-full flex items-center justify-between p-4 bg-slate-900 border border-slate-700 hover:border-purple-500 rounded-xl group transition-all">
-                        <div className="flex items-center">
-                            <div className="p-2 bg-slate-800 text-purple-400 rounded-lg mr-3">
-                                <Code className="w-5 h-5"/>
-                            </div>
-                            <div className="text-left">
-                                <p className="font-bold text-white">Desarrollador</p>
-                                <p className="text-xs text-slate-400">Acceso total (Debug)</p>
-                            </div>
-                        </div>
-                        <ArrowRight className="w-5 h-5 text-slate-500 group-hover:text-purple-500"/>
-                     </button>
-                  </div>
-
-                  <div className="mt-8 pt-6 border-t border-slate-100">
-                      <form onSubmit={(e) => { e.preventDefault(); handleSimulatedLogin('ADMIN'); }} className="opacity-70 hover:opacity-100 transition-opacity">
-                          <p className="text-xs font-semibold text-slate-400 mb-2 uppercase">Login Tradicional</p>
-                          <input 
+                  <form onSubmit={handleRealLogin} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Email</label>
+                        <input 
                             type="email" 
-                            className="w-full p-2 text-sm border rounded mb-2 bg-slate-50 focus:bg-white transition-colors"
-                            placeholder="Email..."
+                            className="w-full p-3 text-sm border rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-200 outline-none transition-colors"
+                            placeholder="nombre@ejemplo.com"
                             value={email}
                             onChange={e => setEmail(e.target.value)}
-                          />
-                           <input 
+                            required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Contraseña</label>
+                        <input 
                             type="password" 
-                            className="w-full p-2 text-sm border rounded mb-2 bg-slate-50 focus:bg-white transition-colors"
-                            placeholder="Contraseña..."
+                            className="w-full p-3 text-sm border rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-200 outline-none transition-colors"
+                            placeholder="••••••••"
                             value={password}
                             onChange={e => setPassword(e.target.value)}
-                          />
-                          <button className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm rounded-lg font-medium transition-colors mb-2">
-                              Ingresar
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => setIsRegistering(true)}
-                            className="w-full py-2 text-indigo-600 text-sm font-medium hover:bg-indigo-50 rounded-lg transition-colors flex items-center justify-center"
-                          >
-                             <UserPlus className="w-4 h-4 mr-2" /> Crear Cuenta Nueva
-                          </button>
-                      </form>
+                            required
+                        />
+                      </div>
+                      
+                      <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-colors shadow-lg shadow-indigo-200 flex justify-center items-center"
+                      >
+                          {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Iniciar Sesión'}
+                      </button>
+                  </form>
+
+                  <div className="mt-6 pt-6 border-t border-slate-100 text-center">
+                      <p className="text-sm text-slate-500 mb-3">¿Es tu primera vez aquí?</p>
+                      <button 
+                        onClick={() => setIsRegistering(true)}
+                        className="w-full py-2 text-indigo-600 text-sm font-medium hover:bg-indigo-50 rounded-lg transition-colors flex items-center justify-center border border-indigo-100"
+                      >
+                         <UserPlus className="w-4 h-4 mr-2" /> Registrarse como Administrador
+                      </button>
                   </div>
                 </>
               ) : (
-                <form onSubmit={handleRegistration} className="space-y-4 animate-fade-in">
+                <form onSubmit={handleRealRegistration} className="space-y-4 animate-fade-in">
+                    <div className="p-3 bg-indigo-50 text-indigo-800 text-xs rounded-lg mb-2">
+                        💡 Como es una instalación nueva, la primera cuenta que crees tendrá permisos para crear consorcios.
+                    </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Completo</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
                         <input 
                             required
                             type="text" 
@@ -171,7 +190,7 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
                             required
                             type="email" 
                             className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="juan@email.com"
+                            placeholder="admin@consorcio.com"
                             value={regEmail}
                             onChange={e => setRegEmail(e.target.value)}
                         />
@@ -182,25 +201,18 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
                             required
                             type="password" 
                             className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="••••••••"
+                            placeholder="Mínimo 6 caracteres"
                             value={regPassword}
                             onChange={e => setRegPassword(e.target.value)}
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Usuario</label>
-                        <select 
-                            className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            value={regRole}
-                            onChange={e => setRegRole(e.target.value as UserRole)}
-                        >
-                            <option value="ADMIN">Administrador de Consorcio</option>
-                            <option value="USER">Propietario / Inquilino</option>
-                        </select>
-                    </div>
                     
-                    <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md transition-colors mt-4">
-                        Registrarse e Ingresar
+                    <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md transition-colors mt-4 flex justify-center"
+                    >
+                        {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Crear Cuenta e Ingresar'}
                     </button>
                     
                     <button 
@@ -219,13 +231,20 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
             <div className="p-8 relative h-full flex flex-col">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-slate-800">Seleccione Consorcio</h2>
-                    <button onClick={onLogout} className="text-slate-400 hover:text-red-500" title="Cerrar Sesión">
-                        <LogOut className="w-5 h-5" />
+                    <button onClick={handleRealLogout} className="text-slate-400 hover:text-red-500 flex items-center gap-1 text-sm font-medium" title="Cerrar Sesión">
+                        Salir <LogOut className="w-4 h-4" />
                     </button>
                 </div>
                 
                 {!isCreating ? (
                     <div className="space-y-3 overflow-y-auto max-h-[400px]">
+                        {consortiums.length === 0 && (
+                            <div className="text-center py-8 text-slate-400">
+                                <Building2 className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                                <p>No hay consorcios creados aún.</p>
+                            </div>
+                        )}
+
                         {consortiums.map(c => (
                             <button 
                                 key={c.id}
@@ -244,7 +263,7 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
                         {(userRole === 'ADMIN' || userRole === 'DEV') && (
                             <button 
                                 onClick={() => setIsCreating(true)}
-                                className="w-full border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-4 flex items-center justify-center text-slate-500 hover:text-indigo-500 transition-colors"
+                                className="w-full border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-4 flex items-center justify-center text-slate-500 hover:text-indigo-500 transition-colors mt-4"
                             >
                                 <PlusCircle className="w-5 h-5 mr-2" />
                                 Crear Nuevo Consorcio
@@ -285,7 +304,7 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
                 )}
                 
                 <div className="mt-auto border-t border-slate-100 pt-4 text-center">
-                    <p className="text-xs text-slate-400">Conectado como: {userEmail} ({userRole})</p>
+                    <p className="text-xs text-slate-400">Conectado como: {userEmail}</p>
                 </div>
             </div>
         )}
