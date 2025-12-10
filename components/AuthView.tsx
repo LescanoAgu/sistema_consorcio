@@ -130,18 +130,20 @@ const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, on
                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Email</label>
                         <input 
                             type="email" 
-                            className="w-full p-3 text-sm border rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-200 outline-none transition-colors"
+                            autoComplete="username" // <--- AGREGAR ESTO
+                            className="..."
                             placeholder="nombre@ejemplo.com"
                             value={email}
                             onChange={e => setEmail(e.target.value)}
-                            required
+                              required
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Contraseña</label>
                         <input 
                             type="password" 
-                            className="w-full p-3 text-sm border rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-200 outline-none transition-colors"
+                            autoComplete="current-password" // <--- AGREGAR ESTO
+                            className="..."
                             placeholder="••••••••"
                             value={password}
                             onChange={e => setPassword(e.target.value)}
