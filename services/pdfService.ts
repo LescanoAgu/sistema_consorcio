@@ -1,4 +1,3 @@
-
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { SettlementRecord, Unit } from "../types";
@@ -22,16 +21,28 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
   doc.text(`Período: ${record.month}`, pageWidth - 14, 20, { align: 'right' });
   doc.text(`Cierre: ${new Date(record.dateClosed).toLocaleDateString()}`, pageWidth - 14, 30, { align: 'right' });
 
-  // -- SUMMARY --
+  // -- SUMMARY SECTION --
   let finalY = 45;
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(12);
   doc.text("Resumen Financiero", 14, 55);
 
+  // AQUÍ ESTÁ EL CAMBIO IMPORTANTE: Desglose del Fondo
+  // Si el registro es viejo y no tiene los campos nuevos, usaremos 0 como fallback
+  const startBalance = record.reserveBalanceStart || 0;
+  const contribution = record.reserveContribution || 0;
+  const expense = record.reserveExpense || 0;
+  const endBalance = record.reserveBalanceAtClose;
+
   const summaryData = [
-    ['Total Gastos', `$${record.totalExpenses.toFixed(2)}`],
-    ['Total a Recaudar', `$${record.totalCollected.toFixed(2)}`],
-    ['Saldo Fondo Reserva', `$${record.reserveBalanceAtClose.toFixed(2)}`]
+    ['Total Gastos del Mes', `$${record.totalExpenses.toFixed(2)}`],
+    ['Total a Recaudar (Expensas)', `$${record.totalCollected.toFixed(2)}`],
+    ['', ''], // Espacio
+    ['FONDO DE RESERVA', ''],
+    ['Saldo Inicial (Caja Anterior)', `$${startBalance.toFixed(2)}`],
+    ['(+) Aportes del Mes', `$${contribution.toFixed(2)}`],
+    ['(-) Gastos cubiertos por Fondo', `-$${expense.toFixed(2)}`],
+    ['(=) Saldo Final Fondo Reserva', `$${endBalance.toFixed(2)}`]
   ];
 
   autoTable(doc, {
@@ -42,8 +53,20 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
     headStyles: { fillColor: [243, 244, 246], textColor: [55, 65, 81], fontStyle: 'bold' },
     styles: { fontSize: 10 },
     columnStyles: { 
-        0: { cellWidth: 100 },
+        0: { cellWidth: 120 },
         1: { halign: 'right', fontStyle: 'bold' } 
+    },
+    // Resaltar la fila final del fondo
+    didParseCell: function (data) {
+        if (data.row.index === 7) { 
+            data.cell.styles.fillColor = [209, 250, 229]; // Verde claro
+            data.cell.styles.textColor = [6, 95, 70]; // Verde oscuro
+            data.cell.styles.fontStyle = 'bold';
+        }
+        if (data.row.index === 3) {
+             data.cell.styles.fontStyle = 'bold';
+             data.cell.styles.textColor = [79, 70, 229];
+        }
     },
     margin: { left: 14 }
   });
@@ -51,6 +74,7 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
   // -- EXPENSES TABLE --
   finalY = (doc as any).lastAutoTable.finalY + 15;
   doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0); // Reset color
   doc.text("Detalle de Gastos", 14, finalY);
 
   const expenseBody = record.snapshotExpenses.map(e => [
@@ -76,7 +100,6 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
   // -- UNIT BREAKDOWN TABLE --
   finalY = (doc as any).lastAutoTable.finalY + 15;
   
-  // Check if we need a new page
   if (finalY > doc.internal.pageSize.height - 40) {
       doc.addPage();
       finalY = 20;

@@ -24,19 +24,32 @@ export interface Expense {
   distributionType: ExpenseDistributionType;
   itemCategory?: string;
   attachmentUrl?: string;
-  liquidacionId?: string | null; // <--- ESTO ES LO NUEVO IMPORTANTE
+  liquidacionId?: string | null;
 }
 
 export interface SettlementRecord {
   id: string;
   month: string;
   dateClosed: string;
+  
+  // Totales Generales
   totalExpenses: number;
   totalCollected: number;
-  reserveBalanceAtClose: number;
+  
+  // --- DESGLOSE FONDO DE RESERVA ---
+  reserveBalanceStart: number;      // Saldo al inicio del mes
+  reserveContribution: number;      // Aporte recaudado (ej: 5%)
+  reserveExpense: number;           // Gastos pagados con el fondo
+  reserveBalanceAtClose: number;    // Saldo final (Start + Contrib - Expense)
+  // --------------------------------
+
+  // Datos guardados (Snapshot)
   snapshotExpenses: Expense[];
-  unitDetails: any[]; 
   aiReportSummary?: string;
+  unitDetails: {
+      unitId: string;
+      totalToPay: number;
+  }[]; 
 }
 
 export interface Consortium {
@@ -52,7 +65,30 @@ export interface AppSettings {
   monthlyReserveContributionPercentage: number;
 }
 
-export interface Payment { id: string; unitId: string; amount: number; date: string; method: string; }
-export interface DebtAdjustment { id: string; unitId: string; amount: number; description: string; date: string; }
-export interface ReserveTransaction { id: string; date: string; amount: number; description: string; balanceAfter: number; }
+export interface Payment { 
+  id: string; 
+  unitId: string; 
+  amount: number; 
+  date: string; 
+  method: string;
+  notes?: string;
+  attachmentUrl?: string;
+}
+
+export interface DebtAdjustment { 
+  id: string; 
+  unitId: string; 
+  amount: number; 
+  description: string; 
+  date: string; 
+}
+
+export interface ReserveTransaction { 
+  id: string; 
+  date: string; 
+  amount: number; 
+  description: string; 
+  balanceAfter: number; 
+}
+
 export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal';
