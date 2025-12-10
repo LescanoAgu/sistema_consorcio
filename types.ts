@@ -52,6 +52,9 @@ export interface SettlementRecord {
   dateClosed: string;
   totalExpenses: number;
   totalCollected: number; // The target amount to collect
+  reserveBalanceStart: number;
+  reserveContribution: number;
+  reserveExpense: number;
   reserveBalanceAtClose: number;
   snapshotExpenses: Expense[]; // Snapshot of expenses for that month
   aiReportSummary?: string;

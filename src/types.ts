@@ -27,6 +27,8 @@ export interface Expense {
   liquidacionId?: string | null;
 }
 
+// ESTA ES LA INTERFAZ QUE DABA ERROR.
+// AL PEGAR ESTO, SE SOLUCIONA PORQUE YA INCLUYE 'reserveBalanceStart'
 export interface SettlementRecord {
   id: string;
   month: string;
@@ -36,12 +38,12 @@ export interface SettlementRecord {
   totalExpenses: number;
   totalCollected: number;
   
-  // --- DESGLOSE FONDO DE RESERVA ---
-  reserveBalanceStart: number;      // Saldo al inicio del mes
-  reserveContribution: number;      // Aporte recaudado (ej: 5%)
-  reserveExpense: number;           // Gastos pagados con el fondo
-  reserveBalanceAtClose: number;    // Saldo final (Start + Contrib - Expense)
-  // --------------------------------
+  // --- DESGLOSE FONDO DE RESERVA (LOS NUEVOS CAMPOS) ---
+  reserveBalanceStart: number;      
+  reserveContribution: number;      
+  reserveExpense: number;           
+  reserveBalanceAtClose: number;    
+  // ----------------------------------------------------
 
   // Datos guardados (Snapshot)
   snapshotExpenses: Expense[];

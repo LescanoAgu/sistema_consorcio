@@ -27,12 +27,11 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
   doc.setFontSize(12);
   doc.text("Resumen Financiero", 14, 55);
 
-  // AQUÍ ESTÁ EL CAMBIO IMPORTANTE: Desglose del Fondo
-  // Si el registro es viejo y no tiene los campos nuevos, usaremos 0 como fallback
+  // LOGICA FONDO DE RESERVA
   const startBalance = record.reserveBalanceStart || 0;
-  const contribution = record.reserveContribution || 0;
+  const contribution = record.reserveContribution || 0; // Se muestra como informativo
   const expense = record.reserveExpense || 0;
-  const endBalance = record.reserveBalanceAtClose;
+  const endBalance = record.reserveBalanceAtClose; // Debería ser startBalance - expense
 
   const summaryData = [
     ['Total Gastos del Mes', `$${record.totalExpenses.toFixed(2)}`],
@@ -40,9 +39,10 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
     ['', ''], // Espacio
     ['FONDO DE RESERVA', ''],
     ['Saldo Inicial (Caja Anterior)', `$${startBalance.toFixed(2)}`],
-    ['(+) Aportes del Mes', `$${contribution.toFixed(2)}`],
     ['(-) Gastos cubiertos por Fondo', `-$${expense.toFixed(2)}`],
-    ['(=) Saldo Final Fondo Reserva', `$${endBalance.toFixed(2)}`]
+    ['(=) Saldo Final Disponible', `$${endBalance.toFixed(2)}`],
+    ['', ''],
+    ['(+) Aporte a Recaudar este mes', `$${contribution.toFixed(2)}`] // Informativo
   ];
 
   autoTable(doc, {
@@ -58,14 +58,21 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
     },
     // Resaltar la fila final del fondo
     didParseCell: function (data) {
-        if (data.row.index === 7) { 
+        // Resaltar Saldo Final (Fila 6)
+        if (data.row.index === 6) { 
             data.cell.styles.fillColor = [209, 250, 229]; // Verde claro
             data.cell.styles.textColor = [6, 95, 70]; // Verde oscuro
             data.cell.styles.fontStyle = 'bold';
         }
+        // Título Fondo Reserva
         if (data.row.index === 3) {
              data.cell.styles.fontStyle = 'bold';
              data.cell.styles.textColor = [79, 70, 229];
+        }
+        // Aporte futuro en cursiva/gris
+        if (data.row.index === 8) {
+            data.cell.styles.fontStyle = 'italic';
+            data.cell.styles.textColor = [100, 100, 100];
         }
     },
     margin: { left: 14 }
