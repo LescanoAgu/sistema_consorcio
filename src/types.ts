@@ -24,7 +24,7 @@ export interface Expense {
   distributionType: ExpenseDistributionType;
   itemCategory?: string;
   attachmentUrl?: string;
-  liquidacionId?: string | null; // <--- AGREGADO: Para saber si ya se cobró
+  liquidacionId?: string | null; // <--- ESTO ES LO NUEVO IMPORTANTE
 }
 
 export interface SettlementRecord {
@@ -52,7 +52,6 @@ export interface AppSettings {
   monthlyReserveContributionPercentage: number;
 }
 
-// Interfaces adicionales que puedas necesitar...
 export interface Payment { id: string; unitId: string; amount: number; date: string; method: string; }
 export interface DebtAdjustment { id: string; unitId: string; amount: number; description: string; date: string; }
 export interface ReserveTransaction { id: string; date: string; amount: number; description: string; balanceAfter: number; }

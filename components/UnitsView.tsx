@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { Unit } from '../types';
 import { Plus, Trash2, Save, X, Mail, Upload, FileText, Download, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
-// Importamos el servicio
-import { addUnit } from '../services/firestoreService';
+import { addUnit } from '../services/firestoreService'; // Importamos el guardado real
 
 interface UnitsViewProps {
   units: Unit[];
   setUnits: React.Dispatch<React.SetStateAction<Unit[]>>;
-  consortiumId: string; // ✅
+  consortiumId: string; // ✅ Ahora aceptamos el ID
 }
 
 const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) => {
@@ -16,8 +15,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
   const [importText, setImportText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [newUnit, setNewUnit] = useState<Partial<Unit>>({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
-
-  const totalPercentage = units.reduce((acc, u) => acc + u.proratePercentage, 0);
 
   const handleAdd = async () => {
     if (!newUnit.unitNumber || !newUnit.ownerName) return;
@@ -59,7 +56,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
         });
 
         if (newUnits.length > 0) {
-            // ✅ Guardamos uno por uno en Firebase
+            // ✅ Guardamos en Firebase (uno por uno)
             const savedList = [];
             for (const u of newUnits) {
                 const saved = await addUnit(consortiumId, u);
@@ -68,7 +65,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
             setUnits([...units, ...savedList]);
             setShowImport(false);
             setImportText('');
-            alert(`Se importaron ${savedList.length} unidades correctamente.`);
+            alert(`¡Éxito! Se importaron y guardaron ${savedList.length} unidades.`);
         }
     } catch (e) {
         alert('Error al procesar.');
@@ -77,8 +74,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
     }
   };
 
-  // ... (El resto del render es igual al que tenías, solo asegúrate de conectar los botones)
-  // RESUMEN DEL RENDER PARA QUE COPIES Y PEGUES SI ES NECESARIO:
+  // Reutilizamos tu tabla visual
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -93,9 +89,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
         </div>
       </div>
       
-      {/* TABLA ... */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        {/* ... (Header y Rows de la tabla, usando 'units') ... */}
         <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 uppercase">
               <tr>
@@ -108,11 +102,11 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
             <tbody>
               {isAdding && (
                  <tr>
-                    <td className="px-6 py-4"><input className="border rounded p-1" placeholder="Unidad" value={newUnit.unitNumber} onChange={e => setNewUnit({...newUnit, unitNumber: e.target.value})}/></td>
+                    <td className="px-6 py-4"><input className="border rounded p-1 w-20" placeholder="Ej: 1A" value={newUnit.unitNumber} onChange={e => setNewUnit({...newUnit, unitNumber: e.target.value})}/></td>
                     <td className="px-6 py-4"><input className="border rounded p-1" placeholder="Nombre" value={newUnit.ownerName} onChange={e => setNewUnit({...newUnit, ownerName: e.target.value})}/></td>
-                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right" placeholder="0.00" value={newUnit.initialBalance} onChange={e => setNewUnit({...newUnit, initialBalance: parseFloat(e.target.value)})}/></td>
-                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right" placeholder="%" value={newUnit.proratePercentage} onChange={e => setNewUnit({...newUnit, proratePercentage: parseFloat(e.target.value)})}/></td>
-                    <td className="px-6 py-4 text-right"><button onClick={handleAdd} className="text-green-600 font-bold">Guardar</button></td>
+                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right w-20" placeholder="0.00" value={newUnit.initialBalance} onChange={e => setNewUnit({...newUnit, initialBalance: parseFloat(e.target.value)})}/></td>
+                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right w-16" placeholder="%" value={newUnit.proratePercentage} onChange={e => setNewUnit({...newUnit, proratePercentage: parseFloat(e.target.value)})}/></td>
+                    <td className="px-6 py-4 text-right"><button onClick={handleAdd} className="text-green-600 font-bold hover:underline">Guardar</button></td>
                  </tr>
               )}
               {units.map(u => (
@@ -127,16 +121,16 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
         </table>
       </div>
 
-      {/* MODAL IMPORT */}
       {showImport && (
          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
              <div className="bg-white p-6 rounded-xl w-full max-w-2xl">
-                 <h3 className="text-lg font-bold mb-4">Importar CSV</h3>
-                 <textarea className="w-full h-48 border p-2 mb-4 font-mono text-xs" placeholder="1A, Juan, 10.5, 0" value={importText} onChange={e => setImportText(e.target.value)} disabled={isProcessing}></textarea>
+                 <h3 className="text-lg font-bold mb-4">Importar CSV / TXT</h3>
+                 <p className="text-sm text-gray-500 mb-2">Pegar formato: Unidad, Nombre, %, Saldo, Email</p>
+                 <textarea className="w-full h-48 border p-2 mb-4 font-mono text-xs" placeholder="1A, Juan Perez, 10.5, 0, juan@mail.com" value={importText} onChange={e => setImportText(e.target.value)} disabled={isProcessing}></textarea>
                  <div className="flex justify-end gap-2">
                      <button onClick={() => setShowImport(false)} disabled={isProcessing} className="px-4 py-2 border rounded">Cancelar</button>
                      <button onClick={handleProcessImport} disabled={isProcessing || !importText} className="px-4 py-2 bg-indigo-600 text-white rounded">
-                        {isProcessing ? 'Procesando...' : 'Procesar'}
+                        {isProcessing ? 'Guardando en Base de Datos...' : 'Procesar y Guardar'}
                      </button>
                  </div>
              </div>

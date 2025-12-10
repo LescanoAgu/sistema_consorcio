@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Unit, Expense, AppSettings, ExpenseDistributionType, SettlementRecord } from '../types';
-import { Archive, Loader2, AlertTriangle, FileText, AlertCircle } from 'lucide-react';
-// Importamos el servicio de guardado
-import { saveSettlement } from '../services/firestoreService';
+import { Unit, Expense, AppSettings, SettlementRecord } from '../types';
+import { Archive, Loader2, AlertTriangle, FileText } from 'lucide-react';
+import { saveSettlement } from '../services/firestoreService'; // Importamos el servicio
 
 interface SettlementViewProps {
   units: Unit[];
@@ -11,26 +10,24 @@ interface SettlementViewProps {
   updateReserveBalance: (newBalance: number) => void;
   consortiumId: string; // ✅
   onSettlementSuccess: () => void; // ✅
+  onCloseMonth: (record: SettlementRecord) => void;
 }
 
-const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, updateReserveBalance, consortiumId, onSettlementSuccess }) => {
+const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, consortiumId, onSettlementSuccess }) => {
   const [generatingReport, setGeneratingReport] = useState(false);
-  const [aiReport, setAiReport] = useState('');
 
   // Validaciones
   const totalPercentage = units.reduce((acc, u) => acc + u.proratePercentage, 0);
   const isPercentageValid = Math.abs(totalPercentage - 100) < 0.1;
 
-  // Cálculos (Simplificado para el ejemplo, usa tu lógica completa si la tienes)
   const totalOrdinary = expenses.filter(e => e.category === 'Ordinary').reduce((sum, e) => sum + e.amount, 0);
   const totalExtraordinary = expenses.filter(e => e.category === 'Extraordinary').reduce((sum, e) => sum + e.amount, 0);
   
-  // Prorrateo básico
   const settlementData = useMemo(() => {
      return units.map(unit => {
          const ordShare = totalOrdinary * (unit.proratePercentage / 100);
          const extraShare = totalExtraordinary * (unit.proratePercentage / 100);
-         return { ...unit, totalToPay: ordShare + extraShare, ordShare };
+         return { ...unit, totalToPay: ordShare + extraShare };
      });
   }, [units, totalOrdinary, totalExtraordinary]);
   
@@ -40,11 +37,11 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       if(!isPercentageValid) return alert("Los porcentajes deben sumar 100%");
       if(expenses.length === 0) return alert("No hay gastos para liquidar");
       
-      if(confirm("¿Cerrar liquidación? Esto archivará los gastos actuales y generará el histórico.")) {
+      if(confirm("¿Cerrar liquidación? Se generará el cobro y se archivarán los gastos.")) {
           setGeneratingReport(true);
           try {
               const record: SettlementRecord = {
-                  id: '', // Se genera en BD
+                  id: '',
                   month: new Date().toLocaleString('es-ES', { month: 'long', year: 'numeric' }),
                   dateClosed: new Date().toISOString(),
                   totalExpenses: totalOrdinary + totalExtraordinary,
@@ -52,14 +49,14 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
                   reserveBalanceAtClose: settings.reserveFundBalance,
                   snapshotExpenses: expenses,
                   unitDetails: settlementData.map(d => ({ unitId: d.id, totalToPay: d.totalToPay })),
-                  aiReportSummary: aiReport
+                  aiReportSummary: "Reporte generado automáticamente"
               };
 
               // ✅ Guardamos en Firestore
               await saveSettlement(consortiumId, record, expenses.map(e => e.id));
               
               alert("Liquidación cerrada correctamente.");
-              onSettlementSuccess(); // Avisamos a App para recargar
+              onSettlementSuccess(); 
           } catch (e) {
               console.error(e);
               alert("Error al cerrar liquidación");

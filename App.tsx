@@ -89,8 +89,8 @@ const App: React.FC = () => {
       setCurrentUserEmail('');
   };
 
+  // Recargar gastos después de liquidar
   const handleSettlementSuccess = () => {
-      // Recargar gastos (deberían desaparecer los liquidados)
       if (selectedConsortium) {
           FirestoreService.getExpenses(selectedConsortium.id).then(setExpenses);
       }
@@ -120,7 +120,6 @@ const App: React.FC = () => {
   }
 
   const renderView = () => {
-    // Si no hay consorcio seleccionado, no renderizamos nada (seguridad)
     if (!selectedConsortium) return null;
 
     if (currentUserRole === 'USER') {
@@ -136,13 +135,13 @@ const App: React.FC = () => {
         return <UnitsView 
                   units={units} 
                   setUnits={setUnits} 
-                  consortiumId={selectedConsortium.id} // ✅ PASAMOS EL ID
+                  consortiumId={selectedConsortium.id} // ✅ ESTO FALTABA: Pasar el ID
                />;
       case 'expenses':
         return <ExpensesView 
                   expenses={expenses} 
                   setExpenses={setExpenses} 
-                  consortiumId={selectedConsortium.id} // ✅ PASAMOS EL ID
+                  consortiumId={selectedConsortium.id} // ✅ ESTO FALTABA
                />;
       case 'settlement':
         return (
@@ -150,9 +149,10 @@ const App: React.FC = () => {
             units={units} 
             expenses={expenses} 
             settings={settings}
-            consortiumId={selectedConsortium.id} // ✅ PASAMOS EL ID
-            onSettlementSuccess={handleSettlementSuccess} // ✅ Callback para recargar
+            consortiumId={selectedConsortium.id} // ✅ ESTO FALTABA
+            onSettlementSuccess={handleSettlementSuccess} 
             updateReserveBalance={(v) => setSettings({...settings, reserveFundBalance: v})}
+            onCloseMonth={() => {}} // Legacy
           />
         );
       case 'collections':
