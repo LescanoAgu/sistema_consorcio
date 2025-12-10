@@ -1,5 +1,5 @@
 import { db, storage } from '../src/config/firebase'; 
-import { collection, getDocs, addDoc, updateDoc, doc, query, where, orderBy, Timestamp, setDoc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, doc, query, where, orderBy, Timestamp, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Unit, Expense, Consortium, SettlementRecord, UserRole } from '../types'; 
 
@@ -26,7 +26,8 @@ const mapExpenseFromFirestore = (doc: any): Expense => {
     category: data.tipo === 'Ordinario' ? 'Ordinary' : 'Extraordinary',
     distributionType: data.distribucion === 'Prorrateo' ? 'PRORATED' : 'EQUAL_PARTS',
     itemCategory: data.rubro || 'General',
-    attachmentUrl: data.comprobanteUrl || ''
+    attachmentUrl: data.comprobanteUrl || '',
+    liquidacionId: data.liquidacionId || null
   } as Expense;
 };
 
@@ -52,15 +53,15 @@ export const createConsortium = async (consortium: Omit<Consortium, 'id'>) => {
   return { id: docRef.id, ...consortium };
 };
 
-// --- Unidades (Propiedades) ---
+// --- Unidades ---
 export const getUnits = async (consortiumId: string): Promise<Unit[]> => {
-  const q = query(collection(db, `consorcios/${consortiumId}/unidades`));
+  const q = query(collection(db, `consorcios/${consortiumId}/unidades`), orderBy('nombre'));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(mapUnitFromFirestore);
 };
 
-// ✅ ESTA ES LA FUNCIÓN QUE FALTABA PARA GUARDAR EL CSV
 export const addUnit = async (consortiumId: string, unit: Unit) => {
+  // Convertimos al formato de la BD
   const docRef = await addDoc(collection(db, `consorcios/${consortiumId}/unidades`), {
     nombre: unit.unitNumber,
     propietario: unit.ownerName,
@@ -76,7 +77,7 @@ export const addUnit = async (consortiumId: string, unit: Unit) => {
 export const getExpenses = async (consortiumId: string): Promise<Expense[]> => {
   const q = query(
     collection(db, `consorcios/${consortiumId}/gastos`),
-    where("liquidacionId", "==", null), // Solo gastos pendientes
+    where("liquidacionId", "==", null), // Solo traer lo NO liquidado
     orderBy("createdAt", "desc")
   );
   const snapshot = await getDocs(q);
@@ -89,7 +90,7 @@ export const addExpense = async (consortiumId: string, expense: Expense) => {
     monto: expense.amount,
     fecha: expense.date,
     tipo: expense.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario',
-    distribucion: 'Prorrateo', // Simplificado por ahora
+    distribucion: 'Prorrateo',
     rubro: expense.itemCategory,
     comprobanteUrl: expense.attachmentUrl || '',
     liquidacionId: null,
@@ -101,24 +102,33 @@ export const addExpense = async (consortiumId: string, expense: Expense) => {
 };
 
 // --- Archivos (Storage) ---
-// ✅ SOLUCIÓN AL CONGELAMIENTO: Subida real a Firebase Storage
 export const uploadReceipt = async (file: File, consortiumId: string): Promise<string> => {
-  const storageRef = ref(storage, `comprobantes/${consortiumId}/${Date.now()}_${file.name}`);
+  // Guardamos en la carpeta 'consorcios' para coincidir con las reglas de seguridad
+  const storageRef = ref(storage, `consorcios/${consortiumId}/comprobantes/${Date.now()}_${file.name}`);
   await uploadBytes(storageRef, file);
   return await getDownloadURL(storageRef);
 };
 
-// --- Liquidaciones (Cierre de Mes) ---
-export const saveSettlement = async (consortiumId: string, settlement: SettlementRecord) => {
-  // 1. Guardar el registro de la liquidación
-  const settlementRef = await addDoc(collection(db, `consorcios/${consortiumId}/liquidaciones`), {
+// --- Liquidaciones (El cierre) ---
+export const saveSettlement = async (consortiumId: string, settlement: SettlementRecord, expenseIds: string[]) => {
+  const batch = writeBatch(db);
+
+  // 1. Crear el registro de liquidación
+  const settlementRef = doc(collection(db, `consorcios/${consortiumId}/liquidaciones`));
+  batch.set(settlementRef, {
     ...settlement,
+    id: settlementRef.id,
     createdAt: new Date()
   });
 
-  // 2. Marcar los gastos como "liquidados" para que no salgan el próximo mes
-  // Nota: Esto debería hacerse en batch, pero por simplicidad lo haremos uno por uno o lo dejamos para una cloud function.
-  // Por ahora, asumimos que el front limpia la vista, pero lo ideal es actualizar los gastos aquí.
+  // 2. Marcar los gastos como liquidados (para que no salgan el mes que viene)
+  expenseIds.forEach(expId => {
+    const expRef = doc(db, `consorcios/${consortiumId}/gastos`, expId);
+    batch.update(expRef, { liquidacionId: settlementRef.id });
+  });
+
+  await batch.commit();
+  return settlementRef.id;
 };
 
 // --- Usuarios ---

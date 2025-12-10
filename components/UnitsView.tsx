@@ -1,182 +1,148 @@
 import React, { useState } from 'react';
 import { Unit } from '../types';
 import { Plus, Trash2, Save, X, Mail, Upload, FileText, Download, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
-// ✅ Importamos el servicio
+// Importamos el servicio
 import { addUnit } from '../services/firestoreService';
 
 interface UnitsViewProps {
   units: Unit[];
   setUnits: React.Dispatch<React.SetStateAction<Unit[]>>;
-  consortiumId: string; // ✅ Necesitamos esto para saber dónde guardar
+  consortiumId: string; // ✅
 }
 
 const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false); // Para mostrar carga
+  const [isProcessing, setIsProcessing] = useState(false);
   const [newUnit, setNewUnit] = useState<Partial<Unit>>({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
 
   const totalPercentage = units.reduce((acc, u) => acc + u.proratePercentage, 0);
 
-  // --- Agregar Manualmente ---
   const handleAdd = async () => {
-    if (!newUnit.unitNumber || !newUnit.ownerName) return alert("Complete los datos obligatorios");
-    
+    if (!newUnit.unitNumber || !newUnit.ownerName) return;
     try {
-      const unitToAdd = {
-        id: 'temp', // El ID real lo pone firebase
-        unitNumber: newUnit.unitNumber,
-        ownerName: newUnit.ownerName,
-        proratePercentage: Number(newUnit.proratePercentage),
-        initialBalance: Number(newUnit.initialBalance || 0),
-        linkedEmail: newUnit.linkedEmail || '',
-      };
-
-      // ✅ Guardar en Firebase
-      const savedUnit = await addUnit(consortiumId, unitToAdd);
-      
-      setUnits([...units, savedUnit]);
-      setNewUnit({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
-      setIsAdding(false);
-    } catch (e) {
-      alert("Error al guardar en base de datos");
-    }
+        // ✅ Guardamos en Firebase
+        const saved = await addUnit(consortiumId, {
+            id: 'temp',
+            unitNumber: newUnit.unitNumber,
+            ownerName: newUnit.ownerName,
+            proratePercentage: Number(newUnit.proratePercentage),
+            initialBalance: Number(newUnit.initialBalance || 0),
+            linkedEmail: newUnit.linkedEmail || '',
+        });
+        setUnits([...units, saved]);
+        setNewUnit({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
+        setIsAdding(false);
+    } catch (e) { alert("Error al guardar unidad"); }
   };
 
-  // --- Carga Masiva (CSV/TXT) ---
   const handleProcessImport = async () => {
     if(!importText.trim()) return;
     setIsProcessing(true);
-
     try {
         const lines = importText.split(/\r?\n/);
-        const unitsToSave: Unit[] = [];
-        
-        // 1. Parsear texto
+        const newUnits: Unit[] = [];
         lines.forEach(line => {
             if(!line.trim()) return;
             const parts = line.split(/[,;\t]/); 
             if(parts.length >= 2) {
-                const u = {
-                    id: '', 
+                newUnits.push({
+                    id: '',
                     unitNumber: parts[0]?.trim(),
                     ownerName: parts[1]?.trim(),
                     proratePercentage: parseFloat(parts[2]?.trim() || '0'),
                     initialBalance: parseFloat(parts[3]?.trim() || '0'),
                     linkedEmail: parts[4]?.trim() || ''
-                };
-                if(u.unitNumber && u.ownerName) unitsToSave.push(u);
+                });
             }
         });
 
-        if (unitsToSave.length > 0) {
-            // 2. Guardar uno por uno en Firebase
-            const savedUnits = [];
-            for (const u of unitsToSave) {
+        if (newUnits.length > 0) {
+            // ✅ Guardamos uno por uno en Firebase
+            const savedList = [];
+            for (const u of newUnits) {
                 const saved = await addUnit(consortiumId, u);
-                savedUnits.push(saved);
+                savedList.push(saved);
             }
-
-            // 3. Actualizar vista
-            if(confirm(`Se han guardado ${savedUnits.length} unidades correctamente.`)) {
-                setUnits([...units, ...savedUnits]);
-                setShowImport(false);
-                setImportText('');
-            }
-        } else {
-            alert('No se encontraron datos válidos. Revise el formato.');
+            setUnits([...units, ...savedList]);
+            setShowImport(false);
+            setImportText('');
+            alert(`Se importaron ${savedList.length} unidades correctamente.`);
         }
-
     } catch (e) {
-        console.error(e);
-        alert('Ocurrió un error al procesar la importación.');
+        alert('Error al procesar.');
     } finally {
         setIsProcessing(false);
     }
   };
 
-  const handleDelete = (id: string) => {
-    // Aquí deberías agregar deleteUnit en firestoreService si quieres borrar de BD
-    if (confirm('Esto solo borra de la vista actual. Para borrar de BD implemente la función de borrado.')) {
-      setUnits(units.filter(u => u.id !== id));
-    }
-  };
-
-  const downloadExample = () => {
-      const text = "1A, Juan Perez, 5.25, 0, juan@email.com\n1B, Maria Gonzalez, 5.25, 1000, maria@email.com";
-      const element = document.createElement("a");
-      const file = new Blob([text], {type: 'text/plain'});
-      element.href = URL.createObjectURL(file);
-      element.download = "ejemplo_carga.txt";
-      document.body.appendChild(element);
-      element.click();
-  };
-
+  // ... (El resto del render es igual al que tenías, solo asegúrate de conectar los botones)
+  // RESUMEN DEL RENDER PARA QUE COPIES Y PEGUES SI ES NECESARIO:
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-slate-800">Unidades Funcionales</h2>
         <div className="flex gap-2">
             <button onClick={() => setShowImport(true)} className="bg-white border px-4 py-2 rounded-lg flex items-center shadow-sm hover:bg-slate-50">
-              <Upload className="w-4 h-4 mr-2" /> Importar CSV/TXT
+            <Upload className="w-4 h-4 mr-2" /> Importar
             </button>
             <button onClick={() => setIsAdding(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center shadow-sm hover:bg-indigo-700">
-              <Plus className="w-4 h-4 mr-2" /> Agregar Unidad
+            <Plus className="w-4 h-4 mr-2" /> Agregar
             </button>
         </div>
       </div>
-
-      {/* ... (Resto de la tabla igual, solo cambia el estado isProcessing en el modal) ... */}
       
-      {/* Modal de Importación */}
-      {showImport && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6">
-                  <h3 className="text-xl font-bold mb-4">Carga Masiva</h3>
-                  <textarea 
-                      className="w-full h-48 p-4 border rounded-xl font-mono text-sm"
-                      placeholder={`1A, Juan Perez, 12.5, 0, juan@email.com...`}
-                      value={importText}
-                      onChange={(e) => setImportText(e.target.value)}
-                      disabled={isProcessing}
-                  ></textarea>
-                  <div className="mt-4 flex justify-end gap-3">
-                       <button onClick={() => setShowImport(false)} disabled={isProcessing} className="px-4 py-2 text-slate-600">Cancelar</button>
-                       <button onClick={handleProcessImport} disabled={isProcessing} className="px-6 py-2 bg-indigo-600 text-white rounded-lg flex items-center">
-                          {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin"/> : <Save className="w-4 h-4 mr-2" />}
-                          {isProcessing ? 'Guardando en BD...' : 'Procesar y Guardar'}
-                       </button>
-                  </div>
-              </div>
-          </div>
-      )}
-      
-      {/* Tabla de unidades (reutiliza tu código de tabla existente aquí) */}
+      {/* TABLA ... */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-         {/* ... (Tu tabla original aquí) ... */}
-         {/* Solo asegúrate de usar la variable 'units' y 'totalPercentage' que ya definimos */}
-          <table className="w-full text-left">
-            <thead>
-                <tr className="bg-slate-50 text-slate-500 text-sm uppercase">
-                    <th className="px-6 py-3">Unidad</th>
-                    <th className="px-6 py-3">Propietario</th>
-                    <th className="px-6 py-3 text-right">Prorrateo</th>
-                </tr>
+        {/* ... (Header y Rows de la tabla, usando 'units') ... */}
+        <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-500 uppercase">
+              <tr>
+                <th className="px-6 py-3">Unidad</th>
+                <th className="px-6 py-3">Propietario</th>
+                <th className="px-6 py-3 text-right">Saldo</th>
+                <th className="px-6 py-3 text-right">Prorrateo</th>
+              </tr>
             </thead>
             <tbody>
-                {units.map(u => (
-                    <tr key={u.id} className="border-b">
-                        <td className="px-6 py-3">{u.unitNumber}</td>
-                        <td className="px-6 py-3">{u.ownerName}</td>
-                        <td className="px-6 py-3 text-right">{u.proratePercentage}%</td>
-                    </tr>
-                ))}
+              {isAdding && (
+                 <tr>
+                    <td className="px-6 py-4"><input className="border rounded p-1" placeholder="Unidad" value={newUnit.unitNumber} onChange={e => setNewUnit({...newUnit, unitNumber: e.target.value})}/></td>
+                    <td className="px-6 py-4"><input className="border rounded p-1" placeholder="Nombre" value={newUnit.ownerName} onChange={e => setNewUnit({...newUnit, ownerName: e.target.value})}/></td>
+                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right" placeholder="0.00" value={newUnit.initialBalance} onChange={e => setNewUnit({...newUnit, initialBalance: parseFloat(e.target.value)})}/></td>
+                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right" placeholder="%" value={newUnit.proratePercentage} onChange={e => setNewUnit({...newUnit, proratePercentage: parseFloat(e.target.value)})}/></td>
+                    <td className="px-6 py-4 text-right"><button onClick={handleAdd} className="text-green-600 font-bold">Guardar</button></td>
+                 </tr>
+              )}
+              {units.map(u => (
+                <tr key={u.id} className="border-b hover:bg-slate-50">
+                    <td className="px-6 py-4 font-bold">{u.unitNumber}</td>
+                    <td className="px-6 py-4">{u.ownerName}</td>
+                    <td className="px-6 py-4 text-right">${u.initialBalance.toFixed(2)}</td>
+                    <td className="px-6 py-4 text-right">{u.proratePercentage.toFixed(2)}%</td>
+                </tr>
+              ))}
             </tbody>
-          </table>
+        </table>
       </div>
+
+      {/* MODAL IMPORT */}
+      {showImport && (
+         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+             <div className="bg-white p-6 rounded-xl w-full max-w-2xl">
+                 <h3 className="text-lg font-bold mb-4">Importar CSV</h3>
+                 <textarea className="w-full h-48 border p-2 mb-4 font-mono text-xs" placeholder="1A, Juan, 10.5, 0" value={importText} onChange={e => setImportText(e.target.value)} disabled={isProcessing}></textarea>
+                 <div className="flex justify-end gap-2">
+                     <button onClick={() => setShowImport(false)} disabled={isProcessing} className="px-4 py-2 border rounded">Cancelar</button>
+                     <button onClick={handleProcessImport} disabled={isProcessing || !importText} className="px-4 py-2 bg-indigo-600 text-white rounded">
+                        {isProcessing ? 'Procesando...' : 'Procesar'}
+                     </button>
+                 </div>
+             </div>
+         </div>
+      )}
     </div>
   );
 };
-
 export default UnitsView;

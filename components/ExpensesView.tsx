@@ -1,168 +1,104 @@
 import React, { useState } from 'react';
 import { Expense, ExpenseDistributionType } from '../types';
-import { Plus, Trash2, DollarSign, Tag, Paperclip, FileText, CheckCircle, Loader2 } from 'lucide-react';
-// ✅ Importamos los servicios reales
+import { Plus, Trash2, CheckCircle, Loader2, Paperclip, FileText } from 'lucide-react';
+// Importamos servicios
 import { addExpense, uploadReceipt } from '../services/firestoreService';
 
 interface ExpensesViewProps {
   expenses: Expense[];
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
-  consortiumId: string; // ✅ Necesario
+  consortiumId: string; // ✅
 }
 
 const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, consortiumId }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isUploading, setIsUploading] = useState(false); // Estado real de subida
-  
+  const [isUploading, setIsUploading] = useState(false);
   const [newExpense, setNewExpense] = useState<Partial<Expense>>({
-    description: '',
-    amount: 0,
-    date: new Date().toISOString().split('T')[0],
-    category: 'Ordinary',
-    itemCategory: 'Mantenimiento',
-    distributionType: ExpenseDistributionType.PRORATED,
-    attachmentUrl: ''
+    description: '', amount: 0, date: new Date().toISOString().split('T')[0], category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
   });
 
-  // ✅ SUBIDA DE ARCHIVO REAL (Soluciona el congelamiento)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
-          
-          // Validación de tamaño (Max 5MB) para evitar cuelgues
-          if (file.size > 5 * 1024 * 1024) {
-              alert("El archivo es demasiado grande. Máximo 5MB.");
-              return;
-          }
-
           setIsUploading(true);
           try {
-              // Subimos a Firebase Storage
+              // ✅ Subida real a Firebase Storage
               const url = await uploadReceipt(file, consortiumId);
               setNewExpense(curr => ({ ...curr, attachmentUrl: url }));
-          } catch (error) {
-              console.error(error);
-              alert("Error al subir el archivo.");
-          } finally {
-              setIsUploading(false);
-          }
+          } catch (error) { alert("Error al subir archivo"); } 
+          finally { setIsUploading(false); }
       }
   }
 
   const handleAdd = async () => {
     if (!newExpense.description || !newExpense.amount) return;
-    
     try {
-        const expenseToSave = {
+        // ✅ Guardado real
+        const saved = await addExpense(consortiumId, {
             id: 'temp',
             description: newExpense.description,
             amount: Number(newExpense.amount),
-            date: newExpense.date || new Date().toISOString().split('T')[0],
+            date: newExpense.date || '',
             category: newExpense.category as any,
-            itemCategory: newExpense.itemCategory || 'Otros',
             distributionType: newExpense.distributionType as any,
+            itemCategory: newExpense.itemCategory,
             attachmentUrl: newExpense.attachmentUrl
-        };
-
-        // ✅ Guardar en Firestore
-        const saved = await addExpense(consortiumId, expenseToSave as Expense);
-        
-        setExpenses([...expenses, saved]);
-        setNewExpense({
-            description: '',
-            amount: 0,
-            date: new Date().toISOString().split('T')[0],
-            category: 'Ordinary',
-            itemCategory: 'Mantenimiento',
-            distributionType: ExpenseDistributionType.PRORATED,
-            attachmentUrl: ''
         });
+        setExpenses([...expenses, saved]);
         setIsFormOpen(false);
-    } catch (e) {
-        alert("Error al guardar el gasto");
-    }
+        setNewExpense({ description: '', amount: 0, date: new Date().toISOString().split('T')[0], category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: '' });
+    } catch (e) { alert("Error al guardar gasto"); }
   };
 
-  // ... (El resto del renderizado es similar, usa isUploading para mostrar el spinner)
   return (
-      <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-slate-800">Gastos del Mes</h2>
-            <button onClick={() => setIsFormOpen(!isFormOpen)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg">
-                {isFormOpen ? 'Cancelar' : 'Nuevo Gasto'}
-            </button>
-          </div>
-
-          {isFormOpen && (
-              <div className="bg-white p-6 rounded-xl border border-indigo-100 shadow-sm">
-                  {/* ... Campos del formulario ... */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <input 
-                        type="text" 
-                        placeholder="Descripción" 
-                        className="border p-2 rounded" 
-                        value={newExpense.description}
-                        onChange={e => setNewExpense({...newExpense, description: e.target.value})}
-                      />
-                      <input 
-                        type="number" 
-                        placeholder="Monto" 
-                        className="border p-2 rounded"
-                        value={newExpense.amount}
-                        onChange={e => setNewExpense({...newExpense, amount: parseFloat(e.target.value)})} 
-                      />
-                  </div>
-
-                  {/* Input de Archivo */}
-                  <div className="mb-4">
-                      <label className="block text-sm font-medium mb-1">Comprobante</label>
-                      {isUploading ? (
-                          <div className="text-indigo-600 flex items-center text-sm">
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin"/> Subiendo a la nube...
-                          </div>
-                      ) : (
-                          <input type="file" onChange={handleFileChange} accept=".pdf,.jpg,.png" className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
-                      )}
-                      {newExpense.attachmentUrl && !isUploading && (
-                          <div className="text-xs text-emerald-600 mt-1 flex items-center">
-                              <CheckCircle className="w-3 h-3 mr-1"/> Archivo cargado correctamente
-                          </div>
-                      )}
-                  </div>
-
-                  <button onClick={handleAdd} disabled={isUploading} className="bg-indigo-600 text-white px-6 py-2 rounded-lg">
-                      Guardar
-                  </button>
-              </div>
-          )}
-
-          {/* Tabla de gastos */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-left">
-                  <thead className="bg-slate-50 border-b">
-                      <tr>
-                          <th className="px-6 py-3">Fecha</th>
-                          <th className="px-6 py-3">Descripción</th>
-                          <th className="px-6 py-3 text-right">Monto</th>
-                          <th className="px-6 py-3 text-center">Archivo</th>
-                      </tr>
-                  </thead>
-                  <tbody>
-                      {expenses.map(e => (
-                          <tr key={e.id} className="border-b">
-                              <td className="px-6 py-3">{e.date}</td>
-                              <td className="px-6 py-3">{e.description}</td>
-                              <td className="px-6 py-3 text-right">${e.amount.toFixed(2)}</td>
-                              <td className="px-6 py-3 text-center">
-                                  {e.attachmentUrl ? <a href={e.attachmentUrl} target="_blank" className="text-blue-600 underline">Ver</a> : '-'}
-                              </td>
-                          </tr>
-                      ))}
-                  </tbody>
-              </table>
-          </div>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800">Gastos</h2>
+        <button onClick={() => setIsFormOpen(!isFormOpen)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg">
+            {isFormOpen ? 'Cancelar' : 'Nuevo Gasto'}
+        </button>
       </div>
+
+      {isFormOpen && (
+        <div className="bg-white p-6 rounded-xl border shadow-sm grid gap-4">
+             <input className="border p-2 rounded" placeholder="Descripción" value={newExpense.description} onChange={e => setNewExpense({...newExpense, description: e.target.value})} />
+             <div className="flex gap-4">
+                 <input type="number" className="border p-2 rounded w-1/3" placeholder="Monto" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: parseFloat(e.target.value)})} />
+                 <input type="date" className="border p-2 rounded w-1/3" value={newExpense.date} onChange={e => setNewExpense({...newExpense, date: e.target.value})} />
+                 <select className="border p-2 rounded w-1/3" value={newExpense.category} onChange={e => setNewExpense({...newExpense, category: e.target.value as any})}><option value="Ordinary">Ordinario</option><option value="Extraordinary">Extraordinario</option></select>
+             </div>
+             
+             {/* Subida de Archivo */}
+             <div className="border p-3 rounded-lg bg-slate-50">
+                 <label className="text-sm font-bold block mb-2">Comprobante</label>
+                 {isUploading ? <span className="text-indigo-600 flex items-center"><Loader2 className="animate-spin mr-2"/> Subiendo...</span> : 
+                 <input type="file" onChange={handleFileChange} />}
+                 {newExpense.attachmentUrl && !isUploading && <span className="text-green-600 flex items-center mt-2"><CheckCircle className="w-4 h-4 mr-1"/> Cargado</span>}
+             </div>
+
+             <button onClick={handleAdd} disabled={isUploading} className="bg-indigo-600 text-white p-2 rounded hover:bg-indigo-700">Guardar</button>
+        </div>
+      )}
+
+      {/* Lista de gastos */}
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 uppercase text-slate-500">
+                  <tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Descripción</th><th className="px-6 py-3 text-right">Monto</th><th className="px-6 py-3 text-center">Archivo</th></tr>
+              </thead>
+              <tbody>
+                  {expenses.map(e => (
+                      <tr key={e.id} className="border-b">
+                          <td className="px-6 py-3">{e.date}</td>
+                          <td className="px-6 py-3">{e.description}</td>
+                          <td className="px-6 py-3 text-right">${e.amount.toFixed(2)}</td>
+                          <td className="px-6 py-3 text-center">{e.attachmentUrl ? <a href={e.attachmentUrl} target="_blank" className="text-blue-600"><FileText className="inline w-4 h-4"/></a> : '-'}</td>
+                      </tr>
+                  ))}
+              </tbody>
+          </table>
+      </div>
+    </div>
   );
 };
-
 export default ExpensesView;
