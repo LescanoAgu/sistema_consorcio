@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. REGLA PARA LA LISTA DE CONSORCIOS (Lectura pública necesaria para el login)
+    match /consorcios/{consortiumId} {
+      allow read: if true; 
+      allow create, update, delete: if request.auth != null;
+    }
+
+    // 2. REGLA PARA DATOS SENSIBLES (Gastos, Unidades, etc. dentro de un consorcio)
+    match /consorcios/{consortiumId}/{subcollection}/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Bloquear acceso a cualquier otra cosa por defecto
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
