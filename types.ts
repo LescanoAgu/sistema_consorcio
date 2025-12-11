@@ -1,10 +1,10 @@
-export type UserRole = 'DEV' | 'ADMIN' | 'USER';
-
 export enum ExpenseDistributionType {
   PRORATED = 'PRORATED',
   EQUAL_PARTS = 'EQUAL_PARTS',
   FROM_RESERVE = 'FROM_RESERVE'
 }
+
+export type UserRole = 'DEV' | 'ADMIN' | 'USER';
 
 export interface Unit {
   id: string;
@@ -45,7 +45,6 @@ export interface DebtAdjustment {
   description: string; 
 }
 
-// Configuración Global (Banco, Fondo, etc.)
 export interface ConsortiumSettings {
   reserveFundBalance: number;
   monthlyReserveContributionPercentage: number;
@@ -69,11 +68,9 @@ export interface SettlementRecord {
   reserveBalanceAtClose: number;
   reserveDeficitCovered?: number;
 
-  // --- VENCIMIENTOS ---
   firstExpirationDate?: string;
   secondExpirationDate?: string;
-  secondExpirationSurcharge?: number; // Porcentaje de recargo (ej: 5%)
-  // --------------------
+  secondExpirationSurcharge?: number;
 
   snapshotExpenses: Expense[];
   aiReportSummary?: string;
@@ -95,6 +92,11 @@ export interface Consortium {
   address: string;
   cuit?: string;
   image?: string;
+}
+
+export interface AppSettings {
+  reserveFundBalance: number;
+  monthlyReserveContributionPercentage: number;
 }
 
 export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings';

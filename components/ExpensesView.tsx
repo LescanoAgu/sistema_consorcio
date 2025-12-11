@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Expense, ExpenseDistributionType } from '../types';
-import { Plus, Trash2, DollarSign, Tag, Paperclip, CheckCircle, Loader2, Split, AlertCircle } from 'lucide-react';
-
-// Eliminada la importación de geminiService que rompía la app
+import { Plus, Trash2, DollarSign, Tag, Paperclip, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
+import { addExpense, deleteExpense } from '../services/firestoreService'; // ✅ IMPORTANTE
 
 interface ExpensesViewProps {
   expenses: Expense[];
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
-  reserveBalance: number; // Saldo Inicial
+  reserveBalance: number;
+  consortiumId: string; // ✅ NUEVO PROP
 }
 
 const EXPENSE_CATEGORIES = [
@@ -15,7 +15,7 @@ const EXPENSE_CATEGORIES = [
   'Seguros', 'Sueldos y Cargas', 'Limpieza', 'Bancarios', 'Otros'
 ];
 
-const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, reserveBalance }) => {
+const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, reserveBalance, consortiumId }) => {
   const [isFormOpen, setIsFormOpen] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -30,21 +30,15 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     attachmentUrl: ''
   });
 
-  // --- LÓGICA DE SALDO EN TIEMPO REAL ---
-  // 1. Calculamos cuánto ya gastaste del fondo en la lista actual
   const spentFromReserve = useMemo(() => {
     return expenses
       .filter(e => e.distributionType === ExpenseDistributionType.FROM_RESERVE)
       .reduce((acc, curr) => acc + (curr.amount || 0), 0);
   }, [expenses]);
 
-  // 2. Saldo Inicial seguro
   const initialBalanceSafe = (typeof reserveBalance === 'number' && !isNaN(reserveBalance)) ? reserveBalance : 0;
-  
-  // 3. SALDO DISPONIBLE AHORA (Inicial - Lo que ya cargaste)
   const currentAvailableBalance = initialBalanceSafe - spentFromReserve;
 
-  // Agrupación para la tabla
   const gastosAgrupados = useMemo(() => {
     return expenses.reduce((acumulador, gasto) => {
       const categoria = gasto.itemCategory || 'Varios';
@@ -54,7 +48,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     }, {} as Record<string, Expense[]>);
   }, [expenses]);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!newExpense.description) return alert("Falta descripción");
     const amount = Number(newExpense.amount) || 0;
     if (amount <= 0) return alert("El monto debe ser mayor a 0");
@@ -62,18 +56,15 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     const dateToUse = newExpense.date || new Date().toISOString().split('T')[0];
     
     // --- LÓGICA DE DESDOBLAMIENTO (Fondo vs Extraordinaria) ---
-    // Usamos el saldo restante actual para validar
     if (newExpense.distributionType === ExpenseDistributionType.FROM_RESERVE && amount > currentAvailableBalance) {
-        
-        // Cuánto podemos cubrir con lo que queda
         const covered = currentAvailableBalance > 0 ? currentAvailableBalance : 0;   
         const remainder = amount - covered;
         
-        // CASO A: No queda nada ($0) -> Todo a Extraordinaria
+        // CASO A: Fondo Vacío -> Todo a Extraordinaria
         if (covered <= 0) {
-            if(confirm(`⚠️ EL FONDO ESTÁ VACÍO ($0.00)\n\nEl saldo inicial era $${initialBalanceSafe.toLocaleString()}, pero ya se consumió con los gastos anteriores.\n\n¿Desea cargar los $${amount.toLocaleString()} como EXPENSA EXTRAORDINARIA?`)) {
+            if(confirm(`⚠️ EL FONDO ESTÁ VACÍO ($0.00)\n\n¿Desea cargar los $${amount.toLocaleString()} como EXPENSA EXTRAORDINARIA?`)) {
                 const expenseExtra: Expense = {
-                    id: crypto.randomUUID(),
+                    id: 'temp',
                     description: `${newExpense.description} (Saldo)`,
                     amount: amount,
                     date: dateToUse,
@@ -82,19 +73,20 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                     distributionType: ExpenseDistributionType.PRORATED,
                     attachmentUrl: newExpense.attachmentUrl
                 };
-                setExpenses([...expenses, expenseExtra]);
+                
+                // Guardar en Firebase
+                const saved = await addExpense(consortiumId, expenseExtra);
+                setExpenses([...expenses, saved]);
                 resetForm();
                 return;
             }
-            return; // Si dice que no, cancelamos
+            return;
         }
 
-        // CASO B: Queda algo, pero no alcanza -> Dividimos
-        if (confirm(`⚠️ SALDO INSUFICIENTE\n\nQuedan disponibles: $${covered.toLocaleString()}\nGasto a ingresar: $${amount.toLocaleString()}\nFaltan: $${remainder.toLocaleString()}\n\n¿Dividir automáticamente?\n1. $${covered.toLocaleString()} (Fondo)\n2. $${remainder.toLocaleString()} (Extraordinaria)`)) {
-            
-            // Parte 1: Fondo
+        // CASO B: Split Automático
+        if (confirm(`⚠️ SALDO INSUFICIENTE\n\nQuedan: $${covered.toLocaleString()}\nFaltan: $${remainder.toLocaleString()}\n\n¿Dividir automáticamente?`)) {
             const expenseReserve: Expense = {
-                id: crypto.randomUUID(),
+                id: 'temp1',
                 description: `${newExpense.description} (Parte Fondo)`,
                 amount: covered,
                 date: dateToUse,
@@ -104,9 +96,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                 attachmentUrl: newExpense.attachmentUrl
             };
 
-            // Parte 2: Extraordinaria
             const expenseExtra: Expense = {
-                id: crypto.randomUUID(),
+                id: 'temp2',
                 description: `${newExpense.description} (Saldo)`,
                 amount: remainder,
                 date: dateToUse,
@@ -116,7 +107,11 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                 attachmentUrl: newExpense.attachmentUrl
             };
 
-            setExpenses([...expenses, expenseReserve, expenseExtra]);
+            // Guardar ambos en Firebase
+            const saved1 = await addExpense(consortiumId, expenseReserve);
+            const saved2 = await addExpense(consortiumId, expenseExtra);
+
+            setExpenses([...expenses, saved1, saved2]);
             resetForm();
             return; 
         }
@@ -124,8 +119,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
 
     // --- CARGA NORMAL ---
     const expense: Expense = {
-      id: crypto.randomUUID(),
-      description: newExpense.description,
+      id: 'temp', // El ID real lo da Firebase
+      description: newExpense.description || '',
       amount: amount,
       date: dateToUse,
       category: newExpense.category as 'Ordinary' | 'Extraordinary',
@@ -133,8 +128,16 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
       distributionType: newExpense.distributionType as ExpenseDistributionType,
       attachmentUrl: newExpense.attachmentUrl
     };
-    setExpenses([...expenses, expense]);
-    resetForm();
+
+    try {
+        // ✅ GUARDADO REAL EN FIREBASE
+        const savedExpense = await addExpense(consortiumId, expense);
+        setExpenses([...expenses, savedExpense]);
+        resetForm();
+    } catch (e) {
+        console.error(e);
+        alert("Error al guardar el gasto en la base de datos.");
+    }
   };
 
   const resetForm = () => {
@@ -143,11 +146,17 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
         category: 'Ordinary', itemCategory: 'Mantenimiento',
         distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
       });
-      // No cerramos el formulario para permitir carga rápida
   }
 
-  const handleDelete = (id: string) => {
-    if(confirm('¿Eliminar gasto?')) setExpenses(expenses.filter(e => e.id !== id));
+  const handleDelete = async (id: string) => {
+    if(confirm('¿Eliminar gasto?')) {
+        try {
+            await deleteExpense(consortiumId, id); // ✅ BORRADO REAL
+            setExpenses(expenses.filter(e => e.id !== id));
+        } catch(e) {
+            alert("Error al eliminar");
+        }
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,7 +197,6 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
           
           <h3 className="text-lg font-bold text-slate-700 mb-4 border-b border-slate-100 pb-2">Nuevo Gasto</h3>
           
-          {/* INDICADOR DE SALDO EN TIEMPO REAL */}
           <div className="flex gap-4 mb-6">
               <div className="text-xs px-3 py-2 rounded border bg-slate-50 border-slate-200 text-slate-600">
                   Saldo Inicial: <strong>${initialBalanceSafe.toLocaleString()}</strong>

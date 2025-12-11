@@ -39,6 +39,11 @@ function App() {
       }
   }, [consortium]);
 
+  const handleLogin = (email: string, role: UserRole) => {
+    setUser({ email, role });
+    setView(role === 'USER' ? 'user_portal' : 'dashboard');
+  };
+
   const handleCloseMonth = async (record: SettlementRecord) => {
     if (!consortium) return;
     try {
@@ -57,22 +62,59 @@ function App() {
       setSettings(newSettings);
   };
 
-  if (!user) return <AuthView isAuthenticated={false} onLoginSuccess={(e,r) => { setUser({email:e, role:r}); setView(r === 'USER' ? 'user_portal' : 'dashboard'); }} onSelectConsortium={setConsortium} consortiums={consortiumList} onCreateConsortium={async (c) => { const s = await createConsortium(c); setConsortiumList([...consortiumList, s as Consortium]); }} onLogout={() => {}} userRole={'ADMIN'} userEmail={''} />;
-  if (!consortium) return null;
+  if (!user || !consortium) {
+    return (
+      <AuthView 
+        isAuthenticated={!!user} 
+        onLoginSuccess={handleLogin}
+        onSelectConsortium={setConsortium}
+        consortiums={consortiumList}
+        onCreateConsortium={async (c) => { const s = await createConsortium(c); setConsortiumList([...consortiumList, s as Consortium]); }}
+        onLogout={() => setUser(null)}
+        userRole={user?.role || 'ADMIN'}
+        userEmail={user?.email || ''}
+      />
+    );
+  }
 
   return (
     <div className="flex h-screen bg-slate-100">
       <Sidebar currentView={view} onChangeView={setView} consortiumName={consortium.name} onSwitchConsortium={() => setConsortium(null)} onLogout={() => setUser(null)} userRole={user.role} />
       <main className="flex-1 overflow-y-auto p-8 ml-64">
         <div className="max-w-7xl mx-auto">
-          {view === 'dashboard' && <Dashboard units={units} expenses={expenses} settings={settings} reserveHistory={[]} />}
-          {view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
-          {view === 'expenses' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} />}
-          {view === 'settlement' && <SettlementView units={units} expenses={expenses} setExpenses={setExpenses} settings={settings} consortiumId={consortium.id} updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})} onCloseMonth={handleCloseMonth} />}
-          {view === 'history' && <HistoryView history={history} consortiumName={consortium.name} units={units} settings={settings} />}
-          {view === 'user_portal' && <UserPortal userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} />}
-          {view === 'debtors' && <DebtorsView units={units} payments={payments} history={history} debtAdjustments={debtAdjustments} setDebtAdjustments={setDebtAdjustments} />}
-          {view === 'collections' && <CollectionsView payments={payments} units={units} setPayments={setPayments} />}
+          {loading && <div className="text-center p-4">Cargando datos...</div>}
+
+          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} settings={settings} reserveHistory={[]} />}
+          {!loading && view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
+          
+          {/* ✅ CORREGIDO: Pasamos consortiumId */}
+          {!loading && view === 'expenses' && (
+            <ExpensesView 
+                expenses={expenses} 
+                setExpenses={setExpenses} 
+                reserveBalance={settings.reserveFundBalance}
+                consortiumId={consortium.id} 
+            />
+          )}
+          
+          {!loading && view === 'settlement' && (
+            <SettlementView 
+                units={units} 
+                expenses={expenses} 
+                setExpenses={setExpenses}
+                settings={settings} 
+                consortiumId={consortium.id}
+                consortiumName={consortium.name}
+                updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})}
+                onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})}
+                onCloseMonth={handleCloseMonth}
+            />
+          )}
+
+          {!loading && view === 'history' && <HistoryView history={history} consortiumName={consortium.name} units={units} settings={settings} />}
+          {!loading && view === 'user_portal' && <UserPortal userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} />}
+          {!loading && view === 'debtors' && <DebtorsView units={units} payments={payments} history={history} debtAdjustments={debtAdjustments} setDebtAdjustments={setDebtAdjustments} />}
+          {!loading && view === 'collections' && <CollectionsView payments={payments} units={units} setPayments={setPayments} />}
         </div>
       </main>
     </div>
