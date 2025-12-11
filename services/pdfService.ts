@@ -4,6 +4,7 @@ import { SettlementRecord, Unit } from "../types";
 
 // --- FUNCIÓN 1: REPORTE GENERAL (Para el Grupo) ---
 export const generateSettlementPDF = (record: SettlementRecord, consortiumName: string, units: Unit[]) => {
+  consortiumName = "Consorcio O'Higgins"; // Force correct name per user request
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.width;
 
@@ -34,7 +35,18 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
   const expense = record.reserveExpense || 0;
   const endBalance = record.reserveBalanceAtClose; 
 
+
+  // Calculate split expenses
+  const totalOrdinary = record.snapshotExpenses
+    .filter(e => e.category === 'Ordinary')
+    .reduce((sum, e) => sum + e.amount, 0);
+  const totalExtraordinary = record.snapshotExpenses
+    .filter(e => e.category !== 'Ordinary')
+    .reduce((sum, e) => sum + e.amount, 0);
+
   const summaryData = [
+    ['Gastos Ordinarios', `$${totalOrdinary.toFixed(2)}`],
+    ['Gastos Extraordinarios', `$${totalExtraordinary.toFixed(2)}`],
     ['Total Gastos del Mes', `$${record.totalExpenses.toFixed(2)}`],
     ['Total a Recaudar (Expensas)', `$${record.totalCollected.toFixed(2)}`],
     ['', ''], 
@@ -97,39 +109,9 @@ export const generateSettlementPDF = (record: SettlementRecord, consortiumName: 
     styles: { fontSize: 9 }
   });
 
-  // -- UNIT BREAKDOWN TABLE --
-  finalY = (doc as any).lastAutoTable.finalY + 15;
-  
-  if (finalY > doc.internal.pageSize.height - 40) {
-      doc.addPage();
-      finalY = 20;
-  }
-
-  doc.setFontSize(12);
-  doc.text("Prorrateo por Unidad", 14, finalY);
-
-  const unitsBody = record.unitDetails.map(detail => {
-    const unit = units.find(u => u.id === detail.unitId);
-    return [
-        unit?.unitNumber || '?',
-        unit?.ownerName || 'Desconocido',
-        `${unit?.proratePercentage.toFixed(2)}%`,
-        `$${detail.totalToPay.toFixed(2)}`
-    ];
-  });
-
-  autoTable(doc, {
-    startY: finalY + 5,
-    head: [['UF', 'Propietario', '%', 'A Pagar']],
-    body: unitsBody,
-    theme: 'plain',
-    headStyles: { fillColor: [229, 231, 235], textColor: 0 },
-    columnStyles: { 
-        3: { halign: 'right', fontStyle: 'bold' },
-        2: { halign: 'right' }
-    },
-    styles: { fontSize: 9, cellPadding: 2 }
-  });
+  // -- UNIT BREAKDOWN TABLE REMOVED FOR PRIVACY --
+  // finalY = (doc as any).lastAutoTable.finalY + 15;
+  // ... (Code removed)
 
   // Footer General
   const pageCount = (doc as any).internal.getNumberOfPages();
@@ -150,6 +132,7 @@ export const generateIndividualCouponPDF = (
     consortiumName: string, 
     units: Unit[]
 ) => {
+    consortiumName = "Consorcio O'Higgins"; // Force correct name
     const doc = new jsPDF();
     const unit = units.find(u => u.id === unitId);
     
@@ -157,9 +140,22 @@ export const generateIndividualCouponPDF = (
     const detail = record.unitDetails.find(d => d.unitId === unitId);
     if (!unit || !detail) return;
 
-    // Cálculos aproximados para mostrar desglose en el cupón
+    
+    // Calculate split expenses for the unit
+    const totalOrdinary = record.snapshotExpenses
+        .filter(e => e.category === 'Ordinary')
+        .reduce((sum, e) => sum + e.amount, 0);
+    const totalExtraordinary = record.snapshotExpenses
+        .filter(e => e.category !== 'Ordinary')
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    const ordShare = totalOrdinary * (unit.proratePercentage / 100);
+    const extraShare = totalExtraordinary * (unit.proratePercentage / 100);
     const reserveShare = (record.reserveContribution || 0) * (unit.proratePercentage / 100);
-    const expenseShare = detail.totalToPay - reserveShare;
+    
+    // Total calculation verification
+    // Note: detailed.totalToPay should theoretically match ordShare + extraShare + reserveShare
+    // We display the calculated shares.
 
     // 1. Encabezado Cupón
     doc.setFillColor(79, 70, 229); // Indigo
@@ -178,10 +174,14 @@ export const generateIndividualCouponPDF = (
     doc.text(`Unidad Funcional: ${unit.unitNumber}`, 20, 70);
     doc.text(`Período: ${record.month}`, 140, 60);
     
-    // Fecha vto simulada (día 10 del mes siguiente)
-    const vtoDate = new Date();
-    vtoDate.setMonth(vtoDate.getMonth() + 1);
-    doc.text(`Vencimiento: 10/${vtoDate.getMonth() + 1}/${vtoDate.getFullYear()}`, 140, 70);
+    // Vencimientos
+    const vto1 = "22/12";
+    const vto2 = "31/12";
+    const totalWithInterest = detail.totalToPay * 1.10;
+
+    doc.setFontSize(10);
+    doc.text(`1er Vto (${vto1}): $${detail.totalToPay.toFixed(2)}`, 140, 70);
+    doc.text(`2do Vto (${vto2}): $${totalWithInterest.toFixed(2)}`, 140, 76);
 
     // 3. El Número Importante (TOTAL)
     doc.setFillColor(243, 244, 246); // Gris claro
@@ -202,7 +202,8 @@ export const generateIndividualCouponPDF = (
         startY: 140,
         head: [['Concepto', 'Monto']],
         body: [
-            ['Cuota Parte Expensas (Ordinarias + Extraord.)', `$${expenseShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
+            ['Expensas Ordinarias (Inquilino)', `$${ordShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
+            ['Expensas Extraordinarias (Propietario)', `$${extraShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
             ['Aporte Fondo de Reserva', `$${reserveShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
         ],
         theme: 'plain',
@@ -223,18 +224,19 @@ export const generateIndividualCouponPDF = (
     doc.text("DATOS PARA TRANSFERENCIA", 30, finalY + 10);
     
     doc.setFontSize(10);
-    doc.text("Banco: Banco Nación", 30, finalY + 20);
-    doc.text("Titular: Consorcio Propietarios Edificio Norte", 30, finalY + 28);
+    doc.text("Titular: Sebastián Garbuio", 30, finalY + 20);
+    doc.text("CUIT/CUIL: 20305458504", 30, finalY + 28);
     
     doc.setFont("helvetica", "bold");
-    doc.text("CBU: 0110599520000001234567", 30, finalY + 38);
-    doc.text("Alias: EDIFICIO.NORTE.PAGO", 30, finalY + 46);
+    doc.text("CVU: 000003100030604976717", 30, finalY + 38);
+    doc.text("Alias: flan.alcuza.edad.mp", 30, finalY + 46);
 
     // Footer
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150, 150, 150);
-    doc.text("Por favor envíe el comprobante por WhatsApp o Email al realizar el pago.", 105, 280, { align: "center" });
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(220, 38, 38); // Red warning color
+    doc.text("Favor de enviar comprobante al Whatsapp: 261 270-0255 para registrar el pago.", 105, 275, { align: "center" });
+    doc.text("En caso contrario NO se registrará el pago.", 105, 280, { align: "center" });
 
     doc.save(`Cupon_${unit.unitNumber}_${record.month}.pdf`);
 };
