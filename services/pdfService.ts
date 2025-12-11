@@ -1,242 +1,193 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { SettlementRecord, Unit } from "../types";
+import { SettlementRecord, Unit, ExpenseDistributionType, ConsortiumSettings } from "../types";
 
-// --- FUNCIÓN 1: REPORTE GENERAL (Para el Grupo) ---
-export const generateSettlementPDF = (record: SettlementRecord, consortiumName: string, units: Unit[]) => {
-  consortiumName = "Consorcio O'Higgins"; // Force correct name per user request
+// --- FUNCIÓN 1: REPORTE GENERAL ---
+export const generateSettlementPDF = (record: SettlementRecord, consortiumName: string, units: Unit[], settings?: ConsortiumSettings) => {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.width;
 
-  // -- HEADER --
-  doc.setFillColor(79, 70, 229); // Indigo 600
+  // Header
+  doc.setFillColor(79, 70, 229);
   doc.rect(0, 0, pageWidth, 40, 'F');
-  
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(22);
   doc.text(consortiumName, 14, 20);
-  
   doc.setFontSize(14);
   doc.text("Liquidación de Expensas", 14, 30);
-  
   doc.setFontSize(10);
   doc.text(`Período: ${record.month}`, pageWidth - 14, 20, { align: 'right' });
   doc.text(`Cierre: ${new Date(record.dateClosed).toLocaleDateString()}`, pageWidth - 14, 30, { align: 'right' });
 
-  // -- SUMMARY SECTION --
-  let finalY = 45;
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(12);
-  doc.text("Resumen Financiero", 14, 55);
-
-  // LOGICA FONDO DE RESERVA
-  const startBalance = record.reserveBalanceStart || 0;
-  const contribution = record.reserveContribution || 0; 
-  const expense = record.reserveExpense || 0;
-  const endBalance = record.reserveBalanceAtClose; 
-
-
-  // Calculate split expenses
-  const totalOrdinary = record.snapshotExpenses
-    .filter(e => e.category === 'Ordinary')
-    .reduce((sum, e) => sum + e.amount, 0);
-  const totalExtraordinary = record.snapshotExpenses
-    .filter(e => e.category !== 'Ordinary')
-    .reduce((sum, e) => sum + e.amount, 0);
-
+  // Tabla Resumen
+  const deficit = record.reserveDeficitCovered || 0;
   const summaryData = [
-    ['Gastos Ordinarios', `$${totalOrdinary.toFixed(2)}`],
-    ['Gastos Extraordinarios', `$${totalExtraordinary.toFixed(2)}`],
     ['Total Gastos del Mes', `$${record.totalExpenses.toFixed(2)}`],
     ['Total a Recaudar (Expensas)', `$${record.totalCollected.toFixed(2)}`],
     ['', ''], 
     ['FONDO DE RESERVA', ''],
-    ['Saldo Inicial (Caja Anterior)', `$${startBalance.toFixed(2)}`],
-    ['(-) Gastos cubiertos por Fondo', `-$${expense.toFixed(2)}`],
-    ['(=) Saldo Final Disponible', `$${endBalance.toFixed(2)}`],
+    ['Saldo Inicial', `$${record.reserveBalanceStart.toFixed(2)}`],
+    ['(-) Pagado con Fondo', `-$${record.reserveExpense.toFixed(2)}`],
+    deficit > 0 ? ['(+) Recupero Déficit', `+$${deficit.toFixed(2)}`] : null,
+    ['(=) Saldo Final', `$${record.reserveBalanceAtClose.toFixed(2)}`],
     ['', ''],
-    ['(+) Aporte a Recaudar este mes', `$${contribution.toFixed(2)}`] 
-  ];
+    ['(+) Aporte a Recaudar', `$${record.reserveContribution.toFixed(2)}`] 
+  ].filter(Boolean); // Filtramos nulos
 
   autoTable(doc, {
     startY: 60,
     head: [['Concepto', 'Monto']],
-    body: summaryData,
+    body: summaryData as any,
     theme: 'striped',
-    headStyles: { fillColor: [243, 244, 246], textColor: [55, 65, 81], fontStyle: 'bold' },
-    styles: { fontSize: 10 },
-    columnStyles: { 
-        0: { cellWidth: 120 },
-        1: { halign: 'right', fontStyle: 'bold' } 
-    },
-    didParseCell: function (data) {
-        if (data.row.index === 6) { 
-            data.cell.styles.fillColor = [209, 250, 229];
-            data.cell.styles.textColor = [6, 95, 70];
-            data.cell.styles.fontStyle = 'bold';
-        }
-        if (data.row.index === 3) {
-             data.cell.styles.fontStyle = 'bold';
-             data.cell.styles.textColor = [79, 70, 229];
-        }
-    },
-    margin: { left: 14 }
+    headStyles: { fillColor: [243, 244, 246], textColor: 0, fontStyle: 'bold' }
   });
 
-  // -- EXPENSES TABLE --
-  finalY = (doc as any).lastAutoTable.finalY + 15;
+  // Gastos
+  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  doc.setTextColor(0);
   doc.setFontSize(12);
-  doc.setTextColor(0, 0, 0); 
   doc.text("Detalle de Gastos", 14, finalY);
-
-  const expenseBody = record.snapshotExpenses.map(e => [
-    e.date,
-    e.description,
-    e.itemCategory || '-',
-    e.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario',
-    `$${e.amount.toFixed(2)}`
-  ]);
-
+  
   autoTable(doc, {
     startY: finalY + 5,
-    head: [['Fecha', 'Descripción', 'Rubro', 'Tipo', 'Monto']],
-    body: expenseBody,
+    head: [['Fecha', 'Descripción', 'Tipo', 'Monto']],
+    body: record.snapshotExpenses.map(e => [
+        e.date, e.description, 
+        e.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario',
+        e.distributionType === ExpenseDistributionType.FROM_RESERVE ? `($${e.amount.toFixed(2)})` : `$${e.amount.toFixed(2)}`
+    ]),
     theme: 'grid',
-    headStyles: { fillColor: [79, 70, 229] },
-    columnStyles: { 
-        4: { halign: 'right' } 
-    },
-    styles: { fontSize: 9 }
+    headStyles: { fillColor: [79, 70, 229] }
   });
 
-  // -- UNIT BREAKDOWN TABLE REMOVED FOR PRIVACY --
-  // finalY = (doc as any).lastAutoTable.finalY + 15;
-  // ... (Code removed)
+  // Prorrateo
+  let tableY = (doc as any).lastAutoTable.finalY + 15;
+  if (tableY > doc.internal.pageSize.height - 40) { doc.addPage(); tableY = 20; }
+  
+  doc.text("Prorrateo por Unidad", 14, tableY);
+  
+  autoTable(doc, {
+    startY: tableY + 5,
+    head: [['UF', 'Propietario', '%', 'A Pagar']],
+    body: record.unitDetails.map(detail => {
+        const u = units.find(unit => unit.id === detail.unitId);
+        return [u?.unitNumber || '?', u?.ownerName || '', `${u?.proratePercentage.toFixed(2)}%`, `$${detail.totalToPay.toFixed(2)}`];
+    }),
+    theme: 'plain',
+    headStyles: { fillColor: [229, 231, 235], textColor: 0 }
+  });
 
-  // Footer General
-  const pageCount = (doc as any).internal.getNumberOfPages();
-  for(let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(`Página ${i} de ${pageCount} - Generado por Gestión Consorcio`, pageWidth / 2, doc.internal.pageSize.height - 10, { align: 'center' });
+  // Nota Administrativa
+  if (record.couponMessage) {
+      const msgY = (doc as any).lastAutoTable.finalY + 10;
+      // Verificar si cabe en la página
+      if (msgY < doc.internal.pageSize.height - 30) {
+        doc.setFillColor(255, 251, 235);
+        doc.rect(14, msgY, pageWidth - 28, 20, 'F');
+        doc.setTextColor(50);
+        doc.setFontSize(10);
+        doc.text(`Nota: ${record.couponMessage}`, 18, msgY + 13);
+      }
   }
 
-  doc.save(`Liquidacion_${consortiumName.replace(/\s+/g, '_')}_${record.month}.pdf`);
+  doc.save(`Liquidacion_${record.month}.pdf`);
 };
 
-// --- FUNCIÓN 2: CUPÓN INDIVIDUAL (Privado) ---
+// --- FUNCIÓN 2: CUPÓN INDIVIDUAL ---
 export const generateIndividualCouponPDF = (
-    record: SettlementRecord, 
-    unitId: string, 
-    consortiumName: string, 
-    units: Unit[]
+    record: SettlementRecord, unitId: string, consortiumName: string, units: Unit[], settings?: ConsortiumSettings
 ) => {
-    consortiumName = "Consorcio O'Higgins"; // Force correct name
     const doc = new jsPDF();
     const unit = units.find(u => u.id === unitId);
-    
-    // Si no encontramos la unidad o el detalle, salimos
     const detail = record.unitDetails.find(d => d.unitId === unitId);
     if (!unit || !detail) return;
 
+    // Cálculos
+    const pct = unit.proratePercentage / 100;
     
-    // Calculate split expenses for the unit
-    const totalOrdinary = record.snapshotExpenses
-        .filter(e => e.category === 'Ordinary')
-        .reduce((sum, e) => sum + e.amount, 0);
-    const totalExtraordinary = record.snapshotExpenses
-        .filter(e => e.category !== 'Ordinary')
-        .reduce((sum, e) => sum + e.amount, 0);
+    // CORRECCIÓN DE TIPO: Usar el Enum explícito en el filter
+    const ordinaryTotal = record.snapshotExpenses
+        .filter(e => e.category === 'Ordinary' && e.distributionType !== ExpenseDistributionType.FROM_RESERVE)
+        .reduce((a, b) => a + b.amount, 0);
+    const ordinaryShare = ordinaryTotal * pct;
 
-    const ordShare = totalOrdinary * (unit.proratePercentage / 100);
-    const extraShare = totalExtraordinary * (unit.proratePercentage / 100);
-    const reserveShare = (record.reserveContribution || 0) * (unit.proratePercentage / 100);
+    const extraTotal = record.snapshotExpenses
+        .filter(e => e.category === 'Extraordinary' && e.distributionType !== ExpenseDistributionType.FROM_RESERVE)
+        .reduce((a, b) => a + b.amount, 0);
+    const extraShare = extraTotal * pct;
+
+    const reserveShare = (record.reserveContribution || 0) * pct;
+    const deficitShare = (record.reserveDeficitCovered || 0) * pct;
     
-    // Total calculation verification
-    // Note: detailed.totalToPay should theoretically match ordShare + extraShare + reserveShare
-    // We display the calculated shares.
+    // Ajuste por redondeo
+    const checkSum = ordinaryShare + extraShare + reserveShare + deficitShare;
+    const diff = detail.totalToPay - checkSum;
+    const finalOrdinaryShare = ordinaryShare + diff;
 
-    // 1. Encabezado Cupón
-    doc.setFillColor(79, 70, 229); // Indigo
+    // Vencimientos
+    const total1 = detail.totalToPay;
+    const surchargePct = record.secondExpirationSurcharge || 0;
+    const total2 = total1 * (1 + (surchargePct / 100));
+
+    // Header
+    doc.setFillColor(79, 70, 229);
     doc.rect(0, 0, 210, 40, 'F');
-    
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(20);
     doc.text("CUPÓN DE PAGO", 105, 20, { align: "center" });
     doc.setFontSize(12);
     doc.text(consortiumName, 105, 30, { align: "center" });
 
-    // 2. Datos del Propietario
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(14);
+    // Datos
+    doc.setTextColor(0);
+    doc.setFontSize(12);
     doc.text(`Propietario: ${unit.ownerName}`, 20, 60);
-    doc.text(`Unidad Funcional: ${unit.unitNumber}`, 20, 70);
+    doc.text(`UF: ${unit.unitNumber}`, 20, 70);
     doc.text(`Período: ${record.month}`, 140, 60);
-    
-    // Vencimientos
-    const vto1 = "22/12";
-    const vto2 = "31/12";
-    const totalWithInterest = detail.totalToPay * 1.10;
 
-    doc.setFontSize(10);
-    doc.text(`1er Vto (${vto1}): $${detail.totalToPay.toFixed(2)}`, 140, 70);
-    doc.text(`2do Vto (${vto2}): $${totalWithInterest.toFixed(2)}`, 140, 76);
-
-    // 3. El Número Importante (TOTAL)
-    doc.setFillColor(243, 244, 246); // Gris claro
-    doc.roundedRect(20, 85, 170, 40, 3, 3, 'F');
-    
-    doc.setFontSize(12);
-    doc.setTextColor(100, 100, 100);
-    doc.text("TOTAL A PAGAR", 105, 98, { align: "center" });
-    
-    doc.setFontSize(30);
-    doc.setTextColor(79, 70, 229); // Indigo
+    // Fechas de Vencimiento
+    doc.setFontSize(11);
+    const v1Date = record.firstExpirationDate ? new Date(record.firstExpirationDate).toLocaleDateString() : '-';
+    doc.text(`1er Vto (${v1Date}):`, 120, 75);
     doc.setFont("helvetica", "bold");
-    doc.text(`$${detail.totalToPay.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, 105, 115, { align: "center" });
+    doc.text(`$${total1.toLocaleString('es-AR', {minimumFractionDigits: 2})}`, 165, 75);
     doc.setFont("helvetica", "normal");
-
-    // 4. Tabla de Conceptos
-    autoTable(doc, {
-        startY: 140,
-        head: [['Concepto', 'Monto']],
-        body: [
-            ['Expensas Ordinarias (Inquilino)', `$${ordShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
-            ['Expensas Extraordinarias (Propietario)', `$${extraShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
-            ['Aporte Fondo de Reserva', `$${reserveShare.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`],
-        ],
-        theme: 'plain',
-        styles: { fontSize: 11, cellPadding: 3 },
-        columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
-    });
-
-    // 5. Datos Bancarios
-    const finalY = (doc as any).lastAutoTable.finalY + 20;
     
-    doc.setDrawColor(150, 150, 150);
-    doc.setLineDashPattern([2, 2], 0); 
-    doc.rect(20, finalY, 170, 50); 
-    doc.setLineDashPattern([], 0); 
+    if (record.secondExpirationDate) {
+        const v2Date = new Date(record.secondExpirationDate).toLocaleDateString();
+        doc.text(`2do Vto (${v2Date}):`, 120, 82);
+        doc.setFont("helvetica", "bold");
+        doc.text(`$${total2.toLocaleString('es-AR', {minimumFractionDigits: 2})}`, 165, 82);
+    }
 
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text("DATOS PARA TRANSFERENCIA", 30, finalY + 10);
-    
-    doc.setFontSize(10);
-    doc.text("Titular: Sebastián Garbuio", 30, finalY + 20);
-    doc.text("CUIT/CUIL: 20305458504", 30, finalY + 28);
-    
-    doc.setFont("helvetica", "bold");
-    doc.text("CVU: 000003100030604976717", 30, finalY + 38);
-    doc.text("Alias: flan.alcuza.edad.mp", 30, finalY + 46);
+    // Tabla Conceptos
+    const tableBody = [];
+    if (finalOrdinaryShare > 0.01) tableBody.push(['Expensas Ordinarias', `$${finalOrdinaryShare.toLocaleString('es-AR', {minimumFractionDigits: 2})}`]);
+    if (extraShare > 0.01) tableBody.push(['Expensas Extraordinarias', `$${extraShare.toLocaleString('es-AR', {minimumFractionDigits: 2})}`]);
+    if (deficitShare > 0.01) tableBody.push(['Recupero Saldo Fondo', `$${deficitShare.toLocaleString('es-AR', {minimumFractionDigits: 2})}`]);
+    if (reserveShare > 0.01) tableBody.push(['Aporte Fondo Reserva', `$${reserveShare.toLocaleString('es-AR', {minimumFractionDigits: 2})}`]);
 
-    // Footer
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(220, 38, 38); // Red warning color
-    doc.text("Favor de enviar comprobante al Whatsapp: 261 270-0255 para registrar el pago.", 105, 275, { align: "center" });
-    doc.text("En caso contrario NO se registrará el pago.", 105, 280, { align: "center" });
+    autoTable(doc, { startY: 95, head: [['Concepto', 'Monto']], body: tableBody, theme: 'plain', styles: { fontSize: 11, cellPadding: 3 }, columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } } });
+
+    // Banco y Nota
+    const bankY = (doc as any).lastAutoTable.finalY + 20;
+    doc.setFont("helvetica", "normal");
+    
+    if (settings) {
+        doc.setFontSize(10);
+        doc.text("DATOS DE PAGO:", 20, bankY);
+        doc.text(`Banco: ${settings.bankName || '-'}`, 20, bankY + 7);
+        doc.text(`Titular: ${settings.bankHolder || '-'}`, 20, bankY + 14);
+        doc.setFont("helvetica", "bold");
+        doc.text(`CBU: ${settings.bankCBU || '-'}`, 20, bankY + 24);
+        doc.text(`Alias: ${settings.bankAlias || '-'}`, 20, bankY + 31);
+    }
+
+    if (record.couponMessage) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.text(`Nota: ${record.couponMessage}`, 105, bankY + 50, { align: "center" });
+    }
 
     doc.save(`Cupon_${unit.unitNumber}_${record.month}.pdf`);
 };

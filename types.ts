@@ -1,19 +1,18 @@
+export type UserRole = 'DEV' | 'ADMIN' | 'USER';
 
 export enum ExpenseDistributionType {
-  PRORATED = 'PRORATED', // Segun porcentaje
-  EQUAL_PARTS = 'EQUAL_PARTS', // Partes iguales
-  FROM_RESERVE = 'FROM_RESERVE' // Sale del fondo, no se cobra
+  PRORATED = 'PRORATED',
+  EQUAL_PARTS = 'EQUAL_PARTS',
+  FROM_RESERVE = 'FROM_RESERVE'
 }
-
-export type UserRole = 'DEV' | 'ADMIN' | 'USER';
 
 export interface Unit {
   id: string;
   unitNumber: string;
   ownerName: string;
-  linkedEmail?: string; // Para vincular el login de usuario
+  linkedEmail?: string;
   proratePercentage: number; 
-  initialBalance: number; // Saldo inicial (deuda previa o saldo a favor)
+  initialBalance: number; 
 }
 
 export interface Expense {
@@ -23,8 +22,9 @@ export interface Expense {
   date: string;
   distributionType: ExpenseDistributionType;
   category: 'Ordinary' | 'Extraordinary';
-  itemCategory: string; // New: Specific category (e.g. Mantenimiento, Servicios)
-  attachmentUrl?: string; // New: PDF/Image link
+  itemCategory: string; 
+  attachmentUrl?: string; 
+  liquidacionId?: string | null;
 }
 
 export interface Payment {
@@ -34,16 +34,26 @@ export interface Payment {
   date: string;
   method: 'Transferencia' | 'Efectivo' | 'Cheque';
   notes?: string;
-  attachmentUrl?: string; // New: Proof of payment
+  attachmentUrl?: string;
 }
 
-// New: For Interest or Penalties
 export interface DebtAdjustment {
   id: string;
   unitId: string;
-  amount: number; // Positive increases debt
+  amount: number; 
   date: string;
-  description: string; // e.g. "Interés por mora Mayo 5%"
+  description: string; 
+}
+
+// Configuración Global (Banco, Fondo, etc.)
+export interface ConsortiumSettings {
+  reserveFundBalance: number;
+  monthlyReserveContributionPercentage: number;
+  bankName: string;
+  bankCBU: string;
+  bankAlias: string;
+  bankHolder: string;
+  bankCuit: string;
 }
 
 export interface SettlementRecord {
@@ -51,23 +61,31 @@ export interface SettlementRecord {
   month: string;
   dateClosed: string;
   totalExpenses: number;
-  totalCollected: number; // The target amount to collect
+  totalCollected: number;
+  
   reserveBalanceStart: number;
   reserveContribution: number;
   reserveExpense: number;
   reserveBalanceAtClose: number;
-  snapshotExpenses: Expense[]; // Snapshot of expenses for that month
+  reserveDeficitCovered?: number;
+
+  // --- VENCIMIENTOS ---
+  firstExpirationDate?: string;
+  secondExpirationDate?: string;
+  secondExpirationSurcharge?: number; // Porcentaje de recargo (ej: 5%)
+  // --------------------
+
+  snapshotExpenses: Expense[];
   aiReportSummary?: string;
-  // Snapshot of what each unit had to pay in this settlement
+  couponMessage?: string;
   unitDetails: { unitId: string; totalToPay: number }[]; 
 }
 
-// New: Reserve Fund History
 export interface ReserveTransaction {
     id: string;
     date: string;
-    amount: number; // Positive = Income, Negative = Expense
-    description: string; // e.g. "Aporte Expensas Mayo", "Gasto Reparación Bomba"
+    amount: number; 
+    description: string; 
     balanceAfter: number;
 }
 
@@ -79,9 +97,4 @@ export interface Consortium {
   image?: string;
 }
 
-export interface AppSettings {
-  reserveFundBalance: number;
-  monthlyReserveContributionPercentage: number;
-}
-
-export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal';
+export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings';

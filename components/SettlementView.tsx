@@ -1,32 +1,66 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Unit, Expense, AppSettings, ExpenseDistributionType, SettlementRecord } from '../types';
-import { Archive, AlertTriangle, AlertCircle, Edit2, Check } from 'lucide-react';
-
-// Eliminada la importación de geminiService
+import { Unit, Expense, ExpenseDistributionType, SettlementRecord, ConsortiumSettings } from '../types';
+import { Archive, AlertCircle, Save, MessageSquare, Edit2, Calendar } from 'lucide-react';
+import { updateExpense } from '../services/firestoreService';
 
 interface SettlementViewProps {
   units: Unit[];
   expenses: Expense[];
-  settings: AppSettings;
-  updateReserveBalance?: (newBalance: number) => void; 
+  settings: ConsortiumSettings;
+  setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
+  consortiumId: string;
+  updateReserveBalance: (newBalance: number) => void;
   onCloseMonth: (record: SettlementRecord) => void;
 }
 
-const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, updateReserveBalance, onCloseMonth }) => {
+const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, setExpenses, consortiumId, updateReserveBalance, onCloseMonth }) => {
+  const [couponMessage, setCouponMessage] = useState('');
+  
+  // Vencimientos automáticos (Mes siguiente)
+  const today = new Date();
+  const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 10);
+  const nextMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 20);
+  
+  const [firstDate, setFirstDate] = useState(nextMonth.toISOString().split('T')[0]);
+  const [secondDate, setSecondDate] = useState(nextMonthEnd.toISOString().split('T')[0]);
+  const [surcharge, setSurcharge] = useState(5);
+
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<number>(0);
+  const [editDesc, setEditDesc] = useState('');
+
   const [isEditingReserve, setIsEditingReserve] = useState(false);
   const [manualReserveBalance, setManualReserveBalance] = useState(settings.reserveFundBalance || 0);
 
-  // Sincronización segura
   useEffect(() => {
-    if (!isEditingReserve) {
-        setManualReserveBalance(settings.reserveFundBalance || 0);
-    }
+    if(!isEditingReserve) setManualReserveBalance(settings.reserveFundBalance || 0);
   }, [settings.reserveFundBalance, isEditingReserve]);
 
   const totalPercentage = units.reduce((acc, u) => acc + (u.proratePercentage || 0), 0);
   const isPercentageValid = Math.abs(totalPercentage - 100) < 0.1;
 
-  // CÁLCULO DE GASTOS
+  const startEditing = (exp: Expense) => {
+      setEditingExpenseId(exp.id);
+      setEditValue(exp.amount);
+      setEditDesc(exp.description);
+  };
+
+  const saveEditing = async () => {
+      if (!editingExpenseId) return;
+      const updatedExpense = expenses.find(e => e.id === editingExpenseId);
+      if (updatedExpense) {
+          const newExp = { ...updatedExpense, amount: editValue, description: editDesc };
+          await updateExpense(consortiumId, newExp);
+          setExpenses(prev => prev.map(e => e.id === editingExpenseId ? newExp : e));
+      }
+      setEditingExpenseId(null);
+  };
+
+  const saveManualReserve = () => {
+      updateReserveBalance(manualReserveBalance);
+      setIsEditingReserve(false);
+  };
+
   const { totalOrdinary, totalExtraordinary, totalFromReserve, expensesProrated, expensesEqual } = useMemo(() => {
     let ord = 0, extra = 0, reserve = 0;
     const prorated: Expense[] = [];
@@ -35,7 +69,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
     expenses.forEach(e => {
       const amount = e.amount || 0; 
       if (e.distributionType === ExpenseDistributionType.FROM_RESERVE) {
-        reserve += amount;
+        reserve += amount; 
       } else {
         if (e.category === 'Ordinary') ord += amount;
         else extra += amount;
@@ -45,50 +79,36 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       }
     });
 
-    return { 
-        totalOrdinary: ord, 
-        totalExtraordinary: extra, 
-        totalFromReserve: reserve, 
-        expensesProrated: prorated, 
-        expensesEqual: equal 
-    };
+    return { totalOrdinary: ord, totalExtraordinary: extra, totalFromReserve: reserve, expensesProrated: prorated, expensesEqual: equal };
   }, [expenses]);
 
-  // Saldo Final = Inicial (Manual) - Gastos
   const projectedReserveBalance = manualReserveBalance - totalFromReserve;
-  
+  const reserveDeficit = projectedReserveBalance < 0 ? Math.abs(projectedReserveBalance) : 0;
+  const finalBalanceInBox = projectedReserveBalance < 0 ? 0 : projectedReserveBalance;
   const monthlyReserveContributionAmount = (totalOrdinary * (settings.monthlyReserveContributionPercentage || 0)) / 100;
 
-  // Prorrateo
   const settlementData = useMemo(() => {
     return units.map(unit => {
       const percentage = unit.proratePercentage || 0;
       const proratedShare = expensesProrated.reduce((acc, exp) => acc + (exp.amount || 0), 0) * (percentage / 100);
       const equalShare = expensesEqual.reduce((acc, exp) => acc + (exp.amount || 0), 0) / (units.length || 1);
       const reserveContributionShare = monthlyReserveContributionAmount * (percentage / 100);
-      
+      const deficitShare = reserveDeficit * (percentage / 100);
+
       return {
         ...unit,
-        totalToPay: proratedShare + equalShare + reserveContributionShare,
-        proratedShare, equalShare, reserveContributionShare
+        totalToPay: proratedShare + equalShare + reserveContributionShare + deficitShare,
       };
     });
-  }, [units, expensesProrated, expensesEqual, monthlyReserveContributionAmount]);
+  }, [units, expensesProrated, expensesEqual, monthlyReserveContributionAmount, reserveDeficit]);
 
   const totalToCollect = settlementData.reduce((acc, curr) => acc + curr.totalToPay, 0);
 
-  // --- HANDLERS ---
-  const handleSaveReserve = () => {
-      if (updateReserveBalance) {
-          updateReserveBalance(manualReserveBalance);
-      }
-      setIsEditingReserve(false);
-  };
-
   const handleConfirmSettlement = () => {
-      if(!isPercentageValid) return alert(`Los porcentajes suman ${totalPercentage.toFixed(2)}%. Deben sumar 100%.`);
-      
-      if(confirm("¿Cerrar liquidación y generar PDF?")) {
+      if(!isPercentageValid) return alert(`Error: Porcentajes suman ${totalPercentage.toFixed(2)}%`);
+      if(editingExpenseId) return alert("Termina de editar el gasto pendiente.");
+
+      if(confirm("¿Cerrar liquidación?")) {
           const record: SettlementRecord = {
               id: crypto.randomUUID(),
               month: new Date().toLocaleString('es-ES', { month: 'long', year: 'numeric' }),
@@ -96,137 +116,72 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
               totalExpenses: totalOrdinary + totalExtraordinary + totalFromReserve,
               totalCollected: totalToCollect,
               
-              // Datos del fondo
               reserveBalanceStart: manualReserveBalance,
               reserveExpense: totalFromReserve,
-              reserveBalanceAtClose: projectedReserveBalance, 
+              reserveBalanceAtClose: finalBalanceInBox, 
               reserveContribution: monthlyReserveContributionAmount,
+              reserveDeficitCovered: reserveDeficit,
               
+              firstExpirationDate: firstDate,
+              secondExpirationDate: secondDate,
+              secondExpirationSurcharge: surcharge,
+
               snapshotExpenses: [...expenses],
-              aiReportSummary: "Resumen IA desactivado temporalmente.",
+              aiReportSummary: "Resumen IA desactivado.",
+              couponMessage: couponMessage, 
               unitDetails: settlementData.map(d => ({ unitId: d.id, totalToPay: d.totalToPay }))
           };
-          
           onCloseMonth(record);
       }
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex justify-between items-center">
-        <div>
-           <h2 className="text-2xl font-bold text-slate-800">Liquidación</h2>
-           <p className="text-slate-500 text-sm">Cierre mensual de expensas</p>
-        </div>
-        <div className="flex gap-2">
-             <button onClick={handleConfirmSettlement} disabled={!isPercentageValid} className={`px-4 py-2 rounded-lg flex items-center text-white font-medium shadow-sm ${!isPercentageValid ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                <Archive className="w-4 h-4 mr-2"/> Liquidar Mes
-            </button>
-        </div>
+        <div><h2 className="text-2xl font-bold text-slate-800">Liquidación</h2><p className="text-slate-500 text-sm">Configure vencimientos y cierre el mes.</p></div>
+        <button onClick={handleConfirmSettlement} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-white font-bold shadow-lg flex items-center transition-all"><Archive className="w-5 h-5 mr-2"/> Liquidar Mes</button>
       </div>
 
-      {!isPercentageValid && (
-          <div className="bg-red-50 border border-red-200 p-4 rounded-lg flex gap-3 text-red-700">
-              <AlertTriangle className="w-5 h-5" />
-              <p>Error crítico: Los porcentajes suman {totalPercentage.toFixed(2)}%. Ajuste en "Unidades".</p>
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-bold text-slate-700 mb-4 flex items-center"><Calendar className="w-4 h-4 mr-2"/> Vencimientos</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div><label className="block text-xs font-medium text-slate-500 uppercase mb-1">1º Vto</label><input type="date" className="w-full p-2 border rounded" value={firstDate} onChange={e => setFirstDate(e.target.value)} /></div>
+              <div><label className="block text-xs font-medium text-slate-500 uppercase mb-1">2º Vto</label><input type="date" className="w-full p-2 border rounded" value={secondDate} onChange={e => setSecondDate(e.target.value)} /></div>
+              <div><label className="block text-xs font-medium text-slate-500 uppercase mb-1">Recargo 2º Vto (%)</label><input type="number" className="w-full p-2 border rounded" value={surcharge} onChange={e => setSurcharge(parseFloat(e.target.value))} /></div>
           </div>
-      )}
+      </div>
 
-      {/* TARJETA DEL FONDO DE RESERVA */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-         <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-             <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
-                 <AlertCircle className="w-6 h-6 text-emerald-500"/>
-                 Caja Fondo de Reserva
-             </h3>
-             <div className="bg-emerald-100 text-emerald-800 px-4 py-1.5 rounded-full font-bold shadow-sm">
-                 Disponible Final: ${projectedReserveBalance.toLocaleString()}
+      <div className={`p-6 rounded-xl border shadow-sm ${reserveDeficit > 0 ? 'bg-orange-50 border-orange-200' : 'bg-white border-slate-200'}`}>
+         <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-slate-700 flex items-center gap-2"><AlertCircle className="w-5 h-5"/> Fondo de Reserva</h3>
+             <div className="flex items-center gap-2"><span className="text-sm text-slate-500">Inicial:</span>
+                 {isEditingReserve ? (<div className="flex items-center"><input type="number" className="w-24 p-1 border rounded text-right font-bold" value={manualReserveBalance} onChange={e => setManualReserveBalance(parseFloat(e.target.value))}/><button onClick={saveManualReserve} className="ml-2 text-green-600"><Save className="w-4 h-4"/></button></div>) : (<div className="flex items-center"><span className="font-bold text-lg">${manualReserveBalance.toLocaleString()}</span><button onClick={() => setIsEditingReserve(true)} className="ml-2 text-slate-400 hover:text-indigo-600"><Edit2 className="w-4 h-4"/></button></div>)}
              </div>
          </div>
-
-         <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-sm">
-             {/* EDITABLE: Saldo Inicial */}
-             <div className="flex flex-col gap-1 w-full md:w-auto">
-                 <span className="text-slate-500 font-medium ml-1">Saldo Inicial (Caja)</span>
-                 <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
-                     {isEditingReserve ? (
-                         <>
-                             <span className="text-slate-400 font-bold ml-2">$</span>
-                             <input 
-                                type="number" 
-                                className="w-28 p-1 bg-white border rounded text-right font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none"
-                                value={manualReserveBalance}
-                                onChange={(e) => setManualReserveBalance(parseFloat(e.target.value) || 0)}
-                             />
-                             <button onClick={handleSaveReserve} className="p-1.5 bg-emerald-500 text-white rounded hover:bg-emerald-600 transition-colors shadow-sm" title="Guardar cambio">
-                                 <Check className="w-4 h-4"/>
-                             </button>
-                         </>
-                     ) : (
-                         <>
-                             <strong className="text-xl text-slate-700 ml-2">${manualReserveBalance.toLocaleString()}</strong>
-                             <button onClick={() => setIsEditingReserve(true)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors" title="Corregir manualmente">
-                                 <Edit2 className="w-4 h-4"/>
-                             </button>
-                         </>
-                     )}
-                 </div>
-             </div>
-
-             <div className="text-slate-300 font-bold text-2xl hidden md:block">-</div>
-
-             <div className="flex flex-col items-center">
-                 <span className="text-slate-500 mb-1 font-medium">Gastos (Pagados c/ Caja)</span>
-                 <strong className="text-red-500 text-xl">-${totalFromReserve.toLocaleString()}</strong>
-             </div>
-             
-             <div className="text-slate-300 font-bold text-2xl hidden md:block">=</div>
-
-             <div className="flex flex-col items-center p-4 bg-emerald-50 rounded-xl border border-emerald-100 w-full md:w-auto">
-                 <span className="text-emerald-800 text-xs uppercase font-bold mb-1">Saldo Final Real</span>
-                 <strong className="text-emerald-700 text-2xl">${projectedReserveBalance.toLocaleString()}</strong>
-             </div>
+         <div className="flex items-center justify-between text-sm">
+             <div><p className="text-slate-500">Gastos a cubrir</p><p className="text-xl font-bold text-red-600">-${totalFromReserve.toLocaleString()}</p></div>
+             <div className="text-right"><p className="text-slate-500">{reserveDeficit > 0 ? 'Déficit (Se cobra)' : 'Saldo Final'}</p><p className={`text-2xl font-bold ${reserveDeficit > 0 ? 'text-orange-600' : 'text-emerald-600'}`}>{reserveDeficit > 0 ? `-$${reserveDeficit.toLocaleString()}` : `$${projectedReserveBalance.toLocaleString()}`}</p></div>
          </div>
       </div>
-      
-      {/* Resumen de Cálculos Detallado */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
-        <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
-             <h4 className="font-bold text-slate-700 uppercase text-xs tracking-wider">Detalle de Prorrateo</h4>
-        </div>
-        <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-            <thead>
-                <tr className="bg-white text-slate-500 border-b border-slate-100">
-                    <th className="px-6 py-3 font-medium">Unidad</th>
-                    <th className="px-6 py-3 font-medium text-right">Cuota Gastos</th>
-                    <th className="px-6 py-3 font-medium text-right">Aporte Fondo (Futuro)</th>
-                    <th className="px-6 py-3 font-bold text-right bg-indigo-50/50 text-indigo-900">Total a Pagar</th>
-                </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-                {settlementData.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50">
-                    <td className="px-6 py-3 font-medium text-slate-700">
-                        <span className="font-bold">{row.unitNumber}</span> <span className="text-slate-400 mx-1">|</span> {row.ownerName}
-                    </td>
-                    <td className="px-6 py-3 text-right text-slate-600">${(row.proratedShare + row.equalShare).toLocaleString()}</td>
-                    <td className="px-6 py-3 text-right text-emerald-600">+${row.reserveContributionShare.toLocaleString()}</td>
-                    <td className="px-6 py-3 text-right font-bold text-indigo-700 bg-indigo-50/30">${row.totalToPay.toLocaleString()}</td>
-                </tr>
-                ))}
-            </tbody>
-            <tfoot className="bg-slate-50 border-t border-slate-200 font-bold text-slate-700">
-                <tr>
-                    <td className="px-6 py-3 text-right">TOTALES</td>
-                    <td className="px-6 py-3 text-right">${(settlementData.reduce((a,b) => a + b.proratedShare + b.equalShare, 0)).toLocaleString()}</td>
-                    <td className="px-6 py-3 text-right text-emerald-600">${(settlementData.reduce((a,b) => a + b.reserveContributionShare, 0)).toLocaleString()}</td>
-                    <td className="px-6 py-3 text-right text-indigo-700 bg-indigo-50/30">${totalToCollect.toLocaleString()}</td>
-                </tr>
-            </tfoot>
-            </table>
-        </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b font-bold text-slate-700 text-sm">Gastos Cargados</div>
+          <table className="w-full text-sm text-left">
+              <thead className="text-xs uppercase bg-slate-50 border-b"><tr><th className="px-4 py-2">Desc.</th><th className="px-4 py-2 text-right">Monto</th><th className="px-4 py-2 text-center">Acción</th></tr></thead>
+              <tbody>
+                  {expenses.map(e => (
+                      <tr key={e.id} className={editingExpenseId === e.id ? 'bg-indigo-50' : 'hover:bg-slate-50'}>
+                          <td className="px-4 py-3">{editingExpenseId === e.id ? <input className="w-full p-1 border rounded" value={editDesc} onChange={ev => setEditDesc(ev.target.value)} /> : e.description}</td>
+                          <td className="px-4 py-3 text-right font-bold">{editingExpenseId === e.id ? <input type="number" className="w-24 p-1 border rounded text-right" value={editValue} onChange={ev => setEditValue(parseFloat(ev.target.value))} /> : `$${e.amount.toLocaleString()}`}</td>
+                          <td className="px-4 py-3 text-center">{editingExpenseId === e.id ? <button onClick={saveEditing}><Save className="w-4 h-4 text-green-600"/></button> : <button onClick={() => startEditing(e)}><Edit2 className="w-4 h-4 text-slate-400 hover:text-indigo-600"/></button>}</td>
+                      </tr>
+                  ))}
+              </tbody>
+          </table>
+      </div>
+
+      <div className="bg-white p-4 rounded-xl border border-slate-200">
+          <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center"><MessageSquare className="w-4 h-4 mr-2"/> Nota en Cupones</label>
+          <textarea className="w-full p-3 border rounded-lg text-sm" rows={2} placeholder="Ej: Se recuerda la asamblea..." value={couponMessage} onChange={e => setCouponMessage(e.target.value)}></textarea>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { SettlementRecord, Unit } from '../types';
+import { SettlementRecord, Unit, ConsortiumSettings } from '../types';
 import { ChevronDown, ChevronRight, FileText, Calendar, Download, User } from 'lucide-react';
 import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
@@ -7,9 +7,10 @@ interface HistoryViewProps {
   history: SettlementRecord[];
   consortiumName: string;
   units: Unit[];
+  settings: ConsortiumSettings; // <--- Agregado para recibir la configuración
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, units }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, units, settings }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggleExpand = (id: string) => {
@@ -18,12 +19,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
 
   const handleDownloadGeneral = (e: React.MouseEvent, record: SettlementRecord) => {
     e.stopPropagation();
-    generateSettlementPDF(record, consortiumName, units);
+    // Pasamos settings al generador
+    generateSettlementPDF(record, consortiumName, units, settings);
   };
 
   const handleDownloadCoupon = (e: React.MouseEvent, record: SettlementRecord, unitId: string) => {
       e.stopPropagation();
-      generateIndividualCouponPDF(record, unitId, consortiumName, units);
+      // Pasamos settings al generador
+      generateIndividualCouponPDF(record, unitId, consortiumName, units, settings);
   };
 
   if (history.length === 0) {
@@ -67,7 +70,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
                     <button 
                         onClick={(e) => handleDownloadGeneral(e, record)}
                         className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors text-sm font-medium border border-indigo-200"
-                        title="Descargar Resumen General para el Grupo"
+                        title="Descargar Resumen General"
                     >
                         <FileText className="w-4 h-4 mr-2" />
                         Resumen General

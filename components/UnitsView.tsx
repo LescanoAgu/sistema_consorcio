@@ -1,141 +1,103 @@
 import React, { useState } from 'react';
 import { Unit } from '../types';
-import { Plus, Trash2, Save, X, Mail, Upload, FileText, Download, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
-import { addUnit } from '../services/firestoreService'; // Importamos el guardado real
+import { Plus, Trash2, Edit2, X } from 'lucide-react';
+import { addUnit, updateUnit, deleteUnit } from '../services/firestoreService';
 
 interface UnitsViewProps {
   units: Unit[];
   setUnits: React.Dispatch<React.SetStateAction<Unit[]>>;
-  consortiumId: string; // ✅ Ahora aceptamos el ID
+  consortiumId: string;
 }
 
 const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) => {
   const [isAdding, setIsAdding] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [importText, setImportText] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [newUnit, setNewUnit] = useState<Partial<Unit>>({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<Partial<Unit>>({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
 
-  const handleAdd = async () => {
-    if (!newUnit.unitNumber || !newUnit.ownerName) return;
-    try {
-        // ✅ Guardamos en Firebase
-        const saved = await addUnit(consortiumId, {
-            id: 'temp',
-            unitNumber: newUnit.unitNumber,
-            ownerName: newUnit.ownerName,
-            proratePercentage: Number(newUnit.proratePercentage),
-            initialBalance: Number(newUnit.initialBalance || 0),
-            linkedEmail: newUnit.linkedEmail || '',
-        });
-        setUnits([...units, saved]);
-        setNewUnit({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
-        setIsAdding(false);
-    } catch (e) { alert("Error al guardar unidad"); }
+  const resetForm = () => {
+      setFormData({ unitNumber: '', ownerName: '', proratePercentage: 0, initialBalance: 0, linkedEmail: '' });
+      setIsAdding(false);
+      setEditingId(null);
   };
 
-  const handleProcessImport = async () => {
-    if(!importText.trim()) return;
-    setIsProcessing(true);
-    try {
-        const lines = importText.split(/\r?\n/);
-        const newUnits: Unit[] = [];
-        lines.forEach(line => {
-            if(!line.trim()) return;
-            const parts = line.split(/[,;\t]/); 
-            if(parts.length >= 2) {
-                newUnits.push({
-                    id: '',
-                    unitNumber: parts[0]?.trim(),
-                    ownerName: parts[1]?.trim(),
-                    proratePercentage: parseFloat(parts[2]?.trim() || '0'),
-                    initialBalance: parseFloat(parts[3]?.trim() || '0'),
-                    linkedEmail: parts[4]?.trim() || ''
-                });
-            }
-        });
+  const handleStartEdit = (unit: Unit) => {
+      setFormData(unit);
+      setEditingId(unit.id);
+      setIsAdding(true);
+  };
 
-        if (newUnits.length > 0) {
-            // ✅ Guardamos en Firebase (uno por uno)
-            const savedList = [];
-            for (const u of newUnits) {
-                const saved = await addUnit(consortiumId, u);
-                savedList.push(saved);
-            }
-            setUnits([...units, ...savedList]);
-            setShowImport(false);
-            setImportText('');
-            alert(`¡Éxito! Se importaron y guardaron ${savedList.length} unidades.`);
+  const handleSave = async () => {
+    if (!formData.unitNumber || !formData.ownerName) return;
+    try {
+        if (editingId) {
+            const unitToUpdate = { ...formData, id: editingId } as Unit;
+            await updateUnit(consortiumId, unitToUpdate);
+            setUnits(units.map(u => u.id === editingId ? unitToUpdate : u));
+        } else {
+            const newUnit = { ...formData, id: 'temp', proratePercentage: Number(formData.proratePercentage), initialBalance: Number(formData.initialBalance || 0) } as Unit;
+            const saved = await addUnit(consortiumId, newUnit);
+            setUnits([...units, saved]);
         }
-    } catch (e) {
-        alert('Error al procesar.');
-    } finally {
-        setIsProcessing(false);
-    }
+        resetForm();
+    } catch (e) { alert("Error al guardar"); }
   };
 
-  // Reutilizamos tu tabla visual
+  const handleDelete = async (id: string) => {
+      if(confirm('¿Eliminar unidad?')) {
+          await deleteUnit(consortiumId, id);
+          setUnits(units.filter(u => u.id !== id));
+      }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-slate-800">Unidades Funcionales</h2>
-        <div className="flex gap-2">
-            <button onClick={() => setShowImport(true)} className="bg-white border px-4 py-2 rounded-lg flex items-center shadow-sm hover:bg-slate-50">
-            <Upload className="w-4 h-4 mr-2" /> Importar
-            </button>
-            <button onClick={() => setIsAdding(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center shadow-sm hover:bg-indigo-700">
+        <h2 className="text-2xl font-bold text-slate-800">Unidades</h2>
+        <button onClick={() => setIsAdding(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700">
             <Plus className="w-4 h-4 mr-2" /> Agregar
-            </button>
-        </div>
+        </button>
       </div>
       
+      {isAdding && (
+          <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-md mb-4">
+              <div className="flex justify-between mb-2">
+                  <h3 className="font-bold text-slate-700">{editingId ? 'Editar Unidad' : 'Nueva Unidad'}</h3>
+                  <button onClick={resetForm}><X className="w-4 h-4 text-slate-400"/></button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  <input className="border rounded p-2 text-sm" placeholder="UF" value={formData.unitNumber} onChange={e => setFormData({...formData, unitNumber: e.target.value})}/>
+                  <input className="border rounded p-2 text-sm md:col-span-2" placeholder="Propietario" value={formData.ownerName} onChange={e => setFormData({...formData, ownerName: e.target.value})}/>
+                  <input className="border rounded p-2 text-sm" placeholder="Email" value={formData.linkedEmail} onChange={e => setFormData({...formData, linkedEmail: e.target.value})}/>
+                  <div className="flex gap-2">
+                      <input type="number" className="border rounded p-2 text-sm w-1/2" placeholder="%" value={formData.proratePercentage} onChange={e => setFormData({...formData, proratePercentage: parseFloat(e.target.value)})}/>
+                      <button onClick={handleSave} className="bg-green-600 text-white rounded p-2 w-1/2">Guardar</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 uppercase">
-              <tr>
-                <th className="px-6 py-3">Unidad</th>
-                <th className="px-6 py-3">Propietario</th>
-                <th className="px-6 py-3 text-right">Saldo</th>
-                <th className="px-6 py-3 text-right">Prorrateo</th>
-              </tr>
+              <tr><th>Unidad</th><th>Propietario</th><th>Email</th><th className="text-right">Saldo Ini.</th><th className="text-right">Porcentaje</th><th className="text-right">Acciones</th></tr>
             </thead>
-            <tbody>
-              {isAdding && (
-                 <tr>
-                    <td className="px-6 py-4"><input className="border rounded p-1 w-20" placeholder="Ej: 1A" value={newUnit.unitNumber} onChange={e => setNewUnit({...newUnit, unitNumber: e.target.value})}/></td>
-                    <td className="px-6 py-4"><input className="border rounded p-1" placeholder="Nombre" value={newUnit.ownerName} onChange={e => setNewUnit({...newUnit, ownerName: e.target.value})}/></td>
-                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right w-20" placeholder="0.00" value={newUnit.initialBalance} onChange={e => setNewUnit({...newUnit, initialBalance: parseFloat(e.target.value)})}/></td>
-                    <td className="px-6 py-4 text-right"><input type="number" className="border rounded p-1 text-right w-16" placeholder="%" value={newUnit.proratePercentage} onChange={e => setNewUnit({...newUnit, proratePercentage: parseFloat(e.target.value)})}/></td>
-                    <td className="px-6 py-4 text-right"><button onClick={handleAdd} className="text-green-600 font-bold hover:underline">Guardar</button></td>
-                 </tr>
-              )}
+            <tbody className="divide-y divide-slate-100">
               {units.map(u => (
-                <tr key={u.id} className="border-b hover:bg-slate-50">
+                <tr key={u.id} className="hover:bg-slate-50">
                     <td className="px-6 py-4 font-bold">{u.unitNumber}</td>
                     <td className="px-6 py-4">{u.ownerName}</td>
+                    <td className="px-6 py-4 text-slate-400 text-xs">{u.linkedEmail}</td>
                     <td className="px-6 py-4 text-right">${u.initialBalance.toFixed(2)}</td>
                     <td className="px-6 py-4 text-right">{u.proratePercentage.toFixed(2)}%</td>
+                    <td className="px-6 py-4 text-right flex justify-end gap-2">
+                        <button onClick={() => handleStartEdit(u)} className="p-1 text-indigo-500"><Edit2 className="w-4 h-4"/></button>
+                        <button onClick={() => handleDelete(u.id)} className="p-1 text-red-500"><Trash2 className="w-4 h-4"/></button>
+                    </td>
                 </tr>
               ))}
             </tbody>
         </table>
       </div>
-
-      {showImport && (
-         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-             <div className="bg-white p-6 rounded-xl w-full max-w-2xl">
-                 <h3 className="text-lg font-bold mb-4">Importar CSV / TXT</h3>
-                 <p className="text-sm text-gray-500 mb-2">Pegar formato: Unidad, Nombre, %, Saldo, Email</p>
-                 <textarea className="w-full h-48 border p-2 mb-4 font-mono text-xs" placeholder="1A, Juan Perez, 10.5, 0, juan@mail.com" value={importText} onChange={e => setImportText(e.target.value)} disabled={isProcessing}></textarea>
-                 <div className="flex justify-end gap-2">
-                     <button onClick={() => setShowImport(false)} disabled={isProcessing} className="px-4 py-2 border rounded">Cancelar</button>
-                     <button onClick={handleProcessImport} disabled={isProcessing || !importText} className="px-4 py-2 bg-indigo-600 text-white rounded">
-                        {isProcessing ? 'Guardando en Base de Datos...' : 'Procesar y Guardar'}
-                     </button>
-                 </div>
-             </div>
-         </div>
-      )}
     </div>
   );
 };

@@ -9,198 +9,73 @@ import HistoryView from './components/HistoryView';
 import DebtorsView from './components/DebtorsView';
 import AuthView from './components/AuthView';
 import UserPortal from './components/UserPortal';
-import { Unit, Expense, Payment, ViewState, UserRole, Consortium, AppSettings, SettlementRecord, DebtAdjustment } from './types';
-
-// --- PERSISTENCIA LOCAL (Para que guarde sin Base de Datos) ---
-const useLocalStorage = <T,>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] => {
-  const [storedValue, setStoredValue] = useState<T>(() => {
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch (error) {
-      console.error(error);
-      return initialValue;
-    }
-  });
-
-  const setValue = (value: T | ((val: T) => T)) => {
-    try {
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      setStoredValue(valueToStore);
-      window.localStorage.setItem(key, JSON.stringify(valueToStore));
-    } catch (error) {
-      console.error(error);
-    }
-  };
-  return [storedValue, setValue];
-};
+import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings } from './types';
+import { getUnits, getExpenses, getHistory, getConsortiums, createConsortium, saveSettlement, getSettings, saveSettings } from './services/firestoreService';
 
 function App() {
-  // --- ESTADOS CON GUARDADO AUTOMÁTICO ---
-  const [user, setUser] = useLocalStorage<{email: string, role: UserRole} | null>('app_user', null);
-  const [consortium, setConsortium] = useLocalStorage<Consortium | null>('app_consortium', null);
+  const [user, setUser] = useState<{email: string, role: UserRole} | null>(null);
+  const [consortium, setConsortium] = useState<Consortium | null>(null);
+  const [consortiumList, setConsortiumList] = useState<Consortium[]>([]);
   
-  // Datos principales
-  const [units, setUnits] = useLocalStorage<Unit[]>('data_units', []);
-  const [expenses, setExpenses] = useLocalStorage<Expense[]>('data_expenses', []);
-  const [payments, setPayments] = useLocalStorage<Payment[]>('data_payments', []);
-  const [history, setHistory] = useLocalStorage<SettlementRecord[]>('data_history', []);
-  const [debtAdjustments, setDebtAdjustments] = useLocalStorage<DebtAdjustment[]>('data_adjustments', []);
-  
-  // Configuración (Aquí vive el SALDO del Fondo)
-  const [settings, setSettings] = useLocalStorage<AppSettings>('data_settings', {
-    reserveFundBalance: 0,
-    monthlyReserveContributionPercentage: 5
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [history, setHistory] = useState<SettlementRecord[]>([]);
+  const [debtAdjustments, setDebtAdjustments] = useState<DebtAdjustment[]>([]);
+  const [settings, setSettings] = useState<ConsortiumSettings>({
+      reserveFundBalance: 0, monthlyReserveContributionPercentage: 5, bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: ''
   });
 
   const [view, setView] = useState<ViewState>('dashboard');
+  const [loading, setLoading] = useState(false);
 
-  // --- HANDLERS ---
+  useEffect(() => { getConsortiums().then(setConsortiumList); }, []);
 
-  const handleLogin = (email: string, role: UserRole) => {
-    setUser({ email, role });
-    // Si es user normal, va a su portal, si no al dashboard
-    setView(role === 'USER' ? 'user_portal' : 'dashboard');
+  useEffect(() => {
+      if (consortium) {
+          setLoading(true);
+          Promise.all([getUnits(consortium.id), getExpenses(consortium.id), getHistory(consortium.id), getSettings(consortium.id)])
+          .then(([u, e, h, s]) => { setUnits(u); setExpenses(e); setHistory(h); setSettings(s); setLoading(false); });
+      }
+  }, [consortium]);
+
+  const handleCloseMonth = async (record: SettlementRecord) => {
+    if (!consortium) return;
+    try {
+        await saveSettlement(consortium.id, record, expenses.map(e => e.id));
+        const newHistory = await getHistory(consortium.id);
+        setHistory(newHistory);
+        setExpenses([]); 
+        setSettings({...settings, reserveFundBalance: record.reserveBalanceAtClose});
+        setView('history');
+    } catch (e) { alert("Error al cerrar."); }
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    setConsortium(null);
-    setView('dashboard');
+  const handleUpdateSettings = async (newSettings: ConsortiumSettings) => {
+      if(!consortium) return;
+      await saveSettings(consortium.id, newSettings);
+      setSettings(newSettings);
   };
 
-  const handleCloseMonth = (record: SettlementRecord) => {
-    // 1. Guardar en historial
-    setHistory([record, ...history]);
-    
-    // 2. Actualizar Saldos de las Unidades (Deuda)
-    const updatedUnits = units.map(u => {
-        const detail = record.unitDetails.find(d => d.unitId === u.id);
-        const debt = detail ? detail.totalToPay : 0;
-        // Sumamos la deuda nueva al saldo existente (si lo hubiera)
-        // Nota: Esto es simplificado. En un sistema real se crean "Movimientos de Cuenta Corriente".
-        // Aquí asumimos que initialBalance se usa como "Deuda Acumulada".
-        return { ...u }; 
-    });
-    setUnits(updatedUnits);
-
-    // 3. Limpiar gastos del mes actual (Ya se cerraron)
-    setExpenses([]);
-
-    // 4. Actualizar el saldo de la caja del fondo con el valor de cierre real
-    setSettings({
-        ...settings,
-        reserveFundBalance: record.reserveBalanceAtClose
-    });
-
-    alert("¡Mes cerrado con éxito! Los gastos se han archivado y el saldo del fondo se ha actualizado.");
-    setView('history');
-  };
-
-  const updateReserveBalance = (newBalance: number) => {
-      setSettings({ ...settings, reserveFundBalance: newBalance });
-  };
-
-  // --- RENDER ---
-
-  if (!user) {
-    return (
-      <AuthView 
-        isAuthenticated={false} 
-        onLoginSuccess={handleLogin}
-        onSelectConsortium={setConsortium}
-        consortiums={[{ id: '1', name: 'Edificio Demo', address: 'Calle Falsa 123' }]} // Demo data
-        onCreateConsortium={() => {}}
-        onLogout={() => {}}
-        userRole={'ADMIN'}
-        userEmail={''}
-      />
-    );
-  }
-
-  if (!consortium) {
-      // Selector simple si ya está logueado pero sin consorcio (raro en este flujo simplificado)
-      setConsortium({ id: '1', name: 'Edificio Demo', address: 'Calle Falsa 123' });
-      return null; 
-  }
+  if (!user) return <AuthView isAuthenticated={false} onLoginSuccess={(e,r) => { setUser({email:e, role:r}); setView(r === 'USER' ? 'user_portal' : 'dashboard'); }} onSelectConsortium={setConsortium} consortiums={consortiumList} onCreateConsortium={async (c) => { const s = await createConsortium(c); setConsortiumList([...consortiumList, s as Consortium]); }} onLogout={() => {}} userRole={'ADMIN'} userEmail={''} />;
+  if (!consortium) return null;
 
   return (
     <div className="flex h-screen bg-slate-100">
-      <Sidebar 
-        currentView={view} 
-        onChangeView={setView} 
-        consortiumName={consortium.name}
-        onSwitchConsortium={() => setConsortium(null)}
-        onLogout={handleLogout}
-        userRole={user.role}
-      />
-      
+      <Sidebar currentView={view} onChangeView={setView} consortiumName={consortium.name} onSwitchConsortium={() => setConsortium(null)} onLogout={() => setUser(null)} userRole={user.role} />
       <main className="flex-1 overflow-y-auto p-8 ml-64">
         <div className="max-w-7xl mx-auto">
-          
-          {view === 'dashboard' && (
-            <Dashboard 
-                units={units} 
-                expenses={expenses} 
-                settings={settings} 
-                reserveHistory={[]} // Historial de reserva visual simplificado
-            />
-          )}
-
-          {view === 'units' && (
-            <UnitsView units={units} setUnits={setUnits} />
-          )}
-
-          {view === 'expenses' && (
-            <ExpensesView 
-                expenses={expenses} 
-                setExpenses={setExpenses} 
-                reserveBalance={settings.reserveFundBalance} // Pasamos el saldo real
-            />
-          )}
-
-          {view === 'settlement' && (
-            <SettlementView 
-                units={units} 
-                expenses={expenses} 
-                settings={settings} 
-                onCloseMonth={handleCloseMonth}
-                updateReserveBalance={updateReserveBalance} // Pasamos la función para guardar manual
-            />
-          )}
-
-          {view === 'collections' && (
-            <CollectionsView payments={payments} units={units} setPayments={setPayments} />
-          )}
-
-          {view === 'debtors' && (
-             <DebtorsView 
-                units={units} 
-                payments={payments} 
-                history={history} 
-                debtAdjustments={debtAdjustments} 
-                setDebtAdjustments={setDebtAdjustments} 
-             />
-          )}
-
-          {view === 'history' && (
-            <HistoryView history={history} consortiumName={consortium.name} units={units} />
-          )}
-
-          {view === 'user_portal' && (
-             <UserPortal 
-                userEmail={user.email} 
-                units={units} 
-                expenses={expenses} 
-                history={history} 
-                payments={payments} 
-             />
-          )}
-
+          {view === 'dashboard' && <Dashboard units={units} expenses={expenses} settings={settings} reserveHistory={[]} />}
+          {view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
+          {view === 'expenses' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} />}
+          {view === 'settlement' && <SettlementView units={units} expenses={expenses} setExpenses={setExpenses} settings={settings} consortiumId={consortium.id} updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})} onCloseMonth={handleCloseMonth} />}
+          {view === 'history' && <HistoryView history={history} consortiumName={consortium.name} units={units} settings={settings} />}
+          {view === 'user_portal' && <UserPortal userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} />}
+          {view === 'debtors' && <DebtorsView units={units} payments={payments} history={history} debtAdjustments={debtAdjustments} setDebtAdjustments={setDebtAdjustments} />}
+          {view === 'collections' && <CollectionsView payments={payments} units={units} setPayments={setPayments} />}
         </div>
       </main>
     </div>
   );
 }
-
 export default App;
