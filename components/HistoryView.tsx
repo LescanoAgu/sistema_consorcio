@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { SettlementRecord, Unit } from '../types';
-import { ChevronDown, ChevronRight, FileText, Calendar, Download } from 'lucide-react';
-import { generateSettlementPDF } from '../services/pdfService';
+import { ChevronDown, ChevronRight, FileText, Calendar, Download, User } from 'lucide-react';
+import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
 interface HistoryViewProps {
   history: SettlementRecord[];
@@ -17,15 +16,20 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
     setExpandedId(expandedId === id ? null : id);
   };
 
-  const handleDownloadPDF = (e: React.MouseEvent, record: SettlementRecord) => {
-    e.stopPropagation(); // Prevent toggling expand
+  const handleDownloadGeneral = (e: React.MouseEvent, record: SettlementRecord) => {
+    e.stopPropagation();
     generateSettlementPDF(record, consortiumName, units);
+  };
+
+  const handleDownloadCoupon = (e: React.MouseEvent, record: SettlementRecord, unitId: string) => {
+      e.stopPropagation();
+      generateIndividualCouponPDF(record, unitId, consortiumName, units);
   };
 
   if (history.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-400">
-          <HistoryIcon className="w-16 h-16 mb-4 opacity-20" />
+          <Calendar className="w-16 h-16 mb-4 opacity-20" />
           <h3 className="text-lg font-medium">No hay historial disponible</h3>
           <p className="text-sm">Cierre una liquidación mensual para verla aquí.</p>
       </div>
@@ -39,6 +43,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
       <div className="space-y-4">
         {history.map((record) => (
           <div key={record.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            
             <div 
                 className="p-6 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
                 onClick={() => toggleExpand(record.id)}
@@ -53,22 +58,19 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
                     </div>
                 </div>
                 
-                <div className="flex items-center gap-4 md:gap-8">
-                     <div className="text-right hidden md:block">
-                        <p className="text-xs text-slate-500 uppercase">Total Gastos</p>
-                        <p className="font-bold text-slate-700">${record.totalExpenses.toFixed(2)}</p>
-                    </div>
+                <div className="flex items-center gap-4">
                     <div className="text-right hidden md:block">
-                        <p className="text-xs text-slate-500 uppercase">A Recaudar</p>
+                        <p className="text-xs text-slate-500 uppercase">Total Expensas</p>
                         <p className="font-bold text-slate-700">${record.totalCollected.toFixed(2)}</p>
                     </div>
                     
                     <button 
-                        onClick={(e) => handleDownloadPDF(e, record)}
-                        className="p-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-600 rounded-lg transition-colors group"
-                        title="Descargar PDF"
+                        onClick={(e) => handleDownloadGeneral(e, record)}
+                        className="flex items-center px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors text-sm font-medium border border-indigo-200"
+                        title="Descargar Resumen General para el Grupo"
                     >
-                        <Download className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                        <FileText className="w-4 h-4 mr-2" />
+                        Resumen General
                     </button>
 
                     {expandedId === record.id ? <ChevronDown className="text-slate-400"/> : <ChevronRight className="text-slate-400"/>}
@@ -78,47 +80,30 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
             {expandedId === record.id && (
                 <div className="border-t border-slate-100 bg-slate-50 p-6 animate-fade-in">
                     
-                    {record.aiReportSummary && (
-                        <div className="mb-6 bg-white p-4 rounded-lg border border-indigo-100">
-                            <h4 className="text-xs font-bold text-indigo-500 uppercase mb-2 flex items-center">
-                                <FileText className="w-3 h-3 mr-1" /> Resumen IA
-                            </h4>
-                            <p className="text-sm text-slate-600 whitespace-pre-line">{record.aiReportSummary}</p>
-                        </div>
-                    )}
+                    <h4 className="text-sm font-bold text-slate-700 uppercase mb-4 flex items-center">
+                        <User className="w-4 h-4 mr-2"/>
+                        Cupones Individuales (Privados)
+                    </h4>
 
-                    <h4 className="text-sm font-bold text-slate-700 uppercase mb-3">Detalle de Gastos</h4>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left bg-white rounded-lg border border-slate-200">
-                            <thead className="bg-slate-100 text-slate-500">
-                                <tr>
-                                    <th className="px-4 py-2">Fecha</th>
-                                    <th className="px-4 py-2">Descripción</th>
-                                    <th className="px-4 py-2">Rubro</th>
-                                    <th className="px-4 py-2">Categoría</th>
-                                    <th className="px-4 py-2 text-right">Monto</th>
-                                    <th className="px-4 py-2 text-center">Adjunto</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {record.snapshotExpenses.map(exp => (
-                                    <tr key={exp.id} className="border-b border-slate-100 last:border-0">
-                                        <td className="px-4 py-2 text-slate-500">{exp.date}</td>
-                                        <td className="px-4 py-2 font-medium text-slate-700">{exp.description}</td>
-                                        <td className="px-4 py-2 text-slate-600">{exp.itemCategory || '-'}</td>
-                                        <td className="px-4 py-2">
-                                            <span className={`text-xs px-2 py-0.5 rounded-full ${exp.category === 'Ordinary' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                                                {exp.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario'}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-2 text-right font-medium">${exp.amount.toFixed(2)}</td>
-                                        <td className="px-4 py-2 text-center text-xs text-indigo-600">
-                                            {exp.attachmentUrl ? 'Ver PDF' : '-'}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {record.unitDetails.map(detail => {
+                            const unit = units.find(u => u.id === detail.unitId);
+                            return (
+                                <div key={detail.unitId} className="flex justify-between items-center p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-indigo-300 transition-colors">
+                                    <div>
+                                        <p className="font-bold text-slate-800 text-sm">{unit?.unitNumber} - {unit?.ownerName}</p>
+                                        <p className="text-xs text-slate-500">A Pagar: <span className="font-semibold text-indigo-600">${detail.totalToPay.toFixed(2)}</span></p>
+                                    </div>
+                                    <button 
+                                        onClick={(e) => handleDownloadCoupon(e, record, detail.unitId)}
+                                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
+                                        title="Descargar Cupón de Pago"
+                                    >
+                                        <Download className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            )
+                        })}
                     </div>
                 </div>
             )}
@@ -128,24 +113,5 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
     </div>
   );
 };
-
-const HistoryIcon = (props: any) => (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      width="24" 
-      height="24" 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
-      {...props}
-    >
-      <path d="M3 3v5h5"/>
-      <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/>
-      <path d="M12 7v5l4 2"/>
-    </svg>
-)
 
 export default HistoryView;
