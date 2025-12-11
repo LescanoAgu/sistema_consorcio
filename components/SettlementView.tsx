@@ -1,7 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Unit, Expense, ExpenseDistributionType, SettlementRecord, ConsortiumSettings } from '../types';
-import { Archive, AlertCircle, Save, MessageSquare, Edit2, Calendar, CreditCard, X } from 'lucide-react';
+import { Archive, AlertCircle, Save, MessageSquare, Edit2, Calendar, CreditCard, Eye, FileText, User } from 'lucide-react';
 import { updateExpense } from '../services/firestoreService';
+import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
 interface SettlementViewProps {
   units: Unit[];
@@ -9,14 +10,18 @@ interface SettlementViewProps {
   settings: ConsortiumSettings;
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
   consortiumId: string;
+  consortiumName: string; // ✅ Nombre para el PDF
   updateReserveBalance: (newBalance: number) => void;
   onUpdateBankSettings: (settings: Partial<ConsortiumSettings>) => void;
   onCloseMonth: (record: SettlementRecord) => void;
 }
 
-const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, setExpenses, consortiumId, updateReserveBalance, onUpdateBankSettings, onCloseMonth }) => {
+const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, setExpenses, consortiumId, consortiumName, updateReserveBalance, onUpdateBankSettings, onCloseMonth }) => {
   const [couponMessage, setCouponMessage] = useState('');
   
+  // Estado para previsualización
+  const [previewUnitId, setPreviewUnitId] = useState<string>('');
+
   // Vencimientos
   const today = new Date();
   const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 10);
@@ -25,11 +30,11 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
   const [secondDate, setSecondDate] = useState(nextMonthEnd.toISOString().split('T')[0]);
   const [surcharge, setSurcharge] = useState(5);
 
-  // Edición Gastos (Ahora incluye Categoría)
+  // Edición Gastos
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<number>(0);
   const [editDesc, setEditDesc] = useState('');
-  const [editCat, setEditCat] = useState<'Ordinary' | 'Extraordinary'>('Ordinary'); // <--- NUEVO
+  const [editCat, setEditCat] = useState<'Ordinary' | 'Extraordinary'>('Ordinary');
 
   // Edición Fondo
   const [isEditingReserve, setIsEditingReserve] = useState(false);
@@ -53,7 +58,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       setEditingExpenseId(exp.id);
       setEditValue(exp.amount);
       setEditDesc(exp.description);
-      setEditCat(exp.category); // Cargar categoría actual
+      setEditCat(exp.category);
   };
 
   const saveEditing = async () => {
@@ -64,7 +69,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
               ...updatedExpense, 
               amount: editValue, 
               description: editDesc, 
-              category: editCat // Guardar nueva categoría
+              category: editCat 
           };
           await updateExpense(consortiumId, newExp);
           setExpenses(prev => prev.map(e => e.id === editingExpenseId ? newExp : e));
@@ -109,8 +114,6 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       const proratedShare = expensesProrated.reduce((acc, exp) => acc + (exp.amount || 0), 0) * (percentage / 100);
       const equalShare = expensesEqual.reduce((acc, exp) => acc + (exp.amount || 0), 0) / (units.length || 1);
       const reserveContributionShare = monthlyReserveContributionAmount * (percentage / 100);
-      
-      // EL DÉFICIT SIEMPRE ES EXTRAORDINARIO PARA EL USUARIO
       const deficitShare = reserveDeficit * (percentage / 100);
 
       return {
@@ -122,33 +125,47 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
 
   const totalToCollect = settlementData.reduce((acc, curr) => acc + curr.totalToPay, 0);
 
+  // --- GENERACIÓN DE RECORD PROVISORIO ---
+  const getTempRecord = (): SettlementRecord => {
+      return {
+          id: 'temp-preview',
+          month: new Date().toLocaleString('es-ES', { month: 'long', year: 'numeric' }) + " (PROVISORIO)",
+          dateClosed: new Date().toISOString(),
+          totalExpenses: totalOrdinary + totalExtraordinary + totalFromReserve,
+          totalCollected: totalToCollect,
+          reserveBalanceStart: manualReserveBalance,
+          reserveExpense: totalFromReserve,
+          reserveBalanceAtClose: finalBalanceInBox, 
+          reserveContribution: monthlyReserveContributionAmount,
+          reserveDeficitCovered: reserveDeficit,
+          firstExpirationDate: firstDate,
+          secondExpirationDate: secondDate,
+          secondExpirationSurcharge: surcharge,
+          snapshotExpenses: [...expenses],
+          aiReportSummary: "Previsualización.",
+          couponMessage: couponMessage, 
+          unitDetails: settlementData.map(d => ({ unitId: d.id, totalToPay: d.totalToPay }))
+      };
+  };
+
+  const handlePreviewGeneral = () => {
+      generateSettlementPDF(getTempRecord(), consortiumName, units, settings);
+  };
+
+  const handlePreviewIndividual = () => {
+      if (!previewUnitId) return alert("Seleccione una unidad.");
+      generateIndividualCouponPDF(getTempRecord(), previewUnitId, consortiumName, units, settings);
+  };
+
   const handleConfirmSettlement = () => {
       if(!isPercentageValid) return alert(`Error: Porcentajes suman ${totalPercentage.toFixed(2)}%`);
       if(editingExpenseId) return alert("Termina de editar el gasto pendiente.");
 
-      if(confirm("¿Cerrar liquidación?")) {
-          const record: SettlementRecord = {
-              id: crypto.randomUUID(),
-              month: new Date().toLocaleString('es-ES', { month: 'long', year: 'numeric' }),
-              dateClosed: new Date().toISOString(),
-              totalExpenses: totalOrdinary + totalExtraordinary + totalFromReserve,
-              totalCollected: totalToCollect,
-              
-              reserveBalanceStart: manualReserveBalance,
-              reserveExpense: totalFromReserve,
-              reserveBalanceAtClose: finalBalanceInBox, 
-              reserveContribution: monthlyReserveContributionAmount,
-              reserveDeficitCovered: reserveDeficit,
-              
-              firstExpirationDate: firstDate,
-              secondExpirationDate: secondDate,
-              secondExpirationSurcharge: surcharge,
-
-              snapshotExpenses: [...expenses],
-              aiReportSummary: "Resumen IA desactivado.",
-              couponMessage: couponMessage, 
-              unitDetails: settlementData.map(d => ({ unitId: d.id, totalToPay: d.totalToPay }))
-          };
+      if(confirm("¿Cerrar liquidación? Esta acción es definitiva.")) {
+          // Creamos el record real (sin el texto "PROVISORIO")
+          const record = getTempRecord();
+          record.id = crypto.randomUUID();
+          record.month = new Date().toLocaleString('es-ES', { month: 'long', year: 'numeric' });
           onCloseMonth(record);
       }
   }
@@ -157,7 +174,33 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
     <div className="space-y-6 relative">
       <div className="flex justify-between items-center">
         <div><h2 className="text-2xl font-bold text-slate-800">Liquidación</h2><p className="text-slate-500 text-sm">Configure vencimientos, revise gastos y cierre.</p></div>
-        <button onClick={handleConfirmSettlement} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-white font-bold shadow-lg flex items-center transition-all"><Archive className="w-5 h-5 mr-2"/> Liquidar Mes</button>
+        <button onClick={handleConfirmSettlement} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-white font-bold shadow-lg flex items-center transition-all"><Archive className="w-5 h-5 mr-2"/> Liquidar Mes (Definitivo)</button>
+      </div>
+
+      {/* BARRA DE PREVISUALIZACIÓN */}
+      <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+              <Eye className="w-5 h-5 text-indigo-600" />
+              <span className="font-bold text-indigo-900 text-sm">Previsualizar Documentos:</span>
+          </div>
+          
+          <div className="flex flex-wrap gap-3 items-center w-full md:w-auto">
+              <button onClick={handlePreviewGeneral} className="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 text-sm font-medium rounded-lg hover:bg-indigo-100 flex items-center shadow-sm">
+                  <FileText className="w-4 h-4 mr-2" /> Resumen General
+              </button>
+
+              <div className="h-6 w-px bg-indigo-200 hidden md:block"></div>
+
+              <div className="flex gap-2 w-full md:w-auto">
+                  <select className="px-3 py-2 bg-white border border-indigo-200 rounded-lg text-sm w-full md:w-48" value={previewUnitId} onChange={(e) => setPreviewUnitId(e.target.value)}>
+                      <option value="">Seleccionar Unidad...</option>
+                      {units.map(u => (<option key={u.id} value={u.id}>{u.unitNumber} - {u.ownerName}</option>))}
+                  </select>
+                  <button onClick={handlePreviewIndividual} className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center shadow-sm ${!previewUnitId ? 'bg-slate-200 text-slate-400' : 'bg-indigo-600 text-white'}`} disabled={!previewUnitId}>
+                      <User className="w-4 h-4 mr-2" /> Ver Cupón
+                  </button>
+              </div>
+          </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -191,7 +234,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
          <div className="flex items-center justify-between text-sm">
              <div><p className="text-slate-500">Gastos a cubrir</p><p className="text-xl font-bold text-red-600">-${totalFromReserve.toLocaleString()}</p></div>
              <div className="text-right">
-                 <p className="text-slate-500">{reserveDeficit > 0 ? 'Déficit (Recupero Extraordinario)' : 'Saldo Final'}</p>
+                 <p className="text-slate-500">{reserveDeficit > 0 ? 'Déficit (Se cobra)' : 'Saldo Final'}</p>
                  <p className={`text-2xl font-bold ${reserveDeficit > 0 ? 'text-orange-600' : 'text-emerald-600'}`}>
                      {reserveDeficit > 0 ? `-$${reserveDeficit.toLocaleString()}` : `$${projectedReserveBalance.toLocaleString()}`}
                  </p>

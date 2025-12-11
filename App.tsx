@@ -87,7 +87,6 @@ function App() {
           {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} settings={settings} reserveHistory={[]} />}
           {!loading && view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
           
-          {/* ✅ CORREGIDO: Pasamos consortiumId */}
           {!loading && view === 'expenses' && (
             <ExpensesView 
                 expenses={expenses} 
@@ -104,7 +103,7 @@ function App() {
                 setExpenses={setExpenses}
                 settings={settings} 
                 consortiumId={consortium.id}
-                consortiumName={consortium.name}
+                consortiumName={consortium.name} // ✅ Pasamos el nombre para el PDF provisorio
                 updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})}
                 onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})}
                 onCloseMonth={handleCloseMonth}
