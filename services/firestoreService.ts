@@ -16,7 +16,7 @@ import {
     uploadBytes, 
     getDownloadURL 
 } from 'firebase/storage'; 
-// CORRECCIÓN DE RUTA: Apuntamos a src/config
+// CORRECCIÓN: Ruta correcta según tu estructura de carpetas
 import { db } from '../src/config/firebase'; 
 import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings } from '../types';
 
@@ -41,7 +41,7 @@ export const getUnits = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Unit));
 };
 
-// IMPORTANTE: Renombrado a 'addUnit' porque UnitsView lo importa así
+// IMPORTANTE: Renombrado a 'addUnit' para que UnitsView funcione
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
     return { id: docRef.id, ...unit };
@@ -66,7 +66,7 @@ export const getExpenses = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
 };
 
-// IMPORTANTE: Renombrado a 'addExpense' porque ExpensesView lo importa así
+// IMPORTANTE: Renombrado a 'addExpense' para que ExpensesView funcione
 export const addExpense = async (consortiumId: string, expense: Omit<Expense, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/expenses`), expense);
     return { id: docRef.id, ...expense };
@@ -114,12 +114,13 @@ export const uploadPaymentReceipt = async (file: File): Promise<string> => {
     return await getDownloadURL(snapshot.ref);
 };
 
-// App.tsx usa createPayment, así que mantenemos este nombre aquí
+// App.tsx usa createPayment
 export const createPayment = async (consortiumId: string, payment: Omit<Payment, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/payments`), payment);
     return { id: docRef.id, ...payment };
 };
 
+// IMPORTANTE: Agregado para aprobar/rechazar pagos
 export const updatePayment = async (consortiumId: string, paymentId: string, updates: Partial<Payment>) => {
     const docRef = doc(db, `consortiums/${consortiumId}/payments`, paymentId);
     await updateDoc(docRef, updates);

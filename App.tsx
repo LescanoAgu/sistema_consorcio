@@ -11,6 +11,7 @@ import AuthView from './components/AuthView';
 import UserPortal from './components/UserPortal';
 import SettingsView from './components/SettingsView';
 import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings } from './types';
+// IMPORTANTE: Imports actualizados para incluir todas las funciones de pago
 import { 
     getUnits, getExpenses, getHistory, getConsortiums, createConsortium, 
     saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment 
