@@ -1,44 +1,55 @@
-
-import React, { useMemo } from 'react';
-import { Unit, Expense, SettlementRecord, Payment, ExpenseDistributionType } from '../types';
-import { Wallet, CheckCircle, AlertCircle, TrendingUp, Download, Building, Users } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Unit, Expense, SettlementRecord, Payment, ConsortiumSettings } from '../types';
+import { CheckCircle, AlertCircle, TrendingUp, Download, Building, Users, Upload, X, Paperclip } from 'lucide-react';
 
 interface UserPortalProps {
   userEmail: string;
   units: Unit[];
-  expenses: Expense[]; // Current month expenses
+  expenses: Expense[];
   history: SettlementRecord[];
   payments: Payment[];
+  settings: ConsortiumSettings;
+  onReportPayment: (paymentData: { amount: number, date: string, method: 'Transferencia' | 'Efectivo' | 'Cheque', notes: string, file: File | null }) => Promise<void>;
 }
 
-const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, history, payments }) => {
-  // 1. Identify User's Unit (Simple mapping by email for demo, or fallback to first unit if not found)
+const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, history, payments, settings, onReportPayment }) => {
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Form State
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+
+  // 1. Identify User's Unit
   const myUnit = useMemo(() => {
     return units.find(u => u.linkedEmail === userEmail) || units.find(u => u.ownerName === 'Usuario Demo') || units[0];
   }, [units, userEmail]);
 
-  // 2. Calculate Financial Status for Current User
+  // 2. Calculate Financial Status
   const status = useMemo(() => {
     if (!myUnit) return null;
-    
     const initial = myUnit.initialBalance || 0;
-    
-    // Historical Debt
     const totalSettled = history.reduce((acc, record) => {
         const detail = record.unitDetails?.find(d => d.unitId === myUnit.id);
         return acc + (detail ? detail.totalToPay : 0);
     }, 0);
-
-    // Payments
-    const totalPaid = payments.filter(p => p.unitId === myUnit.id).reduce((acc, p) => acc + p.amount, 0);
+    // Solo restamos pagos aprobados para el saldo real
+    const validPayments = payments.filter(p => p.unitId === myUnit.id && p.status === 'APPROVED');
+    const totalPaid = validPayments.reduce((acc, p) => acc + p.amount, 0);
     
-    // Current Debt
     const balance = (initial + totalSettled) - totalPaid;
-
-    return { balance, totalPaid, totalSettled };
+    return { balance, totalPaid };
   }, [myUnit, history, payments]);
 
-  // 3. Calculate All Debtors for Transparency
+  // 3. Pending Payments
+  const myPendingPayments = useMemo(() => {
+      if(!myUnit) return [];
+      return payments.filter(p => p.unitId === myUnit.id && p.status === 'PENDING');
+  }, [payments, myUnit]);
+
+  // 4. All Debtors (Solo pagos aprobados cuentan para reducir deuda pública)
   const allDebtors = useMemo(() => {
       return units.map(unit => {
         const initial = unit.initialBalance || 0;
@@ -46,36 +57,126 @@ const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, his
             const detail = record.unitDetails?.find(d => d.unitId === unit.id);
             return acc + (detail ? detail.totalToPay : 0);
         }, 0);
-        const totalPaid = payments.filter(p => p.unitId === unit.id).reduce((acc, p) => acc + p.amount, 0);
-        
-        // Note: For simplicity in User View, we aren't pulling the Adjustment state here, 
-        // assuming standard debt. In a real full sync, we'd pass debtAdjustments too.
+        const totalPaid = payments.filter(p => p.unitId === unit.id && p.status === 'APPROVED').reduce((acc, p) => acc + p.amount, 0);
         const balance = (initial + totalSettled) - totalPaid;
-
         return { ...unit, balance };
-      })
-      .filter(u => u.balance > 100) // Only show significant debt
-      .sort((a, b) => b.balance - a.balance);
+      }).filter(u => u.balance > 100).sort((a, b) => b.balance - a.balance);
   }, [units, history, payments]);
 
-  // 4. Current Month Projection (Not closed yet)
-  const currentProjection = useMemo(() => {
-     if (!myUnit) return 0;
-     // Simple projection based on prorate
-     const totalExpenses = expenses.reduce((acc, e) => e.distributionType !== ExpenseDistributionType.FROM_RESERVE ? acc + e.amount : acc, 0);
-     return totalExpenses * (myUnit.proratePercentage / 100);
-  }, [myUnit, expenses]);
-
+  const handleSubmitPayment = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!amount) return;
+      setIsSubmitting(true);
+      try {
+          await onReportPayment({
+              amount: parseFloat(amount),
+              date,
+              method: 'Transferencia',
+              notes,
+              file
+          });
+          setShowPaymentModal(false);
+          setAmount('');
+          setNotes('');
+          setFile(null);
+          alert("Pago informado exitosamente. Quedará pendiente de aprobación.");
+      } catch (error) {
+          console.error(error);
+          alert("Error al informar el pago.");
+      } finally {
+          setIsSubmitting(false);
+      }
+  };
 
   if (!myUnit) return <div className="text-center p-10">No se encontró unidad asociada a {userEmail}</div>;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 text-white shadow-lg">
-          <h2 className="text-2xl font-bold mb-1">Hola, {myUnit.ownerName}</h2>
-          <p className="opacity-90">Unidad: <strong>{myUnit.unitNumber}</strong> | Prorrateo: {myUnit.proratePercentage}%</p>
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold mb-1">Hola, {myUnit.ownerName}</h2>
+            <p className="opacity-90">Unidad: <strong>{myUnit.unitNumber}</strong></p>
+          </div>
+          <button 
+            onClick={() => setShowPaymentModal(true)}
+            className="bg-white text-indigo-600 px-4 py-2 rounded-lg font-bold shadow hover:bg-indigo-50 transition-colors flex items-center gap-2"
+          >
+              <Upload className="w-5 h-5" />
+              Informar Pago
+          </button>
       </div>
+
+      {/* MODAL DE PAGO */}
+      {showPaymentModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+                  <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
+                      <h3 className="font-bold text-slate-700">Informar Nuevo Pago</h3>
+                      <button onClick={() => setShowPaymentModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6"/></button>
+                  </div>
+                  <form onSubmit={handleSubmitPayment} className="p-6 space-y-4">
+                      <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Monto Abonado ($)</label>
+                          <input required type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="0.00" />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Fecha de Transferencia</label>
+                          <input required type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Comprobante (Imagen/PDF)</label>
+                          <div className="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center hover:bg-slate-50 transition-colors relative">
+                              <input 
+                                type="file" 
+                                accept="image/*,application/pdf"
+                                onChange={e => setFile(e.target.files ? e.target.files[0] : null)}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              />
+                              <div className="flex flex-col items-center gap-2 text-slate-500">
+                                  {file ? (
+                                      <>
+                                        <CheckCircle className="w-8 h-8 text-emerald-500" />
+                                        <span className="text-sm font-medium text-emerald-600">{file.name}</span>
+                                      </>
+                                  ) : (
+                                      <>
+                                        <Paperclip className="w-8 h-8" />
+                                        <span className="text-sm">Toca para subir comprobante</span>
+                                      </>
+                                  )}
+                              </div>
+                          </div>
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Notas Adicionales</label>
+                          <textarea value={notes} onChange={e => setNotes(e.target.value)} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" rows={2} placeholder="Ej: Pago de expensas Enero..." />
+                      </div>
+                      <button disabled={isSubmitting} type="submit" className="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                          {isSubmitting ? 'Enviando...' : 'Enviar Informe de Pago'}
+                      </button>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {/* Pending Payments Alert */}
+      {myPendingPayments.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+              <div>
+                  <h4 className="font-bold text-amber-800">Pagos Pendientes de Aprobación</h4>
+                  <p className="text-sm text-amber-700 mb-2">Has informado los siguientes pagos que aún no han sido verificados por la administración:</p>
+                  <ul className="space-y-1">
+                      {myPendingPayments.map(p => (
+                          <li key={p.id} className="text-sm font-mono text-amber-900 bg-amber-100/50 px-2 py-1 rounded inline-block mr-2">
+                              ${p.amount} ({new Date(p.date).toLocaleDateString()})
+                          </li>
+                      ))}
+                  </ul>
+              </div>
+          </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Main Status Card */}
@@ -100,21 +201,28 @@ const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, his
                   
                   <div className="w-full md:w-auto bg-slate-50 p-4 rounded-xl border border-slate-100">
                       <h4 className="text-xs font-bold uppercase text-slate-400 mb-3">Datos de Transferencia</h4>
-                      <p className="text-sm text-slate-700 font-medium flex justify-between gap-4">
-                          <span>CBU:</span> <span className="font-mono">0123456789012345678901</span>
-                      </p>
-                      <p className="text-sm text-slate-700 font-medium flex justify-between gap-4 mt-1">
-                          <span>Alias:</span> <span className="font-mono">EDIFICIO.NORTE.PAGO</span>
-                      </p>
-                      <p className="text-sm text-slate-700 font-medium flex justify-between gap-4 mt-1">
-                          <span>Banco:</span> <span>Banco Nación</span>
-                      </p>
+                      {settings.bankCBU ? (
+                        <>
+                          <p className="text-sm text-slate-700 font-medium flex justify-between gap-4">
+                              <span>CBU:</span> <span className="font-mono select-all">{settings.bankCBU}</span>
+                          </p>
+                          <p className="text-sm text-slate-700 font-medium flex justify-between gap-4 mt-1">
+                              <span>Alias:</span> <span className="font-mono uppercase select-all">{settings.bankAlias}</span>
+                          </p>
+                          <p className="text-sm text-slate-700 font-medium flex justify-between gap-4 mt-1">
+                              <span>Banco:</span> <span>{settings.bankName}</span>
+                          </p>
+                          <p className="text-xs text-slate-500 mt-2 text-right">Titular: {settings.bankHolder}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-amber-600 italic">Datos bancarios no configurados.</p>
+                      )}
                   </div>
               </div>
           </div>
-
-          {/* Current Month Preview */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          
+           {/* Current Month Preview */}
+           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
               <div className="flex items-center gap-3 mb-4">
                   <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
                       <TrendingUp className="w-5 h-5" />
@@ -129,10 +237,9 @@ const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, his
                   <span className="font-medium">${expenses.reduce((a,c) => a+c.amount, 0).toFixed(2)}</span>
               </div>
               <div className="flex justify-between items-end">
-                  <span className="text-slate-800 font-bold">Tu Parte Estimada</span>
-                  <span className="font-bold text-blue-600 text-xl">~${currentProjection.toFixed(2)}</span>
+                  <span className="text-slate-800 font-bold">Tu Parte</span>
+                  <span className="font-bold text-blue-600 text-xl">~${(expenses.reduce((a,c) => a+c.amount, 0) * (myUnit.proratePercentage / 100)).toFixed(2)}</span>
               </div>
-              <p className="text-xs text-slate-400 mt-2 text-center">*Esto no es una liquidación final.</p>
           </div>
       </div>
 

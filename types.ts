@@ -35,6 +35,7 @@ export interface Payment {
   method: 'Transferencia' | 'Efectivo' | 'Cheque';
   notes?: string;
   attachmentUrl?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'; // <--- ESTADO CLAVE
 }
 
 export interface DebtAdjustment {

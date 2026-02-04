@@ -1,198 +1,152 @@
-import { db, storage } from '../src/config/firebase'; 
-import { collection, getDocs, addDoc, updateDoc, doc, query, where, orderBy, Timestamp, setDoc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { Unit, Expense, Consortium, SettlementRecord, UserRole, ConsortiumSettings } from '../types'; 
+import { 
+    collection, 
+    getDocs, 
+    addDoc, 
+    updateDoc, 
+    deleteDoc, 
+    doc, 
+    query, 
+    orderBy, 
+    setDoc,
+    getDoc
+} from 'firebase/firestore';
+import { 
+    getStorage, 
+    ref, 
+    uploadBytes, 
+    getDownloadURL 
+} from 'firebase/storage'; 
+// CORRECCIÓN DE RUTA: Apuntamos a src/config
+import { db } from '../src/config/firebase'; 
+import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings } from '../types';
 
-// --- Mapeos ---
-const mapUnitFromFirestore = (doc: any): Unit => {
-  const data = doc.data();
-  return {
-    id: doc.id,
-    unitNumber: data.nombre || 'Sin Nombre',
-    ownerName: data.propietario || 'Desconocido',
-    linkedEmail: data.email || '',
-    proratePercentage: parseFloat(data.porcentaje) || 0,
-    initialBalance: parseFloat(data.saldo) || 0
-  };
+// --- CONSORTIUM MANAGEMENT ---
+export const createConsortium = async (data: Omit<Consortium, 'id'>) => {
+    const docRef = await addDoc(collection(db, 'consortiums'), data);
+    return { id: docRef.id, ...data };
 };
 
-const mapExpenseFromFirestore = (doc: any): Expense => {
-  const data = doc.data();
-  return {
-    id: doc.id,
-    description: data.concepto,
-    amount: parseFloat(data.monto),
-    date: data.fecha instanceof Timestamp ? data.fecha.toDate().toISOString().split('T')[0] : data.fecha,
-    category: data.tipo === 'Ordinario' ? 'Ordinary' : 'Extraordinary',
-    distributionType: data.distribucion === 'Prorrateo' ? 'PRORATED' : (data.distribucion === 'Fondo' ? 'FROM_RESERVE' : 'EQUAL_PARTS'),
-    itemCategory: data.rubro || 'General',
-    attachmentUrl: data.comprobanteUrl || '',
-    liquidacionId: data.liquidacionId || null
-  } as Expense;
+export const getConsortiums = async () => {
+    const q = query(collection(db, 'consortiums'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Consortium));
 };
 
-// --- Consorcios ---
-export const getConsortiums = async (): Promise<Consortium[]> => {
-  const q = query(collection(db, 'consorcios'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({
-    id: doc.id,
-    name: doc.data().nombre,
-    address: doc.data().direccion,
-    cuit: doc.data().cuit
-  }));
+// --- UNITS ---
+// Usado por: UnitsView, App, UserPortal
+
+export const getUnits = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/units`), orderBy('unitNumber'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Unit));
 };
 
-export const createConsortium = async (consortium: Omit<Consortium, 'id'>) => {
-  const docRef = await addDoc(collection(db, 'consorcios'), {
-    nombre: consortium.name,
-    direccion: consortium.address,
-    cuit: consortium.cuit,
-    createdAt: new Date()
-  });
-  // Crear configuración por defecto
-  await setDoc(doc(db, `consorcios/${docRef.id}/config`, 'general'), {
-      reserveFundBalance: 0,
-      monthlyReserveContributionPercentage: 5,
-      bankName: 'Banco Nación',
-      bankCBU: '',
-      bankAlias: '',
-      bankHolder: consortium.name,
-      bankCuit: consortium.cuit || ''
-  });
-  return { id: docRef.id, ...consortium };
-};
-
-// --- Unidades ---
-export const getUnits = async (consortiumId: string): Promise<Unit[]> => {
-  const q = query(collection(db, `consorcios/${consortiumId}/unidades`), orderBy('nombre'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(mapUnitFromFirestore);
-};
-
-export const addUnit = async (consortiumId: string, unit: Unit) => {
-  const docRef = await addDoc(collection(db, `consorcios/${consortiumId}/unidades`), {
-    nombre: unit.unitNumber,
-    propietario: unit.ownerName,
-    porcentaje: unit.proratePercentage,
-    saldo: unit.initialBalance,
-    email: unit.linkedEmail,
-    createdAt: new Date()
-  });
-  return { ...unit, id: docRef.id };
+// IMPORTANTE: Renombrado a 'addUnit' porque UnitsView lo importa así
+export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
+    return { id: docRef.id, ...unit };
 };
 
 export const updateUnit = async (consortiumId: string, unit: Unit) => {
-    const unitRef = doc(db, `consorcios/${consortiumId}/unidades`, unit.id);
-    await updateDoc(unitRef, {
-        nombre: unit.unitNumber,
-        propietario: unit.ownerName,
-        porcentaje: unit.proratePercentage,
-        saldo: unit.initialBalance,
-        email: unit.linkedEmail
-    });
+    const docRef = doc(db, `consortiums/${consortiumId}/units`, unit.id);
+    await updateDoc(docRef, { ...unit });
 };
 
 export const deleteUnit = async (consortiumId: string, unitId: string) => {
-    await deleteDoc(doc(db, `consorcios/${consortiumId}/unidades`, unitId));
+    const docRef = doc(db, `consortiums/${consortiumId}/units`, unitId);
+    await deleteDoc(docRef);
 };
 
-// --- Gastos ---
-export const getExpenses = async (consortiumId: string): Promise<Expense[]> => {
-  const q = query(
-    collection(db, `consorcios/${consortiumId}/gastos`),
-    where("liquidacionId", "==", null), 
-    orderBy("createdAt", "desc")
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(mapExpenseFromFirestore);
+// --- EXPENSES ---
+// Usado por: ExpensesView, SettlementView, App
+
+export const getExpenses = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/expenses`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
 };
 
-export const addExpense = async (consortiumId: string, expense: Expense) => {
-  const newExpense = {
-    concepto: expense.description,
-    monto: expense.amount,
-    fecha: expense.date,
-    tipo: expense.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario',
-    distribucion: expense.distributionType === 'PRORATED' ? 'Prorrateo' : (expense.distributionType === 'FROM_RESERVE' ? 'Fondo' : 'Iguales'),
-    rubro: expense.itemCategory,
-    comprobanteUrl: expense.attachmentUrl || '',
-    liquidacionId: null,
-    createdAt: new Date()
-  };
-  
-  const docRef = await addDoc(collection(db, `consorcios/${consortiumId}/gastos`), newExpense);
-  return { ...expense, id: docRef.id };
+// IMPORTANTE: Renombrado a 'addExpense' porque ExpensesView lo importa así
+export const addExpense = async (consortiumId: string, expense: Omit<Expense, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/expenses`), expense);
+    return { id: docRef.id, ...expense };
 };
 
-export const updateExpense = async (consortiumId: string, expense: Expense) => {
-    const expenseRef = doc(db, `consorcios/${consortiumId}/gastos`, expense.id);
-    await updateDoc(expenseRef, {
-        concepto: expense.description,
-        monto: expense.amount,
-        fecha: expense.date,
-        tipo: expense.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario',
-        distribucion: expense.distributionType === 'PRORATED' ? 'Prorrateo' : (expense.distributionType === 'FROM_RESERVE' ? 'Fondo' : 'Iguales'),
-        rubro: expense.itemCategory,
-    });
+// IMPORTANTE: Agregado porque SettlementView lo necesita
+export const updateExpense = async (consortiumId: string, expenseId: string, updates: Partial<Expense>) => {
+    const docRef = doc(db, `consortiums/${consortiumId}/expenses`, expenseId);
+    await updateDoc(docRef, updates);
 };
 
 export const deleteExpense = async (consortiumId: string, expenseId: string) => {
-    await deleteDoc(doc(db, `consorcios/${consortiumId}/gastos`, expenseId));
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, expenseId));
 };
 
-// --- Configuración (Settings) ---
+// --- SETTLEMENTS & HISTORY ---
+export const saveSettlement = async (consortiumId: string, record: SettlementRecord, expenseIdsToRemove: string[]) => {
+    // 1. Guardar registro en historial
+    await addDoc(collection(db, `consortiums/${consortiumId}/history`), record);
+
+    // 2. Archivar/Borrar gastos liquidados
+    for (const id of expenseIdsToRemove) {
+        await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, id));
+    }
+    
+    // 3. Actualizar saldo del fondo en configuración
+    await saveSettings(consortiumId, { 
+        reserveFundBalance: record.reserveBalanceAtClose,
+    } as any); 
+};
+
+export const getHistory = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/history`), orderBy('month', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord));
+};
+
+// --- PAYMENTS & COLLECTIONS ---
+// Usado por: App (handleReportPayment), CollectionsView
+
+export const uploadPaymentReceipt = async (file: File): Promise<string> => {
+    const storage = getStorage();
+    const storageRef = ref(storage, `receipts/${Date.now()}_${file.name}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    return await getDownloadURL(snapshot.ref);
+};
+
+// App.tsx usa createPayment, así que mantenemos este nombre aquí
+export const createPayment = async (consortiumId: string, payment: Omit<Payment, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/payments`), payment);
+    return { id: docRef.id, ...payment };
+};
+
+export const updatePayment = async (consortiumId: string, paymentId: string, updates: Partial<Payment>) => {
+    const docRef = doc(db, `consortiums/${consortiumId}/payments`, paymentId);
+    await updateDoc(docRef, updates);
+};
+
+export const getPayments = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Payment));
+};
+
+// --- SETTINGS ---
 export const getSettings = async (consortiumId: string): Promise<ConsortiumSettings> => {
-    const docRef = doc(db, `consorcios/${consortiumId}/config`, 'general');
+    const docRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
     const snap = await getDoc(docRef);
-    if (snap.exists()) return snap.data() as ConsortiumSettings;
-    return {
-        reserveFundBalance: 0,
-        monthlyReserveContributionPercentage: 5,
-        bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: ''
-    };
+    if (snap.exists()) {
+        return snap.data() as ConsortiumSettings;
+    } else {
+        return { 
+            reserveFundBalance: 0, 
+            monthlyReserveContributionPercentage: 5,
+            bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: ''
+        };
+    }
 };
 
 export const saveSettings = async (consortiumId: string, settings: ConsortiumSettings) => {
-    const docRef = doc(db, `consorcios/${consortiumId}/config`, 'general');
+    const docRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
     await setDoc(docRef, settings, { merge: true });
-};
-
-// --- Liquidaciones ---
-export const saveSettlement = async (consortiumId: string, settlement: SettlementRecord, expenseIds: string[]) => {
-  const batch = writeBatch(db);
-
-  // 1. Crear el registro de liquidación
-  const settlementRef = doc(collection(db, `consorcios/${consortiumId}/liquidaciones`));
-  batch.set(settlementRef, {
-    ...settlement,
-    id: settlementRef.id,
-    createdAt: new Date()
-  });
-
-  // 2. Marcar los gastos como liquidados
-  expenseIds.forEach(expId => {
-    const expRef = doc(db, `consorcios/${consortiumId}/gastos`, expId);
-    batch.update(expRef, { liquidacionId: settlementRef.id });
-  });
-
-  // 3. Actualizar el saldo del fondo en la configuración
-  const configRef = doc(db, `consorcios/${consortiumId}/config`, 'general');
-  batch.update(configRef, { reserveFundBalance: settlement.reserveBalanceAtClose });
-
-  await batch.commit();
-  return settlementRef.id;
-};
-
-export const getHistory = async (consortiumId: string): Promise<SettlementRecord[]> => {
-    const q = query(collection(db, `consorcios/${consortiumId}/liquidaciones`), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => d.data() as SettlementRecord);
-}
-
-// --- Archivos (Storage) ---
-export const uploadReceipt = async (file: File, consortiumId: string): Promise<string> => {
-  const storageRef = ref(storage, `consorcios/${consortiumId}/comprobantes/${Date.now()}_${file.name}`);
-  await uploadBytes(storageRef, file);
-  return await getDownloadURL(storageRef);
 };
