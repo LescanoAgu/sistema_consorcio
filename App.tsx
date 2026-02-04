@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import UnitsView from './components/UnitsView';
@@ -11,7 +11,6 @@ import AuthView from './components/AuthView';
 import UserPortal from './components/UserPortal';
 import SettingsView from './components/SettingsView';
 import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings } from './types';
-// IMPORTANTE: Imports actualizados para incluir todas las funciones de pago
 import { 
     getUnits, getExpenses, getHistory, getConsortiums, createConsortium, 
     saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment 
@@ -36,26 +35,31 @@ function App() {
 
   useEffect(() => { getConsortiums().then(setConsortiumList); }, []);
 
-  useEffect(() => {
-      if (consortium) {
-          setLoading(true);
-          Promise.all([
-              getUnits(consortium.id), 
-              getExpenses(consortium.id), 
-              getHistory(consortium.id), 
-              getSettings(consortium.id),
-              getPayments(consortium.id)
-          ])
-          .then(([u, e, h, s, p]) => { 
-              setUnits(u); 
-              setExpenses(e); 
-              setHistory(h); 
-              setSettings(s); 
-              setPayments(p);
-              setLoading(false); 
-          });
-      }
+  // Función para cargar datos (Extraída para poder reusarla al borrar datos)
+  const loadConsortiumData = useCallback(() => {
+    if (consortium) {
+        setLoading(true);
+        Promise.all([
+            getUnits(consortium.id), 
+            getExpenses(consortium.id), 
+            getHistory(consortium.id), 
+            getSettings(consortium.id),
+            getPayments(consortium.id)
+        ])
+        .then(([u, e, h, s, p]) => { 
+            setUnits(u); 
+            setExpenses(e); 
+            setHistory(h); 
+            setSettings(s); 
+            setPayments(p);
+            setLoading(false); 
+        });
+    }
   }, [consortium]);
+
+  useEffect(() => {
+      loadConsortiumData();
+  }, [loadConsortiumData]);
 
   const handleLogin = (email: string, role: UserRole) => {
     setUser({ email, role });
@@ -81,8 +85,6 @@ function App() {
   };
 
   // --- PAGOS ---
-  
-  // 1. Reporte del Usuario
   const handleReportPayment = async (data: { amount: number, date: string, method: 'Transferencia' | 'Efectivo' | 'Cheque', notes: string, file: File | null }) => {
       if(!consortium || !user) return;
       const myUnit = units.find(u => u.linkedEmail === user.email) || units.find(u => u.ownerName === 'Usuario Demo');
@@ -98,14 +100,12 @@ function App() {
       setPayments([created as Payment, ...payments]);
   };
 
-  // 2. Carga Manual del Admin (Entra aprobado directo)
   const handleAdminAddPayment = async (paymentData: Omit<Payment, 'id'>) => {
       if(!consortium) return;
       const created = await createPayment(consortium.id, paymentData);
       setPayments([created as Payment, ...payments]);
   };
 
-  // 3. Aprobar/Rechazar Pago
   const handlePaymentStatusChange = async (id: string, newStatus: 'APPROVED' | 'REJECTED') => {
       if(!consortium) return;
       await updatePayment(consortium.id, id, { status: newStatus });
@@ -134,7 +134,18 @@ function App() {
         <div className="max-w-7xl mx-auto">
           {loading && <div className="text-center p-4">Cargando datos...</div>}
 
-          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} settings={settings} reserveHistory={[]} />}
+          {!loading && view === 'dashboard' && (
+            <Dashboard 
+                units={units} 
+                expenses={expenses} 
+                settings={settings} 
+                reserveHistory={[]} 
+                userRole={user.role} // <--- Pasamos el Rol
+                consortiumId={consortium.id} // <--- Pasamos el ID del Consorcio
+                onDataReset={loadConsortiumData} // <--- Función de recarga tras borrado
+            />
+          )}
+
           {!loading && view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
           
           {!loading && view === 'expenses' && (

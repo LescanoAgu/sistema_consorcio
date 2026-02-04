@@ -8,7 +8,8 @@ import {
     query, 
     orderBy, 
     setDoc,
-    getDoc
+    getDoc,
+    writeBatch // <--- IMPORTANTE: Necesario para borrar en lote
 } from 'firebase/firestore';
 import { 
     getStorage, 
@@ -16,9 +17,26 @@ import {
     uploadBytes, 
     getDownloadURL 
 } from 'firebase/storage'; 
-// CORRECCIÓN: Ruta correcta según tu estructura de carpetas
+// CORRECCIÓN: Apuntamos a src/config/firebase
 import { db } from '../src/config/firebase'; 
 import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings } from '../types';
+
+// --- UTILIDADES ---
+
+// Función para vaciar una colección completa (ZONA DE PELIGRO)
+export const clearCollection = async (consortiumId: string, collectionName: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/${collectionName}`));
+    const snapshot = await getDocs(q);
+    
+    // Firestore permite batches de hasta 500 operaciones
+    // Si tienes más de 500 docs, esto debería hacerse en un loop, pero para este caso sirve
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+    });
+    
+    await batch.commit();
+};
 
 // --- CONSORTIUM MANAGEMENT ---
 export const createConsortium = async (data: Omit<Consortium, 'id'>) => {
@@ -33,7 +51,6 @@ export const getConsortiums = async () => {
 };
 
 // --- UNITS ---
-// Usado por: UnitsView, App, UserPortal
 
 export const getUnits = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/units`), orderBy('unitNumber'));
@@ -41,7 +58,7 @@ export const getUnits = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Unit));
 };
 
-// IMPORTANTE: Renombrado a 'addUnit' para que UnitsView funcione
+// IMPORTANTE: Renombrado a 'addUnit' para coincidir con UnitsView
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
     return { id: docRef.id, ...unit };
@@ -58,7 +75,6 @@ export const deleteUnit = async (consortiumId: string, unitId: string) => {
 };
 
 // --- EXPENSES ---
-// Usado por: ExpensesView, SettlementView, App
 
 export const getExpenses = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/expenses`), orderBy('date', 'desc'));
@@ -66,13 +82,13 @@ export const getExpenses = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
 };
 
-// IMPORTANTE: Renombrado a 'addExpense' para que ExpensesView funcione
+// IMPORTANTE: Renombrado a 'addExpense' para coincidir con ExpensesView
 export const addExpense = async (consortiumId: string, expense: Omit<Expense, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/expenses`), expense);
     return { id: docRef.id, ...expense };
 };
 
-// IMPORTANTE: Agregado porque SettlementView lo necesita
+// Agregado porque SettlementView lo necesita
 export const updateExpense = async (consortiumId: string, expenseId: string, updates: Partial<Expense>) => {
     const docRef = doc(db, `consortiums/${consortiumId}/expenses`, expenseId);
     await updateDoc(docRef, updates);
@@ -105,7 +121,6 @@ export const getHistory = async (consortiumId: string) => {
 };
 
 // --- PAYMENTS & COLLECTIONS ---
-// Usado por: App (handleReportPayment), CollectionsView
 
 export const uploadPaymentReceipt = async (file: File): Promise<string> => {
     const storage = getStorage();
@@ -114,13 +129,11 @@ export const uploadPaymentReceipt = async (file: File): Promise<string> => {
     return await getDownloadURL(snapshot.ref);
 };
 
-// App.tsx usa createPayment
 export const createPayment = async (consortiumId: string, payment: Omit<Payment, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/payments`), payment);
     return { id: docRef.id, ...payment };
 };
 
-// IMPORTANTE: Agregado para aprobar/rechazar pagos
 export const updatePayment = async (consortiumId: string, paymentId: string, updates: Partial<Payment>) => {
     const docRef = doc(db, `consortiums/${consortiumId}/payments`, paymentId);
     await updateDoc(docRef, updates);
