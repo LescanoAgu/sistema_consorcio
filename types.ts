@@ -7,22 +7,30 @@ export enum ExpenseDistributionType {
 export type UserRole = 'DEV' | 'ADMIN' | 'USER';
 export type MaintenanceStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE';
 
-// --- NUEVO: Espacios Comunes y Reservas ---
+// --- NUEVO: Documentos ---
+export interface ConsortiumDocument {
+  id: string;
+  title: string;
+  category: 'Reglamento' | 'Acta' | 'Aviso' | 'Otro';
+  url: string;
+  date: string;
+}
+
 export interface Amenity {
   id: string;
-  name: string; // Ej: "Quincho", "SUM"
+  name: string;
   description: string;
   capacity: number;
-  requiresApproval: boolean; // Si requiere ok del admin
+  requiresApproval: boolean;
 }
 
 export interface Booking {
   id: string;
   amenityId: string;
   unitId: string;
-  unitNumber: string; // Para mostrar rápido quién reservó
-  date: string; // YYYY-MM-DD
-  timeSlot: string; // "Mediodía" | "Noche" | u horario específico
+  unitNumber: string;
+  date: string;
+  timeSlot: string;
   status: 'CONFIRMED' | 'PENDING' | 'REJECTED';
   createdAt: string;
 }
@@ -94,6 +102,10 @@ export interface ConsortiumSettings {
   bankAlias: string;
   bankHolder: string;
   bankCuit: string;
+  address?: string;
+  cuit?: string; 
+  adminName?: string;
+  logoUrl?: string;
 }
 
 export interface SettlementRecord {
@@ -102,19 +114,13 @@ export interface SettlementRecord {
   dateClosed: string;
   totalExpenses: number;
   totalCollected: number;
-  
   reserveBalanceStart: number;
   reserveContribution: number;
   reserveExpense: number;
   reserveBalanceAtClose: number;
-  reserveDeficitCovered?: number;
-
   firstExpirationDate?: string;
   secondExpirationDate?: string;
-  secondExpirationSurcharge?: number;
-
   snapshotExpenses: Expense[];
-  aiReportSummary?: string;
   couponMessage?: string;
   unitDetails: { unitId: string; totalToPay: number }[]; 
 }
@@ -133,6 +139,7 @@ export interface Consortium {
   address: string;
   cuit?: string;
   image?: string;
+  adminIds?: string[]; // Array de UIDs de admins
 }
 
 export interface AppSettings {
@@ -140,5 +147,15 @@ export interface AppSettings {
   monthlyReserveContributionPercentage: number;
 }
 
-// Agregamos 'amenities' a las vistas
-export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities';
+export interface ExpenseTemplate {
+  id: string;
+  alias: string; // Nombre corto para identificarla (ej: "Abono Ascensor")
+  description: string;
+  amount: number;
+  category: 'Ordinary' | 'Extraordinary';
+  itemCategory: string;
+  distributionType: ExpenseDistributionType;
+}
+
+// Agregamos 'documents' a las vistas
+export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities' | 'profile' | 'documents';

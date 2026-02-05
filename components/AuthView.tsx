@@ -1,317 +1,201 @@
 import React, { useState } from 'react';
 import { Consortium, UserRole } from '../types';
-import { Building2, ArrowRight, LogOut, ShieldCheck, User, PlusCircle, UserPlus, LogIn, AlertCircle, Loader2 } from 'lucide-react';
-// ✅ IMPORTANTE: Importamos la autenticación real de Firebase
+import { Building2, ArrowRight, LogOut, PlusCircle, LogIn, AlertCircle, Loader2, UserPlus } from 'lucide-react';
 import { auth } from '../src/config/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 interface AuthViewProps {
   isAuthenticated: boolean;
   onLoginSuccess: (email: string, role: UserRole) => void;
   onSelectConsortium: (consortium: Consortium) => void;
   consortiums: Consortium[];
-  onCreateConsortium: (c: Consortium) => void;
+  onCreateConsortium: (c: Consortium, userId: string) => void;
   onLogout: () => void;
   userRole: UserRole;
   userEmail: string;
 }
 
-const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onLoginSuccess, onSelectConsortium, consortiums, onCreateConsortium, onLogout, userRole, userEmail }) => {
-  // Login States
+const AuthView: React.FC<AuthViewProps> = ({ isAuthenticated, onSelectConsortium, consortiums, onCreateConsortium, onLogout, userEmail }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  // Registration State
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [regName, setRegName] = useState(''); // (Nota: Firebase Auth básico usa solo email/pass, el nombre lo guardaremos local por ahora)
-  const [regEmail, setRegEmail] = useState('');
-  const [regRole, setRegRole] = useState<UserRole>('ADMIN'); // Por defecto ADMIN para crear el primer consorcio
-  const [regPassword, setRegPassword] = useState('');
+  const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  const [isCreatingConsortium, setIsCreatingConsortium] = useState(false);
+  const [newConsortium, setNewConsortium] = useState({ name: '', address: '', cuit: '' });
 
-  // Create Consortium State
-  const [isCreating, setIsCreating] = useState(false);
-  const [newConsortium, setNewConsortium] = useState<Partial<Consortium>>({ name: '', address: '', cuit: '' });
-
-  const step = isAuthenticated ? 'select' : 'login';
-
-  // --- LÓGICA DE AUTENTICACIÓN REAL ---
-
-  const handleRealLogin = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // Si pasa, notificamos a la App (Asumimos ADMIN si entra por login directo para simplificar, o podrías guardar el rol en BD)
-      onLoginSuccess(email, 'ADMIN'); 
-    } catch (err: any) {
-      console.error(err);
-      setError('Error al iniciar sesión: Verifique sus credenciales.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRealRegistration = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      await createUserWithEmailAndPassword(auth, regEmail, regPassword);
-      // Al registrarse, usamos el rol que seleccionó en el formulario
-      onLoginSuccess(regEmail, regRole);
-      alert("¡Cuenta creada con éxito! Ahora puedes crear tu primer consorcio.");
-    } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/email-already-in-use') {
-        setError('Este correo ya está registrado.');
-      } else if (err.code === 'auth/weak-password') {
-        setError('La contraseña debe tener al menos 6 caracteres.');
+      if (mode === 'LOGIN') {
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
-        setError('Error al registrarse. Intente nuevamente.');
+        await createUserWithEmailAndPassword(auth, email, password);
       }
+    } catch (err: any) {
+      setError(mode === 'LOGIN' ? 'Credenciales incorrectas.' : 'Error al registrarse: ' + err.message);
     } finally {
       setLoading(false);
     }
   };
-
-  const handleRealLogout = async () => {
-    await signOut(auth);
-    onLogout();
-  };
-
-  // --- LÓGICA DE CREACIÓN ---
 
   const handleCreate = () => {
-      if(newConsortium.name && newConsortium.address) {
-          onCreateConsortium({
-              id: crypto.randomUUID(),
-              name: newConsortium.name,
-              address: newConsortium.address,
-              cuit: newConsortium.cuit || '',
-              image: ''
-          });
-          setIsCreating(false);
-          setNewConsortium({ name: '', address: '', cuit: '' });
+      if(!newConsortium.name) return;
+      if (auth.currentUser) {
+          onCreateConsortium({ 
+              id: '', 
+              name: newConsortium.name, 
+              address: newConsortium.address, 
+              cuit: newConsortium.cuit 
+          }, auth.currentUser.uid);
+          setIsCreatingConsortium(false);
       }
-  }
+  };
 
-  return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-        
-        {step === 'login' && (
-           <div className="p-8">
-              <div className="text-center mb-8">
-                  <div className="inline-block p-3 bg-indigo-600 rounded-xl mb-4">
-                      <Building2 className="w-8 h-8 text-white" />
-                  </div>
-                  <h1 className="text-2xl font-bold text-slate-800">Gestión Consorcio</h1>
-                  <p className="text-slate-500">
-                      {isRegistering ? 'Crear Cuenta (Admin)' : 'Bienvenido al Sistema'}
-                  </p>
-              </div>
-
-              {error && (
-                <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center">
-                  <AlertCircle className="w-4 h-4 mr-2"/>
-                  {error}
-                </div>
-              )}
-
-              {!isRegistering ? (
-                <>
-                  <form onSubmit={handleRealLogin} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Email</label>
-                        <input 
-                            type="email" 
-                            autoComplete="username" // <--- AGREGAR ESTO
-                            className="..."
-                            placeholder="nombre@ejemplo.com"
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                              required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Contraseña</label>
-                        <input 
-                            type="password" 
-                            autoComplete="current-password" // <--- AGREGAR ESTO
-                            className="..."
-                            placeholder="••••••••"
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            required
-                        />
-                      </div>
-                      
-                      <button 
-                        type="submit" 
-                        disabled={loading}
-                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-colors shadow-lg shadow-indigo-200 flex justify-center items-center"
-                      >
-                          {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Iniciar Sesión'}
-                      </button>
-                  </form>
-
-                  <div className="mt-6 pt-6 border-t border-slate-100 text-center">
-                      <p className="text-sm text-slate-500 mb-3">¿Es tu primera vez aquí?</p>
-                      <button 
-                        onClick={() => setIsRegistering(true)}
-                        className="w-full py-2 text-indigo-600 text-sm font-medium hover:bg-indigo-50 rounded-lg transition-colors flex items-center justify-center border border-indigo-100"
-                      >
-                         <UserPlus className="w-4 h-4 mr-2" /> Registrarse como Administrador
-                      </button>
-                  </div>
-                </>
-              ) : (
-                <form onSubmit={handleRealRegistration} className="space-y-4 animate-fade-in">
-                    <div className="p-3 bg-indigo-50 text-indigo-800 text-xs rounded-lg mb-2">
-                        💡 Como es una instalación nueva, la primera cuenta que crees tendrá permisos para crear consorcios.
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
-                        <input 
-                            required
-                            type="text" 
-                            className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="Ej: Juan Perez"
-                            value={regName}
-                            onChange={e => setRegName(e.target.value)}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <input 
-                            required
-                            type="email" 
-                            className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="admin@consorcio.com"
-                            value={regEmail}
-                            onChange={e => setRegEmail(e.target.value)}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
-                        <input 
-                            required
-                            type="password" 
-                            className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="Mínimo 6 caracteres"
-                            value={regPassword}
-                            onChange={e => setRegPassword(e.target.value)}
-                        />
-                    </div>
-                    
-                    <button 
-                        type="submit" 
-                        disabled={loading}
-                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-md transition-colors mt-4 flex justify-center"
-                    >
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin"/> : 'Crear Cuenta e Ingresar'}
-                    </button>
-                    
-                    <button 
-                        type="button" 
-                        onClick={() => setIsRegistering(false)}
-                        className="w-full py-2 text-slate-500 hover:text-slate-700 text-sm font-medium flex items-center justify-center mt-2"
-                    >
-                        <LogIn className="w-4 h-4 mr-2" /> Volver al Login
-                    </button>
-                </form>
-              )}
-           </div>
-        )}
-
-        {step === 'select' && (
-            <div className="p-8 relative h-full flex flex-col">
-                <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold text-slate-800">Seleccione Consorcio</h2>
-                    <button onClick={handleRealLogout} className="text-slate-400 hover:text-red-500 flex items-center gap-1 text-sm font-medium" title="Cerrar Sesión">
-                        Salir <LogOut className="w-4 h-4" />
-                    </button>
-                </div>
+  // --- VISTA 1: LOGIN / REGISTRO ---
+  if (!isAuthenticated) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden w-full max-w-5xl flex flex-col md:flex-row h-[600px]">
                 
-                {!isCreating ? (
-                    <div className="space-y-3 overflow-y-auto max-h-[400px]">
-                        {consortiums.length === 0 && (
-                            <div className="text-center py-8 text-slate-400">
-                                <Building2 className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                                <p>No hay consorcios creados aún.</p>
+                {/* Brand Section */}
+                <div className="md:w-1/2 bg-slate-900 text-white p-12 flex flex-col justify-between relative">
+                    <div className="relative z-10">
+                        <div className="flex items-center gap-3 mb-8">
+                            <div className="p-2 bg-indigo-600 rounded-lg"><Building2 className="w-8 h-8"/></div>
+                            <span className="text-2xl font-bold tracking-tight">ConsorcioSimple</span>
+                        </div>
+                        <h1 className="text-4xl font-extrabold leading-tight mb-6">
+                            Gestión inteligente para comunidades modernas.
+                        </h1>
+                        <p className="text-slate-400 text-lg">
+                            Administra expensas, reservas, reclamos y comunicación en un solo lugar.
+                        </p>
+                    </div>
+                    <div className="text-xs text-slate-500 relative z-10">
+                        © 2024 Plataforma de Gestión
+                    </div>
+                    {/* Abstract Shapes */}
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 -translate-y-1/2 translate-x-1/2"></div>
+                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 translate-y-1/2 -translate-x-1/2"></div>
+                </div>
+
+                {/* Form Section */}
+                <div className="md:w-1/2 p-12 flex flex-col justify-center">
+                    <div className="w-full max-w-sm mx-auto">
+                        <h2 className="text-2xl font-bold text-slate-900 mb-2">
+                            {mode === 'LOGIN' ? 'Iniciar Sesión' : 'Crear Cuenta'}
+                        </h2>
+                        <p className="text-slate-500 mb-8">
+                            {mode === 'LOGIN' ? 'Accede a tu panel de control' : 'Comienza gratis hoy mismo'}
+                        </p>
+
+                        {error && (
+                            <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-lg flex items-center text-red-600 text-sm animate-pulse">
+                                <AlertCircle className="w-4 h-4 mr-2"/> {error}
                             </div>
                         )}
 
-                        {consortiums.map(c => (
-                            <button 
-                                key={c.id}
-                                onClick={() => onSelectConsortium(c)}
-                                className="w-full group bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 rounded-xl p-4 text-left transition-all flex items-center justify-between"
-                            >
-                                <div>
-                                    <h3 className="font-bold text-slate-800 group-hover:text-indigo-700">{c.name}</h3>
-                                    <p className="text-xs text-slate-500">{c.address}</p>
-                                    {c.cuit && <p className="text-[10px] text-slate-400 mt-1">CUIT: {c.cuit}</p>}
-                                </div>
-                                <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 transform group-hover:translate-x-1 transition-all" />
-                            </button>
-                        ))}
-                        
-                        {(userRole === 'ADMIN' || userRole === 'DEV') && (
-                            <button 
-                                onClick={() => setIsCreating(true)}
-                                className="w-full border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-4 flex items-center justify-center text-slate-500 hover:text-indigo-500 transition-colors mt-4"
-                            >
-                                <PlusCircle className="w-5 h-5 mr-2" />
-                                Crear Nuevo Consorcio
-                            </button>
-                        )}
-                    </div>
-                ) : (
-                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 animate-fade-in">
-                        <h3 className="font-bold text-slate-700 mb-3">Nuevo Edificio</h3>
-                        <div className="space-y-3">
-                            <input 
-                                type="text" 
-                                placeholder="Nombre del Consorcio"
-                                className="w-full p-2 border rounded text-sm"
-                                value={newConsortium.name}
-                                onChange={e => setNewConsortium({...newConsortium, name: e.target.value})}
-                            />
-                            <input 
-                                type="text" 
-                                placeholder="Dirección Completa"
-                                className="w-full p-2 border rounded text-sm"
-                                value={newConsortium.address}
-                                onChange={e => setNewConsortium({...newConsortium, address: e.target.value})}
-                            />
-                            <input 
-                                type="text" 
-                                placeholder="CUIT (Opcional)"
-                                className="w-full p-2 border rounded text-sm"
-                                value={newConsortium.cuit}
-                                onChange={e => setNewConsortium({...newConsortium, cuit: e.target.value})}
-                            />
-                            <div className="flex gap-2 pt-2">
-                                <button onClick={() => setIsCreating(false)} className="flex-1 py-2 text-slate-500 hover:bg-slate-200 rounded text-sm">Cancelar</button>
-                                <button onClick={handleCreate} className="flex-1 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700">Guardar</button>
+                        <form onSubmit={handleAuth} className="space-y-5">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Correo Electrónico</label>
+                                <input type="email" required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all" placeholder="nombre@empresa.com" value={email} onChange={e => setEmail(e.target.value)} />
                             </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
+                                <input type="password" required className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
+                            </div>
+                            <button type="submit" disabled={loading} className="w-full py-2.5 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all flex justify-center items-center shadow-lg shadow-slate-200">
+                                {loading ? <Loader2 className="animate-spin w-5 h-5"/> : (mode === 'LOGIN' ? 'Ingresar' : 'Registrarse')}
+                            </button>
+                        </form>
+
+                        <div className="mt-6 text-center pt-6 border-t border-slate-100">
+                            <p className="text-sm text-slate-500">
+                                {mode === 'LOGIN' ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?'}
+                                <button onClick={() => setMode(mode === 'LOGIN' ? 'REGISTER' : 'LOGIN')} className="ml-2 text-indigo-600 font-bold hover:underline">
+                                    {mode === 'LOGIN' ? 'Regístrate' : 'Inicia Sesión'}
+                                </button>
+                            </p>
                         </div>
                     </div>
-                )}
-                
-                <div className="mt-auto border-t border-slate-100 pt-4 text-center">
-                    <p className="text-xs text-slate-400">Conectado como: {userEmail}</p>
                 </div>
             </div>
-        )}
+        </div>
+      );
+  }
 
+  // --- VISTA 2: SELECCIÓN DE CONSORCIO ---
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl">
+          <div className="flex justify-between items-center mb-6">
+              <div>
+                  <h1 className="text-2xl font-bold text-slate-800">Mis Consorcios</h1>
+                  <p className="text-slate-500 text-sm">Selecciona una propiedad para gestionar</p>
+              </div>
+              <div className="flex items-center gap-4">
+                  <span className="text-sm text-slate-500 hidden md:block">{userEmail}</span>
+                  <button onClick={onLogout} className="text-slate-400 hover:text-red-500 transition-colors" title="Salir">
+                      <LogOut className="w-5 h-5"/>
+                  </button>
+              </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Tarjetas de Consorcios */}
+              {consortiums.map(c => (
+                  <button 
+                      key={c.id} 
+                      onClick={() => onSelectConsortium(c)}
+                      className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md hover:border-indigo-500 transition-all group text-left relative overflow-hidden"
+                  >
+                      <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <ArrowRight className="w-5 h-5 text-indigo-500"/>
+                      </div>
+                      <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-indigo-50 transition-colors">
+                          <Building2 className="w-6 h-6 text-slate-600 group-hover:text-indigo-600"/>
+                      </div>
+                      <h3 className="font-bold text-lg text-slate-800 mb-1 truncate">{c.name}</h3>
+                      <p className="text-sm text-slate-500 truncate">{c.address || 'Sin dirección'}</p>
+                  </button>
+              ))}
+
+              {/* Botón Crear Nuevo */}
+              <button 
+                  onClick={() => setIsCreatingConsortium(true)}
+                  className="bg-slate-100 p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all flex flex-col items-center justify-center text-center min-h-[160px]"
+              >
+                  <PlusCircle className="w-8 h-8 text-slate-400 mb-2"/>
+                  <span className="font-bold text-slate-600">Crear Nuevo Consorcio</span>
+              </button>
+          </div>
       </div>
+
+      {/* Modal Crear Consorcio */}
+      {isCreatingConsortium && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
+                  <h3 className="text-xl font-bold text-slate-800 mb-4">Nuevo Edificio</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre del Consorcio</label>
+                          <input className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Ej: Edificio Alvear" autoFocus value={newConsortium.name} onChange={e => setNewConsortium({...newConsortium, name: e.target.value})} />
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Dirección</label>
+                          <input className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Calle y Altura" value={newConsortium.address} onChange={e => setNewConsortium({...newConsortium, address: e.target.value})} />
+                      </div>
+                      <div className="flex gap-3 pt-2">
+                          <button onClick={() => setIsCreatingConsortium(false)} className="flex-1 py-2 text-slate-500 font-medium hover:bg-slate-100 rounded-lg">Cancelar</button>
+                          <button onClick={handleCreate} className="flex-1 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800">Crear</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

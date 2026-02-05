@@ -13,19 +13,24 @@ import UserPortal from './components/UserPortal';
 import SettingsView from './components/SettingsView';
 import AnnouncementsView from './components/AnnouncementsView';
 import MaintenanceView from './components/MaintenanceView';
-import AmenitiesView from './components/AmenitiesView'; // <--- NUEVO
-import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking } from './types';
+import AmenitiesView from './components/AmenitiesView'; 
+import ProfileView from './components/ProfileView';
+import DocumentsView from './components/DocumentsView'; 
+import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument } from './types';
+import { auth } from './src/config/firebase'; 
 import { 
-    getUnits, getExpenses, getHistory, getConsortiums, createConsortium, 
+    getUnits, getExpenses, getHistory, createConsortium, 
     saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment,
     getAnnouncements, addAnnouncement, deleteAnnouncement,
     getDebtAdjustments, addDebtAdjustment, deleteDebtAdjustment,
     getMaintenanceRequests, addMaintenanceRequest, updateMaintenanceRequest, deleteMaintenanceRequest,
-    getAmenities, addAmenity, deleteAmenity, getBookings, addBooking, deleteBooking // <--- NUEVO
+    getAmenities, addAmenity, deleteAmenity, getBookings, addBooking, deleteBooking,
+    getAdminConsortiums, getUserConsortiums, 
+    getDocuments, addDocument, deleteDocument
 } from './services/firestoreService';
 
 function App() {
-  const [user, setUser] = useState<{email: string, role: UserRole} | null>(null);
+  const [user, setUser] = useState<{email: string, role: UserRole, uid: string} | null>(null);
   const [consortium, setConsortium] = useState<Consortium | null>(null);
   const [consortiumList, setConsortiumList] = useState<Consortium[]>([]);
   
@@ -36,21 +41,57 @@ function App() {
   const [debtAdjustments, setDebtAdjustments] = useState<DebtAdjustment[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]); 
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
-  const [amenities, setAmenities] = useState<Amenity[]>([]); // <--- NUEVO
-  const [bookings, setBookings] = useState<Booking[]>([]); // <--- NUEVO
+  const [amenities, setAmenities] = useState<Amenity[]>([]); 
+  const [bookings, setBookings] = useState<Booking[]>([]); 
+  const [documents, setDocuments] = useState<ConsortiumDocument[]>([]); 
   
   const [settings, setSettings] = useState<ConsortiumSettings>({
-      reserveFundBalance: 0, monthlyReserveContributionPercentage: 5, bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: ''
+      reserveFundBalance: 0, monthlyReserveContributionPercentage: 5, 
+      bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: '',
+      address: '', cuit: '', adminName: ''
   });
 
   const [view, setView] = useState<ViewState>('dashboard');
   const [loading, setLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  useEffect(() => { getConsortiums().then(setConsortiumList); }, []);
-
+  // 1. Escuchar Auth y cargar lista de consorcios
   useEffect(() => {
-    if (consortium) {
+      const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
+          if (firebaseUser && firebaseUser.email) {
+              setUser({ email: firebaseUser.email, role: 'ADMIN', uid: firebaseUser.uid });
+              const adminList = await getAdminConsortiums(firebaseUser.uid);
+              const userList = await getUserConsortiums(firebaseUser.email);
+              
+              // Unificamos listas y eliminamos duplicados
+              const combinedMap = new Map();
+              [...adminList, ...userList].forEach(c => combinedMap.set(c.id, c));
+              setConsortiumList(Array.from(combinedMap.values()));
+          } else {
+              setUser(null);
+              setConsortium(null);
+          }
+      });
+      return () => unsubscribe();
+  }, []);
+
+  // 2. NUEVO: Recuperar sesión del consorcio al recargar la página
+  useEffect(() => {
+      const savedConsortiumId = localStorage.getItem('selectedConsortiumId');
+      // Solo intentamos recuperar si ya tenemos la lista de consorcios y no hay uno seleccionado
+      if (savedConsortiumId && consortiumList.length > 0 && !consortium) {
+          const found = consortiumList.find(c => c.id === savedConsortiumId);
+          if (found) {
+              console.log("Restaurando sesión de consorcio:", found.name);
+              setConsortium(found);
+          }
+      }
+  }, [consortiumList]); // Se ejecuta cada vez que cargan los consorcios disponibles
+
+  // 3. Cargar datos del consorcio seleccionado (BLINDADO)
+  useEffect(() => {
+    // Verificamos que consortium exista Y que tenga ID válido antes de llamar a Firebase
+    if (consortium && consortium.id) {
         setLoading(true);
         Promise.all([
             getUnits(consortium.id), 
@@ -61,10 +102,11 @@ function App() {
             getAnnouncements(consortium.id),
             getDebtAdjustments(consortium.id),
             getMaintenanceRequests(consortium.id),
-            getAmenities(consortium.id), // <--- Load
-            getBookings(consortium.id) // <--- Load
+            getAmenities(consortium.id), 
+            getBookings(consortium.id),
+            getDocuments(consortium.id)
         ])
-        .then(([u, e, h, s, p, a, d, m, am, b]) => { 
+        .then(([u, e, h, s, p, a, d, m, am, b, docs]) => { 
             setUnits(u); 
             setExpenses(e); 
             setHistory(h); 
@@ -75,11 +117,17 @@ function App() {
             setMaintenanceRequests(m);
             setAmenities(am);
             setBookings(b);
+            setDocuments(docs);
             setLoading(false); 
+        })
+        .catch(err => {
+            console.error("Error cargando datos:", err);
+            setLoading(false);
         });
     }
   }, [consortium]);
 
+  // 4. Determinar Rol (Admin vs User)
   useEffect(() => {
       if (user && units.length > 0) {
           const ownerUnit = units.find(u => u.linkedEmail === user.email);
@@ -90,24 +138,31 @@ function App() {
       }
   }, [units, user?.email]);
 
-  const menuBadges = useMemo(() => {
-      const badges: { [key: string]: number } = {};
-      if (user?.role === 'ADMIN') {
-          const pendingCount = payments.filter(p => p.status === 'PENDING').length;
-          if (pendingCount > 0) badges['collections'] = pendingCount;
-          
-          const pendingMaintenance = maintenanceRequests.filter(m => m.status === 'PENDING').length;
-          if (pendingMaintenance > 0) badges['maintenance'] = pendingMaintenance;
-      }
-      const urgentCount = announcements.filter(a => a.priority === 'HIGH').length;
-      if (urgentCount > 0) badges['announcements'] = urgentCount;
-      return badges;
-  }, [payments, announcements, maintenanceRequests, user]);
+  // --- NUEVOS HANDLERS DE SELECCIÓN CON MEMORIA ---
+  const handleSelectConsortium = (c: Consortium) => {
+      localStorage.setItem('selectedConsortiumId', c.id); // Guardamos en memoria
+      setConsortium(c);
+  };
 
+  const handleSwitchConsortium = () => {
+      localStorage.removeItem('selectedConsortiumId'); // Borramos al salir
+      setConsortium(null);
+  };
 
-  const handleLogin = (email: string, role: UserRole) => {
-    setUser({ email, role });
-    setView('dashboard'); 
+  const handleLogout = () => {
+      localStorage.removeItem('selectedConsortiumId'); // Borramos al cerrar sesión
+      auth.signOut();
+  };
+
+  // --- RESTO DE HANDLERS ---
+
+  const handleCreateConsortium = async (c: Consortium, userId: string) => {
+      const newC = await createConsortium(c, userId);
+      setConsortiumList([...consortiumList, newC as Consortium]);
+  };
+
+  const handleLoginSuccess = (email: string, role: UserRole) => {
+      setView('dashboard');
   };
 
   const handleCloseMonth = async (record: SettlementRecord) => {
@@ -197,7 +252,6 @@ function App() {
       setMaintenanceRequests(maintenanceRequests.filter(m => m.id !== id));
   };
 
-  // --- HANDLERS RESERVAS ---
   const handleAddAmenity = async (data: Omit<Amenity, 'id'>) => {
       if(!consortium) return;
       const created = await addAmenity(consortium.id, data);
@@ -222,19 +276,63 @@ function App() {
       setBookings(bookings.filter(b => b.id !== id));
   };
 
-  if (!user || !consortium) {
+  const handleAddDocument = async (data: Omit<ConsortiumDocument, 'id'>) => {
+      if(!consortium) return;
+      const created = await addDocument(consortium.id, data);
+      setDocuments([created as ConsortiumDocument, ...documents]);
+  };
+
+  const handleDeleteDocument = async (id: string) => {
+      if(!consortium) return;
+      await deleteDocument(consortium.id, id);
+      setDocuments(documents.filter(d => d.id !== id));
+  };
+
+  const menuBadges = useMemo(() => {
+      const badges: { [key: string]: number } = {};
+      if (user?.role === 'ADMIN') {
+          const pendingCount = payments.filter(p => p.status === 'PENDING').length;
+          if (pendingCount > 0) badges['collections'] = pendingCount;
+          const pendingMaintenance = maintenanceRequests.filter(m => m.status === 'PENDING').length;
+          if (pendingMaintenance > 0) badges['maintenance'] = pendingMaintenance;
+      }
+      const urgentCount = announcements.filter(a => a.priority === 'HIGH').length;
+      if (urgentCount > 0) badges['announcements'] = urgentCount;
+      return badges;
+  }, [payments, announcements, maintenanceRequests, user]);
+
+  // --- VISTAS ---
+
+  // Si no hay usuario, o hay usuario pero no consorcio seleccionado (y es ADMIN, que puede elegir)
+  if (!user || (!consortium && user.role !== 'ADMIN')) {
     return (
       <AuthView 
         isAuthenticated={!!user} 
-        onLoginSuccess={handleLogin}
-        onSelectConsortium={setConsortium}
+        onLoginSuccess={handleLoginSuccess}
+        onSelectConsortium={handleSelectConsortium} // <--- USAMOS EL NUEVO HANDLER
         consortiums={consortiumList}
-        onCreateConsortium={async (c) => { const s = await createConsortium(c); setConsortiumList([...consortiumList, s as Consortium]); }}
-        onLogout={() => setUser(null)}
+        onCreateConsortium={handleCreateConsortium}
+        onLogout={handleLogout} // <--- USAMOS EL NUEVO LOGOUT
         userRole={user?.role || 'ADMIN'}
         userEmail={user?.email || ''}
       />
     );
+  }
+  
+  // Caso de seguridad extra por si falla la carga
+  if (!consortium) {
+       return (
+        <AuthView 
+            isAuthenticated={!!user} 
+            onLoginSuccess={handleLoginSuccess}
+            onSelectConsortium={handleSelectConsortium} // <--- USAMOS EL NUEVO HANDLER
+            consortiums={consortiumList}
+            onCreateConsortium={handleCreateConsortium}
+            onLogout={handleLogout}
+            userRole={user?.role || 'ADMIN'}
+            userEmail={user?.email || ''}
+        />
+       );
   }
 
   return (
@@ -251,8 +349,8 @@ function App() {
         currentView={view} 
         onChangeView={setView} 
         consortiumName={consortium.name} 
-        onSwitchConsortium={() => setConsortium(null)} 
-        onLogout={() => setUser(null)} 
+        onSwitchConsortium={handleSwitchConsortium} // <--- USAMOS EL NUEVO HANDLER
+        onLogout={handleLogout} 
         userRole={user.role}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -270,7 +368,21 @@ function App() {
           )}
 
           {!loading && view === 'announcements' && (
-             <AnnouncementsView announcements={announcements} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />
+             <AnnouncementsView 
+                announcements={announcements} 
+                units={units} 
+                onAdd={handleAddAnnouncement} 
+                onDelete={handleDeleteAnnouncement} 
+             />
+          )}
+
+          {!loading && view === 'documents' && (
+             <DocumentsView 
+                documents={documents}
+                userRole={user.role}
+                onAdd={handleAddDocument}
+                onDelete={handleDeleteDocument}
+             />
           )}
 
           {!loading && view === 'maintenance' && (
@@ -311,6 +423,7 @@ function App() {
                 updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})}
                 onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})}
                 onCloseMonth={handleCloseMonth}
+                onChangeView={setView}
             />
           )}
 
@@ -320,6 +433,9 @@ function App() {
             <UserPortal 
                 userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} settings={settings} announcements={announcements}
                 debtAdjustments={debtAdjustments} 
+                myBookings={bookings} 
+                myTickets={maintenanceRequests} 
+                documents={documents} 
                 onReportPayment={handleReportPayment} 
             />
           )}
@@ -339,6 +455,10 @@ function App() {
           
           {!loading && view === 'settings' && (
              <SettingsView currentSettings={settings} onSave={handleUpdateSettings} />
+          )}
+          
+          {!loading && view === 'profile' && (
+             <ProfileView userEmail={user.email} userRole={user.role} onLogout={handleLogout} />
           )}
         </div>
       </main>

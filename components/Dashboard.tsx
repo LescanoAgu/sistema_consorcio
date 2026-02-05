@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { Unit, Expense, AppSettings, ExpenseDistributionType, ReserveTransaction, UserRole, Payment } from '../types';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
-import { TrendingUp, Users, Wallet, X, ArrowDownRight, ArrowUpRight, History, Trash2, AlertTriangle, CheckSquare, Square, DollarSign } from 'lucide-react';
-import { clearCollection } from '../services/firestoreService';
+import { TrendingUp, Users, Wallet, X, History, Trash2, AlertTriangle, CheckSquare, Square, DollarSign, Wrench } from 'lucide-react';
+// Importamos deleteUnit para la herramienta de reparación
+import { clearCollection, deleteUnit } from '../services/firestoreService';
 
 interface DashboardProps {
   units: Unit[];
   expenses: Expense[];
-  payments: Payment[]; // <--- NUEVA PROP para calcular recaudación
+  payments: Payment[];
   settings: AppSettings;
   reserveHistory?: ReserveTransaction[];
   userRole: UserRole;
@@ -20,22 +21,21 @@ const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f59e0b', '#10b981', '#3b82f6'
 const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settings, reserveHistory = [], userRole, consortiumId, onDataReset }) => {
   const [showReserveDetail, setShowReserveDetail] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
   
-  // Estado para las opciones de borrado
-  const [deleteOptions, setDeleteOptions] = useState({ expenses: false, payments: false, history: false, debtors: false });
+  const [deleteOptions, setDeleteOptions] = useState({ expenses: false, payments: false, history: false });
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // --- CÁLCULOS PARA GRÁFICOS ---
+  // --- CÁLCULOS ---
   const totalExpenses = expenses.reduce((acc, curr) => 
     curr.distributionType !== ExpenseDistributionType.FROM_RESERVE ? acc + curr.amount : acc
   , 0);
 
-  const currentMonthISO = new Date().toISOString().slice(0, 7); // "2023-10"
+  const currentMonthISO = new Date().toISOString().slice(0, 7);
   const totalCollected = payments
     .filter(p => p.status === 'APPROVED' && p.date.startsWith(currentMonthISO))
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  // Datos para Gráfico de Torta (Gastos por Rubro)
   const expensesByCategory = useMemo(() => {
       const grouped = expenses.reduce((acc, curr) => {
           const cat = curr.itemCategory || 'Varios';
@@ -44,20 +44,53 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
           return acc;
       }, {} as Record<string, number>);
 
-      return Object.keys(grouped).map(key => ({
-          name: key,
-          value: grouped[key]
-      })).sort((a, b) => b.value - a.value); // Ordenar mayor a menor
+      return Object.keys(grouped).map(key => ({ name: key, value: grouped[key] })).sort((a, b) => b.value - a.value);
   }, [expenses]);
 
-  // Datos para Gráfico de Barras (Balance del Mes)
-  const balanceData = [
-      { name: 'Balance Mensual', Gastos: totalExpenses, Recaudado: totalCollected }
-  ];
+  const balanceData = [{ name: 'Balance Mensual', Gastos: totalExpenses, Recaudado: totalCollected }];
 
-  // --- LÓGICA DE BORRADO ---
+  // --- HERRAMIENTA: REPARAR DUPLICADOS ---
+  const handleFixDuplicates = async () => {
+      if (!confirm("⚠️ ¿Escanear y eliminar unidades duplicadas?\n\nEl sistema buscará unidades con el mismo número y dejará solo una. Esta acción no se puede deshacer.")) return;
+      
+      setIsCleaning(true);
+      try {
+          const uniqueMap = new Map<string, string>(); // Mapa: Numero -> ID Original
+          const duplicates: string[] = [];
+
+          units.forEach(u => {
+              const key = u.unitNumber.trim().toUpperCase();
+              if (uniqueMap.has(key)) {
+                  // Ya existe una con este número, esta es duplicada
+                  duplicates.push(u.id);
+              } else {
+                  // Es la primera que vemos, la guardamos como original
+                  uniqueMap.set(key, u.id);
+              }
+          });
+
+          if (duplicates.length === 0) {
+              alert("¡La base de datos está limpia! No se encontraron duplicados.");
+          } else {
+              // Borrar duplicados
+              let deletedCount = 0;
+              for (const id of duplicates) {
+                  await deleteUnit(consortiumId, id);
+                  deletedCount++;
+              }
+              alert(`✅ Limpieza completada.\nSe eliminaron ${deletedCount} unidades duplicadas.`);
+              onDataReset(); // Recargar datos
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Error durante la limpieza.");
+      } finally {
+          setIsCleaning(false);
+      }
+  };
+
   const handleDelete = async () => {
-      if (!deleteOptions.expenses && !deleteOptions.payments && !deleteOptions.history && !deleteOptions.debtors) return alert("Selecciona una opción.");
+      if (!deleteOptions.expenses && !deleteOptions.payments && !deleteOptions.history) return alert("Selecciona una opción.");
       if (!confirm("⚠️ ¿ESTÁS SEGURO? Acción irreversible.")) return;
 
       setIsDeleting(true);
@@ -65,14 +98,11 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
           if (deleteOptions.expenses) await clearCollection(consortiumId, 'expenses');
           if (deleteOptions.payments) await clearCollection(consortiumId, 'payments');
           if (deleteOptions.history) await clearCollection(consortiumId, 'history');
-          // if (deleteOptions.debtors) await clearCollection(consortiumId, 'debt_adjustments');
           
-          alert("Limpieza completada.");
+          alert("Datos eliminados correctamente.");
           setShowDeleteModal(false);
-          setDeleteOptions({ expenses: false, payments: false, history: false, debtors: false });
           onDataReset();
       } catch (error) {
-          console.error(error);
           alert("Error al eliminar datos.");
       } finally {
           setIsDeleting(false);
@@ -92,9 +122,21 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
         </div>
         
         {userRole === 'ADMIN' && (
-            <button onClick={() => setShowDeleteModal(true)} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-200 hover:bg-red-100 transition-colors text-sm font-bold">
-                <Trash2 className="w-4 h-4" /> Herramientas de Limpieza
-            </button>
+            <div className="flex gap-2">
+                {/* BOTÓN REPARADOR */}
+                <button 
+                    onClick={handleFixDuplicates} 
+                    disabled={isCleaning}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors text-sm font-bold disabled:opacity-50"
+                >
+                    <Wrench className={`w-4 h-4 ${isCleaning ? 'animate-spin' : ''}`} /> 
+                    {isCleaning ? 'Reparando...' : 'Reparar Duplicados'}
+                </button>
+
+                <button onClick={() => setShowDeleteModal(true)} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-200 hover:bg-red-100 transition-colors text-sm font-bold">
+                    <Trash2 className="w-4 h-4" /> Zona de Peligro
+                </button>
+            </div>
         )}
       </div>
 
@@ -137,28 +179,16 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
         </div>
       </div>
 
-      {/* GRÁFICOS (NUEVO) */}
+      {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          
-          {/* Gráfico 1: Distribución de Gastos */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 min-h-[300px]">
               <h3 className="font-bold text-slate-700 mb-4">Distribución de Gastos</h3>
               {expenses.length > 0 ? (
                   <div className="h-[250px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
-                              <Pie
-                                  data={expensesByCategory}
-                                  cx="50%"
-                                  cy="50%"
-                                  innerRadius={60}
-                                  outerRadius={80}
-                                  paddingAngle={5}
-                                  dataKey="value"
-                              >
-                                  {expensesByCategory.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                  ))}
+                              <Pie data={expensesByCategory} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                                  {expensesByCategory.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}
                               </Pie>
                               <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
                               <Legend />
@@ -166,15 +196,12 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
                       </ResponsiveContainer>
                   </div>
               ) : (
-                  <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                      No hay gastos registrados para graficar.
-                  </div>
+                  <div className="h-full flex items-center justify-center text-slate-400 text-sm">No hay gastos registrados.</div>
               )}
           </div>
 
-          {/* Gráfico 2: Balance Gastos vs Recaudación */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 min-h-[300px]">
-              <h3 className="font-bold text-slate-700 mb-4">Balance Financiero (Mes Actual)</h3>
+              <h3 className="font-bold text-slate-700 mb-4">Balance Financiero</h3>
               <div className="h-[250px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={balanceData}>
@@ -191,7 +218,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
           </div>
       </div>
 
-      {/* MODAL DE BORRADO (ZONA DE PELIGRO) */}
+      {/* MODAL DE BORRADO */}
       {showDeleteModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">
@@ -200,10 +227,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
                       <button onClick={() => setShowDeleteModal(false)}><X className="w-5 h-5 hover:opacity-80"/></button>
                   </div>
                   <div className="p-6">
-                      <p className="text-slate-600 mb-4 text-sm">
-                          Selecciona qué datos deseas eliminar permanentemente. <strong>Irreversible.</strong>
-                      </p>
-                      
+                      <p className="text-slate-600 mb-4 text-sm">Selecciona qué datos deseas eliminar permanentemente.</p>
                       <div className="space-y-3 mb-6">
                           <div onClick={() => toggleOption('expenses')} className={`p-3 rounded-lg border flex items-center gap-3 cursor-pointer ${deleteOptions.expenses ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
                               {deleteOptions.expenses ? <CheckSquare className="w-5 h-5 text-red-600"/> : <Square className="w-5 h-5 text-slate-400"/>}
@@ -218,26 +242,11 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, settin
                               <div><p className="font-bold text-slate-700">Historial Liquidaciones</p></div>
                           </div>
                       </div>
-
                       <div className="flex gap-3">
                           <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-lg">Cancelar</button>
-                          <button onClick={handleDelete} disabled={isDeleting} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 shadow disabled:opacity-50">
-                              {isDeleting ? 'Borrando...' : 'ELIMINAR'}
-                          </button>
+                          <button onClick={handleDelete} disabled={isDeleting} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 shadow disabled:opacity-50">{isDeleting ? 'Borrando...' : 'ELIMINAR'}</button>
                       </div>
                   </div>
-              </div>
-          </div>
-      )}
-
-      {/* RESERVE DETAIL */}
-      {showReserveDetail && (
-          <div className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden animate-fade-in">
-              <div className="bg-emerald-50/50 p-4 border-b border-emerald-100">
-                  <h4 className="font-bold text-emerald-800 flex items-center gap-2"><History className="w-4 h-4"/> Historial del Fondo</h4>
-              </div>
-              <div className="p-4 text-center text-slate-400">
-                  {reserveHistory.length > 0 ? <p>Tabla de historial...</p> : <p>No hay movimientos registrados.</p>}
               </div>
           </div>
       )}
