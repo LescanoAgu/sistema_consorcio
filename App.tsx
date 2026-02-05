@@ -55,15 +55,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // 1. Escuchar Auth y cargar lista de consorcios
+  // 1. Auth & Load Consortiums
   useEffect(() => {
       const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
           if (firebaseUser && firebaseUser.email) {
               setUser({ email: firebaseUser.email, role: 'ADMIN', uid: firebaseUser.uid });
               const adminList = await getAdminConsortiums(firebaseUser.uid);
               const userList = await getUserConsortiums(firebaseUser.email);
-              
-              // Unificamos listas y eliminamos duplicados
               const combinedMap = new Map();
               [...adminList, ...userList].forEach(c => combinedMap.set(c.id, c));
               setConsortiumList(Array.from(combinedMap.values()));
@@ -75,22 +73,17 @@ function App() {
       return () => unsubscribe();
   }, []);
 
-  // 2. NUEVO: Recuperar sesión del consorcio al recargar la página
+  // 2. Persistencia
   useEffect(() => {
       const savedConsortiumId = localStorage.getItem('selectedConsortiumId');
-      // Solo intentamos recuperar si ya tenemos la lista de consorcios y no hay uno seleccionado
       if (savedConsortiumId && consortiumList.length > 0 && !consortium) {
           const found = consortiumList.find(c => c.id === savedConsortiumId);
-          if (found) {
-              console.log("Restaurando sesión de consorcio:", found.name);
-              setConsortium(found);
-          }
+          if (found) setConsortium(found);
       }
-  }, [consortiumList]); // Se ejecuta cada vez que cargan los consorcios disponibles
+  }, [consortiumList]);
 
-  // 3. Cargar datos del consorcio seleccionado (BLINDADO)
+  // 3. Cargar datos
   useEffect(() => {
-    // Verificamos que consortium exista Y que tenga ID válido antes de llamar a Firebase
     if (consortium && consortium.id) {
         setLoading(true);
         Promise.all([
@@ -127,7 +120,7 @@ function App() {
     }
   }, [consortium]);
 
-  // 4. Determinar Rol (Admin vs User)
+  // 4. Rol
   useEffect(() => {
       if (user && units.length > 0) {
           const ownerUnit = units.find(u => u.linkedEmail === user.email);
@@ -138,33 +131,24 @@ function App() {
       }
   }, [units, user?.email]);
 
-  // --- NUEVOS HANDLERS DE SELECCIÓN CON MEMORIA ---
+  // Handlers
   const handleSelectConsortium = (c: Consortium) => {
-      localStorage.setItem('selectedConsortiumId', c.id); // Guardamos en memoria
+      localStorage.setItem('selectedConsortiumId', c.id);
       setConsortium(c);
   };
-
   const handleSwitchConsortium = () => {
-      localStorage.removeItem('selectedConsortiumId'); // Borramos al salir
+      localStorage.removeItem('selectedConsortiumId');
       setConsortium(null);
   };
-
   const handleLogout = () => {
-      localStorage.removeItem('selectedConsortiumId'); // Borramos al cerrar sesión
+      localStorage.removeItem('selectedConsortiumId');
       auth.signOut();
   };
-
-  // --- RESTO DE HANDLERS ---
-
   const handleCreateConsortium = async (c: Consortium, userId: string) => {
       const newC = await createConsortium(c, userId);
       setConsortiumList([...consortiumList, newC as Consortium]);
   };
-
-  const handleLoginSuccess = (email: string, role: UserRole) => {
-      setView('dashboard');
-  };
-
+  const handleLoginSuccess = () => setView('dashboard');
   const handleCloseMonth = async (record: SettlementRecord) => {
     if (!consortium) return;
     try {
@@ -176,112 +160,94 @@ function App() {
         setView('history');
     } catch (e) { alert("Error al cerrar."); }
   };
-
   const handleUpdateSettings = async (newSettings: ConsortiumSettings) => {
       if(!consortium) return;
       await saveSettings(consortium.id, newSettings);
       setSettings(newSettings);
   };
-
-  const handleReportPayment = async (data: { amount: number, date: string, method: 'Transferencia' | 'Efectivo' | 'Cheque', notes: string, file: File | null }) => {
+  const handleReportPayment = async (data: any) => {
       if(!consortium || !user) return;
-      const myUnit = units.find(u => u.linkedEmail === user.email) || units.find(u => u.ownerName === 'Usuario Demo');
-      if (!myUnit) { alert("Sin unidad asignada."); return; }
-
+      // Nota: En UserPortal multi-unit, pasamos la unidad seleccionada en data, aquí simplificamos buscando la primera por compatibilidad
+      // Idealmente UserPortal debería pasar unitId. Por ahora mantenemos compatibilidad.
+      const myUnit = units.find(u => u.id === data.unitId) || units.find(u => u.linkedEmail === user.email);
+      if (!myUnit) { alert("Error de unidad."); return; }
       let attachmentUrl = '';
       if (data.file) attachmentUrl = await uploadPaymentReceipt(data.file);
-
-      const newPayment: Omit<Payment, 'id'> = {
-          unitId: myUnit.id, amount: data.amount, date: data.date, method: data.method, notes: data.notes, attachmentUrl, status: 'PENDING'
-      };
+      const newPayment = { unitId: myUnit.id, amount: data.amount, date: data.date, method: data.method, notes: data.notes, attachmentUrl, status: 'PENDING' as const };
       const created = await createPayment(consortium.id, newPayment);
       setPayments([created as Payment, ...payments]);
   };
-
   const handleAdminAddPayment = async (paymentData: Omit<Payment, 'id'>) => {
       if(!consortium) return;
       const created = await createPayment(consortium.id, paymentData);
       setPayments([created as Payment, ...payments]);
   };
-
   const handlePaymentStatusChange = async (id: string, newStatus: 'APPROVED' | 'REJECTED') => {
       if(!consortium) return;
       await updatePayment(consortium.id, id, { status: newStatus });
       setPayments(payments.map(p => p.id === id ? { ...p, status: newStatus } : p));
   };
-
-  const handleAddAnnouncement = async (data: Omit<Announcement, 'id'>) => {
+  // (Resto de handlers Add/Delete announcements, etc. se mantienen igual, omitidos para brevedad, copiar del anterior si faltan)
+  const handleAddAnnouncement = async (data: any) => {
       if(!consortium) return;
       const created = await addAnnouncement(consortium.id, data);
       setAnnouncements([created as Announcement, ...announcements]);
   };
-
   const handleDeleteAnnouncement = async (id: string) => {
       if(!consortium) return;
       await deleteAnnouncement(consortium.id, id);
       setAnnouncements(announcements.filter(a => a.id !== id));
   };
-
-  const handleAddDebtAdjustment = async (data: Omit<DebtAdjustment, 'id'>) => {
+  const handleAddDebtAdjustment = async (data: any) => {
       if(!consortium) return;
       const created = await addDebtAdjustment(consortium.id, data);
       setDebtAdjustments([created as DebtAdjustment, ...debtAdjustments]);
   };
-
   const handleDeleteDebtAdjustment = async (id: string) => {
       if(!consortium) return;
       await deleteDebtAdjustment(consortium.id, id);
       setDebtAdjustments(debtAdjustments.filter(d => d.id !== id));
   };
-
-  const handleAddMaintenance = async (data: Omit<MaintenanceRequest, 'id'>) => {
+  const handleAddMaintenance = async (data: any) => {
       if(!consortium) return;
       const created = await addMaintenanceRequest(consortium.id, data);
       setMaintenanceRequests([created as MaintenanceRequest, ...maintenanceRequests]);
   };
-
-  const handleUpdateMaintenance = async (id: string, updates: Partial<MaintenanceRequest>) => {
+  const handleUpdateMaintenance = async (id: string, updates: any) => {
       if(!consortium) return;
       await updateMaintenanceRequest(consortium.id, id, updates);
       setMaintenanceRequests(maintenanceRequests.map(m => m.id === id ? { ...m, ...updates } : m));
   };
-
   const handleDeleteMaintenance = async (id: string) => {
       if(!consortium) return;
       await deleteMaintenanceRequest(consortium.id, id);
       setMaintenanceRequests(maintenanceRequests.filter(m => m.id !== id));
   };
-
-  const handleAddAmenity = async (data: Omit<Amenity, 'id'>) => {
+  const handleAddAmenity = async (data: any) => {
       if(!consortium) return;
       const created = await addAmenity(consortium.id, data);
       setAmenities([...amenities, created as Amenity]);
   };
-
   const handleDeleteAmenity = async (id: string) => {
       if(!consortium) return;
       await deleteAmenity(consortium.id, id);
       setAmenities(amenities.filter(a => a.id !== id));
   };
-
-  const handleAddBooking = async (data: Omit<Booking, 'id'>) => {
+  const handleAddBooking = async (data: any) => {
       if(!consortium) return;
       const created = await addBooking(consortium.id, data);
       setBookings([created as Booking, ...bookings]);
   };
-
   const handleDeleteBooking = async (id: string) => {
       if(!consortium) return;
       await deleteBooking(consortium.id, id);
       setBookings(bookings.filter(b => b.id !== id));
   };
-
-  const handleAddDocument = async (data: Omit<ConsortiumDocument, 'id'>) => {
+  const handleAddDocument = async (data: any) => {
       if(!consortium) return;
       const created = await addDocument(consortium.id, data);
       setDocuments([created as ConsortiumDocument, ...documents]);
   };
-
   const handleDeleteDocument = async (id: string) => {
       if(!consortium) return;
       await deleteDocument(consortium.id, id);
@@ -301,31 +267,27 @@ function App() {
       return badges;
   }, [payments, announcements, maintenanceRequests, user]);
 
-  // --- VISTAS ---
-
-  // Si no hay usuario, o hay usuario pero no consorcio seleccionado (y es ADMIN, que puede elegir)
   if (!user || (!consortium && user.role !== 'ADMIN')) {
     return (
       <AuthView 
         isAuthenticated={!!user} 
         onLoginSuccess={handleLoginSuccess}
-        onSelectConsortium={handleSelectConsortium} // <--- USAMOS EL NUEVO HANDLER
+        onSelectConsortium={handleSelectConsortium}
         consortiums={consortiumList}
         onCreateConsortium={handleCreateConsortium}
-        onLogout={handleLogout} // <--- USAMOS EL NUEVO LOGOUT
+        onLogout={handleLogout}
         userRole={user?.role || 'ADMIN'}
         userEmail={user?.email || ''}
       />
     );
   }
   
-  // Caso de seguridad extra por si falla la carga
   if (!consortium) {
        return (
         <AuthView 
             isAuthenticated={!!user} 
             onLoginSuccess={handleLoginSuccess}
-            onSelectConsortium={handleSelectConsortium} // <--- USAMOS EL NUEVO HANDLER
+            onSelectConsortium={handleSelectConsortium}
             consortiums={consortiumList}
             onCreateConsortium={handleCreateConsortium}
             onLogout={handleLogout}
@@ -349,7 +311,7 @@ function App() {
         currentView={view} 
         onChangeView={setView} 
         consortiumName={consortium.name} 
-        onSwitchConsortium={handleSwitchConsortium} // <--- USAMOS EL NUEVO HANDLER
+        onSwitchConsortium={handleSwitchConsortium}
         onLogout={handleLogout} 
         userRole={user.role}
         isOpen={isSidebarOpen}
@@ -367,71 +329,26 @@ function App() {
             />
           )}
 
-          {!loading && view === 'announcements' && (
-             <AnnouncementsView 
-                announcements={announcements} 
-                units={units} 
-                onAdd={handleAddAnnouncement} 
-                onDelete={handleDeleteAnnouncement} 
-             />
-          )}
-
-          {!loading && view === 'documents' && (
-             <DocumentsView 
-                documents={documents}
-                userRole={user.role}
-                onAdd={handleAddDocument}
-                onDelete={handleDeleteDocument}
-             />
-          )}
-
-          {!loading && view === 'maintenance' && (
-             <MaintenanceView 
-                requests={maintenanceRequests}
-                units={units}
-                userRole={user.role}
-                userEmail={user.email}
-                onAdd={handleAddMaintenance}
-                onUpdate={handleUpdateMaintenance}
-                onDelete={handleDeleteMaintenance}
-             />
-          )}
-
-          {!loading && view === 'amenities' && (
-             <AmenitiesView 
-                amenities={amenities}
-                bookings={bookings}
-                units={units}
-                userRole={user.role}
-                userEmail={user.email}
-                onAddAmenity={handleAddAmenity}
-                onDeleteAmenity={handleDeleteAmenity}
-                onAddBooking={handleAddBooking}
-                onDeleteBooking={handleDeleteBooking}
-             />
-          )}
-
+          {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
+          {!loading && view === 'documents' && <DocumentsView documents={documents} userRole={user.role} onAdd={handleAddDocument} onDelete={handleDeleteDocument} />}
+          {!loading && view === 'maintenance' && <MaintenanceView requests={maintenanceRequests} units={units} userRole={user.role} userEmail={user.email} onAdd={handleAddMaintenance} onUpdate={handleUpdateMaintenance} onDelete={handleDeleteMaintenance} />}
+          {!loading && view === 'amenities' && <AmenitiesView amenities={amenities} bookings={bookings} units={units} userRole={user.role} userEmail={user.email} onAddAmenity={handleAddAmenity} onDeleteAmenity={handleDeleteAmenity} onAddBooking={handleAddBooking} onDeleteBooking={handleDeleteBooking} />}
           {!loading && view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
-          
-          {!loading && view === 'expenses' && (
-            <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} consortiumId={consortium.id} />
-          )}
-          
-          {!loading && view === 'settlement' && (
-            <SettlementView 
-                units={units} expenses={expenses} setExpenses={setExpenses} settings={settings} consortiumId={consortium.id} consortiumName={consortium.name}
-                updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})}
-                onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})}
-                onCloseMonth={handleCloseMonth}
-                onChangeView={setView}
-            />
-          )}
-
+          {!loading && view === 'expenses' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} consortiumId={consortium.id} />}
+          {!loading && view === 'settlement' && <SettlementView units={units} expenses={expenses} setExpenses={setExpenses} settings={settings} consortiumId={consortium.id} consortiumName={consortium.name} updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})} onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})} onCloseMonth={handleCloseMonth} onChangeView={setView} />}
           {!loading && view === 'history' && <HistoryView history={history} consortiumName={consortium.name} units={units} settings={settings} />}
           
+          {/* USER PORTAL CON SOPORTE MULTI-UNIDAD */}
           {!loading && view === 'user_portal' && (
             <UserPortal 
-                userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} settings={settings} announcements={announcements}
+                userEmail={user.email} 
+                consortiumName={consortium.name}
+                units={units} 
+                expenses={expenses} 
+                history={history} 
+                payments={payments} 
+                settings={settings} 
+                announcements={announcements}
                 debtAdjustments={debtAdjustments} 
                 myBookings={bookings} 
                 myTickets={maintenanceRequests} 
@@ -440,26 +357,22 @@ function App() {
             />
           )}
           
-          {!loading && view === 'debtors' && (
-            <DebtorsView 
-                units={units} payments={payments} history={history} 
-                debtAdjustments={debtAdjustments} 
-                onAddAdjustment={handleAddDebtAdjustment} 
-                onDeleteAdjustment={handleDeleteDebtAdjustment} 
-            />
-          )}
+          {!loading && view === 'debtors' && <DebtorsView units={units} payments={payments} history={history} debtAdjustments={debtAdjustments} onAddAdjustment={handleAddDebtAdjustment} onDeleteAdjustment={handleDeleteDebtAdjustment} />}
           
+          {/* COBRANZAS CON DATA DE DEUDA */}
           {!loading && view === 'collections' && (
-             <CollectionsView payments={payments} units={units} onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange} />
+             <CollectionsView 
+                payments={payments} 
+                units={units} 
+                history={history} // <--- NUEVO
+                debtAdjustments={debtAdjustments} // <--- NUEVO
+                onAddPayment={handleAdminAddPayment} 
+                onUpdateStatus={handlePaymentStatusChange} 
+             />
           )}
           
-          {!loading && view === 'settings' && (
-             <SettingsView currentSettings={settings} onSave={handleUpdateSettings} />
-          )}
-          
-          {!loading && view === 'profile' && (
-             <ProfileView userEmail={user.email} userRole={user.role} onLogout={handleLogout} />
-          )}
+          {!loading && view === 'settings' && <SettingsView currentSettings={settings} onSave={handleUpdateSettings} />}
+          {!loading && view === 'profile' && <ProfileView userEmail={user.email} userRole={user.role} onLogout={handleLogout} />}
         </div>
       </main>
     </div>

@@ -97,6 +97,7 @@ export interface MaintenanceRequest {
 export interface ConsortiumSettings {
   reserveFundBalance: number;
   monthlyReserveContributionPercentage: number;
+  interestRate: number;
   bankName: string;
   bankCBU: string;
   bankAlias: string;

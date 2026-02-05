@@ -1,5 +1,5 @@
 import { 
-    collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, writeBatch, where, documentId 
+    collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, getDoc, writeBatch, where, documentId, limit 
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; 
 import { db } from '../src/config/firebase'; 
@@ -17,26 +17,29 @@ export const clearCollection = async (consortiumId: string, collectionName: stri
 // --- CONSORTIUM & USER ACCESS ---
 
 export const createConsortium = async (data: Omit<Consortium, 'id'>, userId: string) => {
-    const consortiumData = { ...data, adminIds: [userId] };
+    const { id, ...cleanData } = data as any; 
+    const consortiumData = { ...cleanData, adminIds: [userId] };
     const docRef = await addDoc(collection(db, 'consortiums'), consortiumData);
-    return { id: docRef.id, ...consortiumData };
+    return { ...consortiumData, id: docRef.id };
 };
 
 export const getAdminConsortiums = async (userId: string) => {
     const q = query(collection(db, 'consortiums'), where('adminIds', 'array-contains', userId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Consortium));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Consortium));
 };
 
 export const getUserConsortiums = async (email: string) => {
     const accessRef = doc(db, 'user_access', email);
     const accessSnap = await getDoc(accessRef);
     if (!accessSnap.exists()) return [];
+    
     const consortiumIds = accessSnap.data().consortiumIds || [];
     if (consortiumIds.length === 0) return [];
+
     const q = query(collection(db, 'consortiums'), where(documentId(), 'in', consortiumIds));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Consortium));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Consortium));
 };
 
 export const registerUserAccess = async (email: string, consortiumId: string) => {
@@ -55,9 +58,10 @@ export const registerUserAccess = async (email: string, consortiumId: string) =>
 
 // --- UNITS ---
 export const getUnits = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/units`), orderBy('unitNumber'));
+    const q = query(collection(db, `consortiums/${consortiumId}/units`));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Unit));
+    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Unit));
+    return list.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true, sensitivity: 'base' }));
 };
 
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
@@ -81,7 +85,7 @@ export const deleteUnit = async (consortiumId: string, unitId: string) => {
 export const getDocuments = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/documents`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConsortiumDocument));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ConsortiumDocument));
 };
 
 export const addDocument = async (consortiumId: string, data: Omit<ConsortiumDocument, 'id'>) => {
@@ -104,7 +108,7 @@ export const uploadDocumentFile = async (file: File): Promise<string> => {
 export const getExpenses = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/expenses`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Expense));
 };
 export const addExpense = async (consortiumId: string, expense: Omit<Expense, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/expenses`), expense);
@@ -128,7 +132,7 @@ export const uploadExpenseReceipt = async (file: File): Promise<string> => {
 export const getAnnouncements = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/announcements`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Announcement));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Announcement));
 };
 export const addAnnouncement = async (consortiumId: string, data: Omit<Announcement, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/announcements`), data);
@@ -142,7 +146,7 @@ export const deleteAnnouncement = async (consortiumId: string, id: string) => {
 export const getDebtAdjustments = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/debt_adjustments`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DebtAdjustment));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as DebtAdjustment));
 };
 export const addDebtAdjustment = async (consortiumId: string, data: Omit<DebtAdjustment, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/debt_adjustments`), data);
@@ -156,7 +160,7 @@ export const deleteDebtAdjustment = async (consortiumId: string, id: string) => 
 export const getMaintenanceRequests = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/maintenance`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceRequest));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceRequest));
 };
 export const addMaintenanceRequest = async (consortiumId: string, data: Omit<MaintenanceRequest, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/maintenance`), data);
@@ -174,7 +178,7 @@ export const deleteMaintenanceRequest = async (consortiumId: string, id: string)
 export const getAmenities = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/amenities`));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Amenity));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Amenity));
 };
 export const addAmenity = async (consortiumId: string, data: Omit<Amenity, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/amenities`), data);
@@ -188,7 +192,7 @@ export const deleteAmenity = async (consortiumId: string, id: string) => {
 export const getBookings = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/bookings`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Booking));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Booking));
 };
 export const addBooking = async (consortiumId: string, data: Omit<Booking, 'id'>) => {
     const q = query(
@@ -199,9 +203,7 @@ export const addBooking = async (consortiumId: string, data: Omit<Booking, 'id'>
         where('status', '==', 'CONFIRMED')
     );
     const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
-        throw new Error("El turno ya está reservado.");
-    }
+    if (!snapshot.empty) throw new Error("El turno ya está reservado.");
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/bookings`), data);
     return { id: docRef.id, ...data };
 };
@@ -211,18 +213,29 @@ export const deleteBooking = async (consortiumId: string, id: string) => {
 
 // --- SETTLEMENTS ---
 export const saveSettlement = async (consortiumId: string, record: SettlementRecord, expenseIdsToRemove: string[]) => {
-    await addDoc(collection(db, `consortiums/${consortiumId}/history`), record);
-    for (const id of expenseIdsToRemove) {
-        await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, id));
+    const historyRef = collection(db, `consortiums/${consortiumId}/history`);
+    const q = query(historyRef, where('month', '==', record.month), limit(1));
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+        const existingDoc = snapshot.docs[0];
+        await updateDoc(doc(db, `consortiums/${consortiumId}/history`, existingDoc.id), record as any);
+        console.log("Liquidación actualizada.");
+    } else {
+        await addDoc(historyRef, record);
+        console.log("Nueva liquidación creada.");
     }
-    await saveSettings(consortiumId, { 
-        reserveFundBalance: record.reserveBalanceAtClose,
-    } as any); 
+
+    for (const id of expenseIdsToRemove) {
+        try { await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, id)); } catch (e) {}
+    }
+    await saveSettings(consortiumId, { reserveFundBalance: record.reserveBalanceAtClose } as any); 
 };
+
 export const getHistory = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/history`), orderBy('month', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SettlementRecord));
 };
 
 // --- PAYMENTS ---
@@ -243,19 +256,22 @@ export const updatePayment = async (consortiumId: string, paymentId: string, upd
 export const getPayments = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Payment));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
 };
 
-// --- SETTINGS ---
+// --- SETTINGS (UPDATED: InterestRate) ---
 export const getSettings = async (consortiumId: string): Promise<ConsortiumSettings> => {
     const docRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-        return snap.data() as ConsortiumSettings;
+        const data = snap.data();
+        return {
+            ...data,
+            interestRate: data.interestRate !== undefined ? data.interestRate : 5 // Default 5%
+        } as ConsortiumSettings;
     } else {
         return { 
-            reserveFundBalance: 0, 
-            monthlyReserveContributionPercentage: 5,
+            reserveFundBalance: 0, monthlyReserveContributionPercentage: 5, interestRate: 5,
             bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: '',
             address: '', cuit: '', adminName: ''
         };
@@ -276,14 +292,12 @@ export const uploadConsortiumLogo = async (file: File): Promise<string> => {
 export const getExpenseTemplates = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/expense_templates`), orderBy('alias'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ExpenseTemplate));
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ExpenseTemplate));
 };
-
 export const addExpenseTemplate = async (consortiumId: string, data: Omit<ExpenseTemplate, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/expense_templates`), data);
     return { id: docRef.id, ...data };
 };
-
 export const deleteExpenseTemplate = async (consortiumId: string, id: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/expense_templates`, id));
 };
