@@ -5,6 +5,27 @@ export enum ExpenseDistributionType {
 }
 
 export type UserRole = 'DEV' | 'ADMIN' | 'USER';
+export type MaintenanceStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE';
+
+// --- NUEVO: Espacios Comunes y Reservas ---
+export interface Amenity {
+  id: string;
+  name: string; // Ej: "Quincho", "SUM"
+  description: string;
+  capacity: number;
+  requiresApproval: boolean; // Si requiere ok del admin
+}
+
+export interface Booking {
+  id: string;
+  amenityId: string;
+  unitId: string;
+  unitNumber: string; // Para mostrar rápido quién reservó
+  date: string; // YYYY-MM-DD
+  timeSlot: string; // "Mediodía" | "Noche" | u horario específico
+  status: 'CONFIRMED' | 'PENDING' | 'REJECTED';
+  createdAt: string;
+}
 
 export interface Unit {
   id: string;
@@ -35,7 +56,7 @@ export interface Payment {
   method: 'Transferencia' | 'Efectivo' | 'Cheque';
   notes?: string;
   attachmentUrl?: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'; // <--- ESTADO CLAVE
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
 export interface DebtAdjustment {
@@ -44,6 +65,25 @@ export interface DebtAdjustment {
   amount: number; 
   date: string;
   description: string; 
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+  date: string;
+  priority: 'NORMAL' | 'HIGH';
+}
+
+export interface MaintenanceRequest {
+  id: string;
+  unitId: string;
+  title: string;
+  description: string;
+  status: MaintenanceStatus;
+  date: string;
+  photos?: string[];
+  adminResponse?: string;
 }
 
 export interface ConsortiumSettings {
@@ -100,4 +140,5 @@ export interface AppSettings {
   monthlyReserveContributionPercentage: number;
 }
 
-export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings';
+// Agregamos 'amenities' a las vistas
+export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities';

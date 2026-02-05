@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Unit, Expense, SettlementRecord, Payment, ConsortiumSettings } from '../types';
-import { CheckCircle, AlertCircle, TrendingUp, Download, Building, Users, Upload, X, Paperclip } from 'lucide-react';
+import { Unit, Expense, SettlementRecord, Payment, ConsortiumSettings, Announcement, DebtAdjustment } from '../types';
+import { CheckCircle, AlertCircle, TrendingUp, Download, Building, Users, Upload, X, Paperclip, Megaphone } from 'lucide-react';
 
 interface UserPortalProps {
   userEmail: string;
@@ -9,47 +9,51 @@ interface UserPortalProps {
   history: SettlementRecord[];
   payments: Payment[];
   settings: ConsortiumSettings;
+  announcements: Announcement[];
+  debtAdjustments?: DebtAdjustment[]; // <--- NUEVA PROP
   onReportPayment: (paymentData: { amount: number, date: string, method: 'Transferencia' | 'Efectivo' | 'Cheque', notes: string, file: File | null }) => Promise<void>;
 }
 
-const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, history, payments, settings, onReportPayment }) => {
+const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, history, payments, settings, announcements, debtAdjustments = [], onReportPayment }) => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Form State
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
-  // 1. Identify User's Unit
   const myUnit = useMemo(() => {
     return units.find(u => u.linkedEmail === userEmail) || units.find(u => u.ownerName === 'Usuario Demo') || units[0];
   }, [units, userEmail]);
 
-  // 2. Calculate Financial Status
   const status = useMemo(() => {
     if (!myUnit) return null;
     const initial = myUnit.initialBalance || 0;
+    
+    // Deuda Histórica
     const totalSettled = history.reduce((acc, record) => {
         const detail = record.unitDetails?.find(d => d.unitId === myUnit.id);
         return acc + (detail ? detail.totalToPay : 0);
     }, 0);
-    // Solo restamos pagos aprobados para el saldo real
+
+    // NUEVO: Ajustes (Multas/Intereses)
+    const totalAdjustments = debtAdjustments.filter(a => a.unitId === myUnit.id).reduce((acc, a) => acc + a.amount, 0);
+
+    // Pagos Aprobados
     const validPayments = payments.filter(p => p.unitId === myUnit.id && p.status === 'APPROVED');
     const totalPaid = validPayments.reduce((acc, p) => acc + p.amount, 0);
     
-    const balance = (initial + totalSettled) - totalPaid;
+    // Saldo Final
+    const balance = (initial + totalSettled + totalAdjustments) - totalPaid;
     return { balance, totalPaid };
-  }, [myUnit, history, payments]);
+  }, [myUnit, history, payments, debtAdjustments]);
 
-  // 3. Pending Payments
   const myPendingPayments = useMemo(() => {
       if(!myUnit) return [];
       return payments.filter(p => p.unitId === myUnit.id && p.status === 'PENDING');
   }, [payments, myUnit]);
 
-  // 4. All Debtors (Solo pagos aprobados cuentan para reducir deuda pública)
   const allDebtors = useMemo(() => {
       return units.map(unit => {
         const initial = unit.initialBalance || 0;
@@ -57,11 +61,15 @@ const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, his
             const detail = record.unitDetails?.find(d => d.unitId === unit.id);
             return acc + (detail ? detail.totalToPay : 0);
         }, 0);
+        
+        // Incluir Ajustes en lista pública
+        const unitAdjustments = debtAdjustments.filter(a => a.unitId === unit.id).reduce((acc, a) => acc + a.amount, 0);
+
         const totalPaid = payments.filter(p => p.unitId === unit.id && p.status === 'APPROVED').reduce((acc, p) => acc + p.amount, 0);
-        const balance = (initial + totalSettled) - totalPaid;
+        const balance = (initial + totalSettled + unitAdjustments) - totalPaid;
         return { ...unit, balance };
       }).filter(u => u.balance > 100).sort((a, b) => b.balance - a.balance);
-  }, [units, history, payments]);
+  }, [units, history, payments, debtAdjustments]);
 
   const handleSubmitPayment = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -106,6 +114,26 @@ const UserPortal: React.FC<UserPortalProps> = ({ userEmail, units, expenses, his
               Informar Pago
           </button>
       </div>
+
+      {/* ANUNCIOS */}
+      {announcements.length > 0 && (
+          <div className="space-y-3">
+              <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                  <Megaphone className="w-5 h-5 text-indigo-600" /> Novedades del Consorcio
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {announcements.map(ann => (
+                      <div key={ann.id} className={`bg-white p-4 rounded-xl border shadow-sm ${ann.priority === 'HIGH' ? 'border-red-200 border-l-4 border-l-red-500' : 'border-slate-200 border-l-4 border-l-indigo-500'}`}>
+                          <div className="flex justify-between items-start mb-1">
+                              <h4 className={`font-bold ${ann.priority === 'HIGH' ? 'text-red-800' : 'text-slate-800'}`}>{ann.title}</h4>
+                              <span className="text-[10px] text-slate-400">{new Date(ann.date).toLocaleDateString()}</span>
+                          </div>
+                          <p className="text-sm text-slate-600 whitespace-pre-wrap">{ann.content}</p>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
 
       {/* MODAL DE PAGO */}
       {showPaymentModal && (

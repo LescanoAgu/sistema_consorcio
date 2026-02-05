@@ -9,7 +9,8 @@ import {
     orderBy, 
     setDoc,
     getDoc,
-    writeBatch // <--- IMPORTANTE: Necesario para borrar en lote
+    writeBatch,
+    where // <--- IMPORTANTE
 } from 'firebase/firestore';
 import { 
     getStorage, 
@@ -17,28 +18,91 @@ import {
     uploadBytes, 
     getDownloadURL 
 } from 'firebase/storage'; 
-// CORRECCIÓN: Apuntamos a src/config/firebase
 import { db } from '../src/config/firebase'; 
-import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings } from '../types';
+import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, DebtAdjustment, MaintenanceRequest, Amenity, Booking } from '../types';
 
-// --- UTILIDADES ---
+// ... (Todo el código anterior igual hasta MAINTENANCE) ...
 
-// Función para vaciar una colección completa (ZONA DE PELIGRO)
+// --- RECLAMOS (MANTENIMIENTO) ---
+export const getMaintenanceRequests = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/maintenance`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceRequest));
+};
+
+export const addMaintenanceRequest = async (consortiumId: string, data: Omit<MaintenanceRequest, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/maintenance`), data);
+    return { id: docRef.id, ...data };
+};
+
+export const updateMaintenanceRequest = async (consortiumId: string, id: string, updates: Partial<MaintenanceRequest>) => {
+    const docRef = doc(db, `consortiums/${consortiumId}/maintenance`, id);
+    await updateDoc(docRef, updates);
+};
+
+export const deleteMaintenanceRequest = async (consortiumId: string, id: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/maintenance`, id));
+};
+
+// --- AMENITIES (ESPACIOS COMUNES) --- NUEVO ---
+export const getAmenities = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/amenities`));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Amenity));
+};
+
+export const addAmenity = async (consortiumId: string, data: Omit<Amenity, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/amenities`), data);
+    return { id: docRef.id, ...data };
+};
+
+export const deleteAmenity = async (consortiumId: string, id: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/amenities`, id));
+};
+
+// --- BOOKINGS (RESERVAS) --- NUEVO ---
+export const getBookings = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/bookings`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Booking));
+};
+
+export const addBooking = async (consortiumId: string, data: Omit<Booking, 'id'>) => {
+    // Validación básica de no duplicados (simple)
+    const q = query(
+        collection(db, `consortiums/${consortiumId}/bookings`), 
+        where('amenityId', '==', data.amenityId),
+        where('date', '==', data.date),
+        where('timeSlot', '==', data.timeSlot),
+        where('status', '==', 'CONFIRMED')
+    );
+    const snapshot = await getDocs(q);
+    if (!snapshot.empty) {
+        throw new Error("El turno ya está reservado.");
+    }
+
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/bookings`), data);
+    return { id: docRef.id, ...data };
+};
+
+export const deleteBooking = async (consortiumId: string, id: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/bookings`, id));
+};
+
+// --- EXTRAS QUE YA TENÍAS (Copiar resto igual) ---
+// Utilidades, Consortium, Units, Expenses, History, Payments, Settings...
+// Asegúrate de que clearCollection y demás funciones base sigan ahí.
+// Si copiaste el archivo entero en el paso anterior, solo agrega la parte de Amenities y Bookings.
+// Para facilitar, aquí tienes las funciones base necesarias si te faltaban:
+
 export const clearCollection = async (consortiumId: string, collectionName: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/${collectionName}`));
     const snapshot = await getDocs(q);
-    
-    // Firestore permite batches de hasta 500 operaciones
-    // Si tienes más de 500 docs, esto debería hacerse en un loop, pero para este caso sirve
     const batch = writeBatch(db);
-    snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-    });
-    
+    snapshot.docs.forEach((doc) => { batch.delete(doc.ref); });
     await batch.commit();
 };
 
-// --- CONSORTIUM MANAGEMENT ---
 export const createConsortium = async (data: Omit<Consortium, 'id'>) => {
     const docRef = await addDoc(collection(db, 'consortiums'), data);
     return { id: docRef.id, ...data };
@@ -50,15 +114,12 @@ export const getConsortiums = async () => {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Consortium));
 };
 
-// --- UNITS ---
-
 export const getUnits = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/units`), orderBy('unitNumber'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Unit));
 };
 
-// IMPORTANTE: Renombrado a 'addUnit' para coincidir con UnitsView
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
     return { id: docRef.id, ...unit };
@@ -74,21 +135,17 @@ export const deleteUnit = async (consortiumId: string, unitId: string) => {
     await deleteDoc(docRef);
 };
 
-// --- EXPENSES ---
-
 export const getExpenses = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/expenses`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
 };
 
-// IMPORTANTE: Renombrado a 'addExpense' para coincidir con ExpensesView
 export const addExpense = async (consortiumId: string, expense: Omit<Expense, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/expenses`), expense);
     return { id: docRef.id, ...expense };
 };
 
-// Agregado porque SettlementView lo necesita
 export const updateExpense = async (consortiumId: string, expenseId: string, updates: Partial<Expense>) => {
     const docRef = doc(db, `consortiums/${consortiumId}/expenses`, expenseId);
     await updateDoc(docRef, updates);
@@ -98,17 +155,48 @@ export const deleteExpense = async (consortiumId: string, expenseId: string) => 
     await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, expenseId));
 };
 
-// --- SETTLEMENTS & HISTORY ---
-export const saveSettlement = async (consortiumId: string, record: SettlementRecord, expenseIdsToRemove: string[]) => {
-    // 1. Guardar registro en historial
-    await addDoc(collection(db, `consortiums/${consortiumId}/history`), record);
+export const uploadExpenseReceipt = async (file: File): Promise<string> => {
+    const storage = getStorage();
+    const storageRef = ref(storage, `expenses/${Date.now()}_${file.name}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    return await getDownloadURL(snapshot.ref);
+};
 
-    // 2. Archivar/Borrar gastos liquidados
+export const getAnnouncements = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/announcements`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Announcement));
+};
+
+export const addAnnouncement = async (consortiumId: string, data: Omit<Announcement, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/announcements`), data);
+    return { id: docRef.id, ...data };
+};
+
+export const deleteAnnouncement = async (consortiumId: string, id: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/announcements`, id));
+};
+
+export const getDebtAdjustments = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/debt_adjustments`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DebtAdjustment));
+};
+
+export const addDebtAdjustment = async (consortiumId: string, data: Omit<DebtAdjustment, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/debt_adjustments`), data);
+    return { id: docRef.id, ...data };
+};
+
+export const deleteDebtAdjustment = async (consortiumId: string, id: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/debt_adjustments`, id));
+};
+
+export const saveSettlement = async (consortiumId: string, record: SettlementRecord, expenseIdsToRemove: string[]) => {
+    await addDoc(collection(db, `consortiums/${consortiumId}/history`), record);
     for (const id of expenseIdsToRemove) {
         await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, id));
     }
-    
-    // 3. Actualizar saldo del fondo en configuración
     await saveSettings(consortiumId, { 
         reserveFundBalance: record.reserveBalanceAtClose,
     } as any); 
@@ -119,8 +207,6 @@ export const getHistory = async (consortiumId: string) => {
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SettlementRecord));
 };
-
-// --- PAYMENTS & COLLECTIONS ---
 
 export const uploadPaymentReceipt = async (file: File): Promise<string> => {
     const storage = getStorage();
@@ -145,7 +231,6 @@ export const getPayments = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Payment));
 };
 
-// --- SETTINGS ---
 export const getSettings = async (consortiumId: string): Promise<ConsortiumSettings> => {
     const docRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
     const snap = await getDoc(docRef);

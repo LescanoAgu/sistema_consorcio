@@ -1,356 +1,182 @@
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
-import { SettlementRecord, Unit, ExpenseDistributionType, ConsortiumSettings } from "../types";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { SettlementRecord, Unit, ConsortiumSettings, Expense, ExpenseDistributionType } from '../types';
 
-// Helper para formatear moneda (Argentina: puntos para miles, coma para decimales)
-const formatMoney = (amount: number) => {
-  return amount.toLocaleString('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
+// Extendemos jsPDF para incluir autoTable (TypeScript hack)
+interface jsPDFWithAutoTable extends jsPDF {
+  lastAutoTable: { finalY: number };
+}
+
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(value);
 };
 
-// --- FUNCIÓN 1: REPORTE GENERAL (Público / Global) ---
-export const generateSettlementPDF = (record: SettlementRecord, consortiumName: string, units: Unit[], settings?: ConsortiumSettings) => {
-  const doc = new jsPDF();
+// --- 1. GENERAR LIQUIDACIÓN GENERAL (EXPENSA) ---
+export const generateSettlementPDF = (
+  record: SettlementRecord,
+  consortiumName: string,
+  units: Unit[],
+  settings: ConsortiumSettings
+) => {
+  const doc = new jsPDF() as jsPDFWithAutoTable;
   const pageWidth = doc.internal.pageSize.width;
 
-  // -- HEADER --
-  doc.setFillColor(79, 70, 229); // Indigo 600
-  doc.rect(0, 0, pageWidth, 40, 'F');
-  
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
+  // --- HEADER ---
+  doc.setFontSize(18);
   doc.text(consortiumName, 14, 20);
   
-  doc.setFontSize(14);
-  doc.text("Liquidación de Expensas", 14, 30);
+  doc.setFontSize(12);
+  doc.text(`Liquidación de Expensas: ${record.month}`, 14, 28);
+  doc.setFontSize(10);
+  doc.text(`Fecha de Cierre: ${new Date(record.dateClosed).toLocaleDateString()}`, 14, 34);
+
+  // --- RESUMEN FINANCIERO ---
+  doc.setFillColor(240, 240, 240);
+  doc.rect(14, 40, pageWidth - 28, 25, 'F');
   
   doc.setFontSize(10);
-  doc.text(`Período: ${record.month}`, pageWidth - 14, 20, { align: 'right' });
-  doc.text(`Cierre: ${new Date(record.dateClosed).toLocaleDateString()}`, pageWidth - 14, 30, { align: 'right' });
+  doc.text("RESUMEN DEL PERÍODO", 18, 48);
+  
+  doc.setFontSize(9);
+  doc.text(`Total Gastos Ordinarios:`, 18, 55);
+  doc.text(formatCurrency(record.totalExpenses), 80, 55);
+  
+  // (Aquí podrías sumar más detalles si tuvieras gastos extraordinarios separados en el record)
+  
+  let currentY = 75;
 
-  // -- SUMMARY SECTION (Resumen Financiero) --
-  let finalY = 45;
-  doc.setTextColor(0, 0, 0);
+  // --- TABLA DE GASTOS ---
   doc.setFontSize(12);
-  doc.text("Resumen Financiero", 14, 55);
+  doc.text("Detalle de Gastos", 14, currentY);
+  currentY += 5;
 
-  // CÁLCULOS
-  const startBalance = record.reserveBalanceStart || 0;
-  const contribution = record.reserveContribution || 0; 
-  const expense = record.reserveExpense || 0;
-  const endBalance = record.reserveBalanceAtClose; 
-  const deficit = record.reserveDeficitCovered || 0;
-
-  // Desglose de Gastos
-  const totalOrd = record.snapshotExpenses
-      .filter(e => e.category === 'Ordinary')
-      .reduce((a, b) => a + b.amount, 0);
-  const totalExtra = record.snapshotExpenses
-      .filter(e => e.category === 'Extraordinary')
-      .reduce((a, b) => a + b.amount, 0);
-
-  const summaryData = [
-    ['Total Gastos del Mes', `$${formatMoney(record.totalExpenses)}`],
-    ['     > Ordinarias', `$${formatMoney(totalOrd)}`],
-    ['     > Extraordinarias', `$${formatMoney(totalExtra)}`],
-    ['Total a Recaudar (Expensas)', `$${formatMoney(record.totalCollected)}`],
-    ['', ''], 
-    ['FONDO DE RESERVA', ''],
-    ['Saldo Inicial (Caja Anterior)', `$${formatMoney(startBalance)}`],
-    ['(-) Gastos pagados con Fondo', `-$${formatMoney(expense)}`],
-    deficit > 0 ? ['(+) Recupero Saldo Negativo', `+$${formatMoney(deficit)}`] : null,
-    ['(=) Saldo Final Disponible', `$${formatMoney(endBalance)}`],
-    ['', ''],
-    ['(+) Aporte a Recaudar este mes', `$${formatMoney(contribution)}`] 
-  ].filter(row => row !== null);
+  const expensesData = record.snapshotExpenses.map(e => [
+    new Date(e.date).toLocaleDateString(),
+    e.category === 'Ordinary' ? 'Ordinario' : 'Extraordinario',
+    e.itemCategory || 'Varios',
+    e.description,
+    formatCurrency(e.amount)
+  ]);
 
   autoTable(doc, {
-    startY: 60,
-    head: [['Concepto', 'Monto']],
-    body: summaryData as any,
-    theme: 'striped',
-    headStyles: { fillColor: [243, 244, 246], textColor: [55, 65, 81], fontStyle: 'bold' },
-    styles: { fontSize: 10, halign: 'right' },
-    columnStyles: { 
-        0: { cellWidth: 120, halign: 'left' },
-        1: { fontStyle: 'bold' } 
-    },
-    didParseCell: function (data) {
-        // Estilos para filas específicas
-        if (data.row.raw[0] === 'Total Gastos del Mes' || data.row.raw[0] === 'Total a Recaudar (Expensas)') {
-             data.cell.styles.fontStyle = 'bold';
-        }
-        if (typeof data.row.raw[0] === 'string' && data.row.raw[0].includes('>')) {
-             data.cell.styles.fontStyle = 'italic';
-             data.cell.styles.textColor = [100, 100, 100];
-        }
-        if (data.row.raw[0] === '(=) Saldo Final Disponible') { 
-            data.cell.styles.fillColor = [209, 250, 229];
-            data.cell.styles.textColor = [6, 95, 70];
-            data.cell.styles.fontStyle = 'bold';
-        }
-        if (data.row.index === 5) { // Header Fondo
-             data.cell.styles.fontStyle = 'bold';
-             data.cell.styles.textColor = [79, 70, 229];
-             data.cell.styles.halign = 'left';
-        }
-    },
-    margin: { left: 14 }
+    startY: currentY,
+    head: [['Fecha', 'Tipo', 'Rubro', 'Concepto', 'Importe']],
+    body: expensesData,
+    theme: 'grid',
+    headStyles: { fillColor: [63, 81, 181] },
+    styles: { fontSize: 8 },
+    columnStyles: { 4: { halign: 'right' } },
   });
 
-  // -- EXPENSES TABLES (Detalle de Gastos Dividido) --
-  finalY = (doc as any).lastAutoTable.finalY + 15;
+  currentY = doc.lastAutoTable.finalY + 15;
+
+  // --- TABLA DE PRORRATEO (DISTRIBUCIÓN) ---
   doc.setFontSize(12);
-  doc.setTextColor(0, 0, 0); 
-  doc.text("Detalle de Gastos", 14, finalY);
+  doc.text("Distribución por Unidad (Prorrateo)", 14, currentY);
+  currentY += 5;
 
-  // 1. GASTOS ORDINARIOS
-  const ordExpenses = record.snapshotExpenses.filter(e => e.category === 'Ordinary');
-  
-  if (ordExpenses.length > 0) {
-      finalY += 7;
+  const distributionData = record.unitDetails.map(detail => {
+    const unit = units.find(u => u.id === detail.unitId);
+    return [
+      unit?.unitNumber || '?',
+      unit?.ownerName || '?',
+      `${unit?.proratePercentage}%`,
+      formatCurrency(detail.totalToPay) // Aquí podrías desglosar deuda previa si la tuvieras en el record
+    ];
+  });
+
+  autoTable(doc, {
+    startY: currentY,
+    head: [['Unidad', 'Propietario', '%', 'Total a Pagar']],
+    body: distributionData,
+    theme: 'striped',
+    headStyles: { fillColor: [46, 125, 50] }, // Verde para cobros
+    styles: { fontSize: 9 },
+    columnStyles: { 2: { halign: 'center' }, 3: { halign: 'right', fontStyle: 'bold' } },
+  });
+
+  currentY = doc.lastAutoTable.finalY + 15;
+
+  // --- DATOS BANCARIOS ---
+  if (settings.bankCBU) {
+      doc.setFillColor(230, 240, 255); // Azul muy claro
+      doc.rect(14, currentY, 120, 35, 'F');
+      
       doc.setFontSize(10);
-      doc.setTextColor(79, 70, 229); // Indigo
-      doc.text("Gastos Ordinarios", 14, finalY);
+      doc.setTextColor(0, 0, 0);
+      doc.text("DATOS PARA TRANSFERENCIA", 18, currentY + 8);
       
-      const ordBody = ordExpenses.map(e => [
-        e.date,
-        e.description,
-        e.itemCategory || '-',
-        e.distributionType === ExpenseDistributionType.FROM_RESERVE ? `($${formatMoney(e.amount)})` : `$${formatMoney(e.amount)}`
-      ]);
-
-      autoTable(doc, {
-        startY: finalY + 2,
-        head: [['Fecha', 'Descripción', 'Rubro', 'Monto']],
-        body: ordBody,
-        theme: 'grid',
-        headStyles: { fillColor: [224, 231, 255], textColor: [55, 65, 81] }, // Azul muy claro
-        columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } },
-        styles: { fontSize: 9 }
-      });
-      
-      finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(9);
+      doc.text(`Banco: ${settings.bankName}`, 18, currentY + 15);
+      doc.text(`Titular: ${settings.bankHolder}`, 18, currentY + 20);
+      doc.text(`CBU: ${settings.bankCBU}`, 18, currentY + 25);
+      doc.text(`Alias: ${settings.bankAlias}`, 18, currentY + 30);
   }
 
-  // 2. GASTOS EXTRAORDINARIOS
-  const extraExpenses = record.snapshotExpenses.filter(e => e.category === 'Extraordinary');
-  
-  if (extraExpenses.length > 0) {
-      // Verificar espacio en hoja
-      if (finalY > doc.internal.pageSize.height - 40) { doc.addPage(); finalY = 20; }
-
-      doc.setFontSize(10);
-      doc.setTextColor(220, 38, 38); // Rojo
-      doc.text("Gastos Extraordinarios", 14, finalY);
-      
-      const extraBody = extraExpenses.map(e => [
-        e.date,
-        e.description,
-        e.itemCategory || '-',
-        e.distributionType === ExpenseDistributionType.FROM_RESERVE ? `($${formatMoney(e.amount)})` : `$${formatMoney(e.amount)}`
-      ]);
-
-      autoTable(doc, {
-        startY: finalY + 2,
-        head: [['Fecha', 'Descripción', 'Rubro', 'Monto']],
-        body: extraBody,
-        theme: 'grid',
-        headStyles: { fillColor: [254, 226, 226], textColor: [153, 27, 27] }, // Rojo muy claro
-        columnStyles: { 3: { halign: 'right', fontStyle: 'bold' } },
-        styles: { fontSize: 9 }
-      });
-      
-      finalY = (doc as any).lastAutoTable.finalY + 10;
-  }
-
-  // --- NOTA ADMINISTRATIVA ---
-  if (record.couponMessage) {
-      // Chequear si entra en la página
-      if (finalY < doc.internal.pageSize.height - 30) {
-        doc.setFillColor(255, 251, 235); 
-        doc.setDrawColor(252, 211, 77);
-        doc.rect(14, finalY, pageWidth - 28, 20, 'FD');
-        
-        doc.setTextColor(180, 83, 9);
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "bold");
-        doc.text("NOTA DE ADMINISTRACIÓN:", 18, finalY + 7);
-        
-        doc.setTextColor(50, 50, 50);
-        doc.setFont("helvetica", "normal");
-        doc.text(record.couponMessage, 18, finalY + 14);
-      }
-  }
-
-  // Footer General
-  const pageCount = (doc as any).internal.getNumberOfPages();
-  for(let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(`Página ${i} de ${pageCount} - Generado por Gestión Consorcio`, pageWidth / 2, doc.internal.pageSize.height - 10, { align: 'center' });
-  }
-
-  doc.save(`Liquidacion_${consortiumName.replace(/\s+/g, '_')}_${record.month}.pdf`);
+  // Guardar PDF
+  doc.save(`Expensas_${consortiumName}_${record.month}.pdf`);
 };
 
-// --- FUNCIÓN 2: CUPÓN INDIVIDUAL (Privado) ---
+// --- 2. GENERAR CUPÓN INDIVIDUAL ---
 export const generateIndividualCouponPDF = (
-    record: SettlementRecord, 
-    unitId: string, 
-    consortiumName: string, 
+    record: SettlementRecord,
+    unitId: string,
+    consortiumName: string,
     units: Unit[],
-    settings?: ConsortiumSettings
+    settings: ConsortiumSettings
 ) => {
-    const doc = new jsPDF();
+    const doc = new jsPDF() as jsPDFWithAutoTable;
     const unit = units.find(u => u.id === unitId);
-    
-    // Si no encontramos la unidad o el detalle, salimos
     const detail = record.unitDetails.find(d => d.unitId === unitId);
-    if (!unit || !detail) return;
 
-    // --- CÁLCULOS DEL DESGLOSE ---
-    const pct = unit.proratePercentage / 100;
-    
-    // 1. Ordinarias (Solo lo que NO salió del fondo)
-    const ordinaryTotal = record.snapshotExpenses
-        .filter(e => e.category === 'Ordinary' && e.distributionType !== ExpenseDistributionType.FROM_RESERVE)
-        .reduce((a, b) => a + b.amount, 0);
-    const ordinaryShare = ordinaryTotal * pct;
+    if (!unit || !detail) return alert("Datos de unidad no encontrados");
 
-    // 2. Extraordinarias (Solo lo que NO salió del fondo)
-    const extraTotal = record.snapshotExpenses
-        .filter(e => e.category === 'Extraordinary' && e.distributionType !== ExpenseDistributionType.FROM_RESERVE)
-        .reduce((a, b) => a + b.amount, 0);
-    const extraShare = extraTotal * pct;
+    // Marco del Cupón
+    doc.setLineWidth(0.5);
+    doc.rect(10, 10, 190, 130); // Un cupón de media página aprox
 
-    // 3. Aporte mensual Fondo
-    const reserveShare = (record.reserveContribution || 0) * pct;
+    // Encabezado
+    doc.setFontSize(16);
+    doc.text(consortiumName, 20, 20);
+    doc.setFontSize(10);
+    doc.text(`CUPÓN DE PAGO - ${record.month}`, 150, 20);
 
-    // 4. RECUPERO DÉFICIT
-    const deficitTotal = record.reserveDeficitCovered || 0;
-    const deficitShare = deficitTotal * pct;
-
-    // Ajuste por redondeo
-    const checkSum = ordinaryShare + extraShare + reserveShare + deficitShare;
-    const diff = detail.totalToPay - checkSum;
-    const finalOrdinaryShare = ordinaryShare + diff;
-
-    // VENCIMIENTOS
-    const total1 = detail.totalToPay;
-    const surchargePct = record.secondExpirationSurcharge || 0;
-    const total2 = total1 * (1 + (surchargePct / 100));
-
-    // --- DIBUJO DEL CUPÓN ---
-
-    // 1. Encabezado
-    doc.setFillColor(79, 70, 229); // Indigo
-    doc.rect(0, 0, 210, 40, 'F');
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(20);
-    doc.text("CUPÓN DE PAGO", 105, 20, { align: "center" });
+    // Datos de la Unidad
     doc.setFontSize(12);
-    doc.text(consortiumName, 105, 30, { align: "center" });
+    doc.text(`Unidad: ${unit.unitNumber}`, 20, 35);
+    doc.text(`Propietario: ${unit.ownerName}`, 20, 42);
+    doc.text(`Porcentaje: ${unit.proratePercentage}%`, 150, 35);
 
-    // 2. Datos del Propietario
-    doc.setTextColor(0, 0, 0);
+    // Detalle del Cobro
+    doc.line(10, 50, 200, 50);
+    
     doc.setFontSize(14);
-    doc.text(`Propietario: ${unit.ownerName}`, 20, 60);
-    doc.text(`Unidad Funcional: ${unit.unitNumber}`, 20, 70);
-    doc.text(`Período: ${record.month}`, 140, 60);
-    
-    // FECHAS
-    doc.setFontSize(11);
-    const v1Date = record.firstExpirationDate ? new Date(record.firstExpirationDate).toLocaleDateString() : '-';
-    doc.text(`1er Vto (${v1Date}):`, 120, 70);
-    doc.setFont("helvetica", "bold");
-    doc.text(`$${formatMoney(total1)}`, 165, 70);
-    doc.setFont("helvetica", "normal");
-    
-    if (record.secondExpirationDate) {
-        const v2Date = new Date(record.secondExpirationDate).toLocaleDateString();
-        doc.text(`2do Vto (${v2Date}):`, 120, 77);
-        doc.setFont("helvetica", "bold");
-        doc.text(`$${formatMoney(total2)}`, 165, 77);
-    }
+    doc.text("A PAGAR", 20, 65);
+    doc.setFontSize(22);
+    doc.text(formatCurrency(detail.totalToPay), 150, 65, { align: 'right' });
 
-    // 3. El Número Importante (TOTAL 1er Vto)
-    doc.setFillColor(243, 244, 246); // Gris claro
-    doc.roundedRect(20, 85, 170, 40, 3, 3, 'F');
-    
-    doc.setFontSize(12);
-    doc.setTextColor(100, 100, 100);
-    doc.text("TOTAL A PAGAR (1er Vto)", 105, 98, { align: "center" });
-    
-    doc.setFontSize(30);
-    doc.setTextColor(79, 70, 229); // Indigo
-    doc.setFont("helvetica", "bold");
-    doc.text(`$${formatMoney(total1)}`, 105, 115, { align: "center" });
-    doc.setFont("helvetica", "normal");
-
-    // 4. Tabla de Conceptos
-    const tableBody = [];
-    
-    if (finalOrdinaryShare > 0.01) 
-        tableBody.push(['Expensas Ordinarias', `$${formatMoney(finalOrdinaryShare)}`]);
-    
-    if (extraShare > 0.01) 
-        tableBody.push(['Expensas Extraordinarias', `$${formatMoney(extraShare)}`]);
-    
-    if (deficitShare > 0.01)
-        tableBody.push(['Recupero Saldo Fondo Reserva', `$${formatMoney(deficitShare)}`]);
-
-    if (reserveShare > 0.01) 
-        tableBody.push(['Aporte Fondo de Reserva', `$${formatMoney(reserveShare)}`]);
-
-    autoTable(doc, {
-        startY: 140,
-        head: [['Concepto', 'Monto']],
-        body: tableBody,
-        theme: 'plain',
-        styles: { fontSize: 11, cellPadding: 3 },
-        columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
-    });
-
-    // 5. Datos Bancarios
-    const finalY = (doc as any).lastAutoTable.finalY + 20;
-    
-    doc.setDrawColor(150, 150, 150);
-    doc.setLineDashPattern([2, 2], 0); 
-    doc.rect(20, finalY, 170, 50); 
-    doc.setLineDashPattern([], 0); 
-
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text("DATOS PARA TRANSFERENCIA", 30, finalY + 10);
+    // Vencimientos (Calculados simples +10 y +20 días del cierre)
+    const cierre = new Date(record.dateClosed);
+    const vto1 = new Date(cierre); vto1.setDate(cierre.getDate() + 10);
     
     doc.setFontSize(10);
-    if (settings) {
-        doc.text(`Banco: ${settings.bankName}`, 30, finalY + 20);
-        doc.text(`Titular: ${settings.bankHolder}`, 30, finalY + 28);
-        doc.setFont("helvetica", "bold");
-        doc.text(`CBU: ${settings.bankCBU}`, 30, finalY + 38);
-        doc.text(`Alias: ${settings.bankAlias}`, 30, finalY + 46);
-    } else {
-        doc.text("Consulte datos a la administración.", 30, finalY + 25);
+    doc.text(`Vencimiento: ${vto1.toLocaleDateString()}`, 20, 80);
+
+    // Datos Bancarios
+    if (settings.bankCBU) {
+        doc.setFillColor(245, 245, 245);
+        doc.rect(20, 90, 170, 30, 'F');
+        doc.setFont("courier", "normal");
+        doc.setFontSize(10);
+        doc.text(`Depositar en: ${settings.bankName}`, 25, 100);
+        doc.text(`CBU: ${settings.bankCBU}`, 25, 107);
+        doc.text(`Alias: ${settings.bankAlias}`, 25, 114);
     }
 
-    // Footer
-    if (record.couponMessage) {
-        doc.setFont("helvetica", "italic");
-        doc.setFontSize(9);
-        doc.setTextColor(100);
-        doc.text(`Nota: ${record.couponMessage}`, 105, finalY + 60, { align: "center" });
-    }
-
-    doc.setFont("helvetica", "normal");
+    // Pie
+    doc.setFont("helvetica", "italic");
     doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text("Por favor envíe el comprobante por WhatsApp o Email al realizar el pago.", 105, 280, { align: "center" });
+    doc.text("Por favor, envíe el comprobante de pago a la administración.", 20, 135);
 
     doc.save(`Cupon_${unit.unitNumber}_${record.month}.pdf`);
 };

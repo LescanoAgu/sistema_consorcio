@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Menu } from 'lucide-react'; 
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import UnitsView from './components/UnitsView';
@@ -10,10 +11,17 @@ import DebtorsView from './components/DebtorsView';
 import AuthView from './components/AuthView';
 import UserPortal from './components/UserPortal';
 import SettingsView from './components/SettingsView';
-import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings } from './types';
+import AnnouncementsView from './components/AnnouncementsView';
+import MaintenanceView from './components/MaintenanceView';
+import AmenitiesView from './components/AmenitiesView'; // <--- NUEVO
+import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking } from './types';
 import { 
     getUnits, getExpenses, getHistory, getConsortiums, createConsortium, 
-    saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment 
+    saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment,
+    getAnnouncements, addAnnouncement, deleteAnnouncement,
+    getDebtAdjustments, addDebtAdjustment, deleteDebtAdjustment,
+    getMaintenanceRequests, addMaintenanceRequest, updateMaintenanceRequest, deleteMaintenanceRequest,
+    getAmenities, addAmenity, deleteAmenity, getBookings, addBooking, deleteBooking // <--- NUEVO
 } from './services/firestoreService';
 
 function App() {
@@ -26,17 +34,22 @@ function App() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [history, setHistory] = useState<SettlementRecord[]>([]);
   const [debtAdjustments, setDebtAdjustments] = useState<DebtAdjustment[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]); 
+  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
+  const [amenities, setAmenities] = useState<Amenity[]>([]); // <--- NUEVO
+  const [bookings, setBookings] = useState<Booking[]>([]); // <--- NUEVO
+  
   const [settings, setSettings] = useState<ConsortiumSettings>({
       reserveFundBalance: 0, monthlyReserveContributionPercentage: 5, bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: ''
   });
 
   const [view, setView] = useState<ViewState>('dashboard');
   const [loading, setLoading] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => { getConsortiums().then(setConsortiumList); }, []);
 
-  // Función para cargar datos (Extraída para poder reusarla al borrar datos)
-  const loadConsortiumData = useCallback(() => {
+  useEffect(() => {
     if (consortium) {
         setLoading(true);
         Promise.all([
@@ -44,26 +57,57 @@ function App() {
             getExpenses(consortium.id), 
             getHistory(consortium.id), 
             getSettings(consortium.id),
-            getPayments(consortium.id)
+            getPayments(consortium.id),
+            getAnnouncements(consortium.id),
+            getDebtAdjustments(consortium.id),
+            getMaintenanceRequests(consortium.id),
+            getAmenities(consortium.id), // <--- Load
+            getBookings(consortium.id) // <--- Load
         ])
-        .then(([u, e, h, s, p]) => { 
+        .then(([u, e, h, s, p, a, d, m, am, b]) => { 
             setUnits(u); 
             setExpenses(e); 
             setHistory(h); 
             setSettings(s); 
             setPayments(p);
+            setAnnouncements(a);
+            setDebtAdjustments(d);
+            setMaintenanceRequests(m);
+            setAmenities(am);
+            setBookings(b);
             setLoading(false); 
         });
     }
   }, [consortium]);
 
   useEffect(() => {
-      loadConsortiumData();
-  }, [loadConsortiumData]);
+      if (user && units.length > 0) {
+          const ownerUnit = units.find(u => u.linkedEmail === user.email);
+          if (ownerUnit && user.role !== 'USER') {
+              setUser(prev => prev ? ({ ...prev, role: 'USER' }) : null);
+              setView('user_portal');
+          } 
+      }
+  }, [units, user?.email]);
+
+  const menuBadges = useMemo(() => {
+      const badges: { [key: string]: number } = {};
+      if (user?.role === 'ADMIN') {
+          const pendingCount = payments.filter(p => p.status === 'PENDING').length;
+          if (pendingCount > 0) badges['collections'] = pendingCount;
+          
+          const pendingMaintenance = maintenanceRequests.filter(m => m.status === 'PENDING').length;
+          if (pendingMaintenance > 0) badges['maintenance'] = pendingMaintenance;
+      }
+      const urgentCount = announcements.filter(a => a.priority === 'HIGH').length;
+      if (urgentCount > 0) badges['announcements'] = urgentCount;
+      return badges;
+  }, [payments, announcements, maintenanceRequests, user]);
+
 
   const handleLogin = (email: string, role: UserRole) => {
     setUser({ email, role });
-    setView(role === 'USER' ? 'user_portal' : 'dashboard');
+    setView('dashboard'); 
   };
 
   const handleCloseMonth = async (record: SettlementRecord) => {
@@ -84,7 +128,6 @@ function App() {
       setSettings(newSettings);
   };
 
-  // --- PAGOS ---
   const handleReportPayment = async (data: { amount: number, date: string, method: 'Transferencia' | 'Efectivo' | 'Cheque', notes: string, file: File | null }) => {
       if(!consortium || !user) return;
       const myUnit = units.find(u => u.linkedEmail === user.email) || units.find(u => u.ownerName === 'Usuario Demo');
@@ -112,6 +155,73 @@ function App() {
       setPayments(payments.map(p => p.id === id ? { ...p, status: newStatus } : p));
   };
 
+  const handleAddAnnouncement = async (data: Omit<Announcement, 'id'>) => {
+      if(!consortium) return;
+      const created = await addAnnouncement(consortium.id, data);
+      setAnnouncements([created as Announcement, ...announcements]);
+  };
+
+  const handleDeleteAnnouncement = async (id: string) => {
+      if(!consortium) return;
+      await deleteAnnouncement(consortium.id, id);
+      setAnnouncements(announcements.filter(a => a.id !== id));
+  };
+
+  const handleAddDebtAdjustment = async (data: Omit<DebtAdjustment, 'id'>) => {
+      if(!consortium) return;
+      const created = await addDebtAdjustment(consortium.id, data);
+      setDebtAdjustments([created as DebtAdjustment, ...debtAdjustments]);
+  };
+
+  const handleDeleteDebtAdjustment = async (id: string) => {
+      if(!consortium) return;
+      await deleteDebtAdjustment(consortium.id, id);
+      setDebtAdjustments(debtAdjustments.filter(d => d.id !== id));
+  };
+
+  const handleAddMaintenance = async (data: Omit<MaintenanceRequest, 'id'>) => {
+      if(!consortium) return;
+      const created = await addMaintenanceRequest(consortium.id, data);
+      setMaintenanceRequests([created as MaintenanceRequest, ...maintenanceRequests]);
+  };
+
+  const handleUpdateMaintenance = async (id: string, updates: Partial<MaintenanceRequest>) => {
+      if(!consortium) return;
+      await updateMaintenanceRequest(consortium.id, id, updates);
+      setMaintenanceRequests(maintenanceRequests.map(m => m.id === id ? { ...m, ...updates } : m));
+  };
+
+  const handleDeleteMaintenance = async (id: string) => {
+      if(!consortium) return;
+      await deleteMaintenanceRequest(consortium.id, id);
+      setMaintenanceRequests(maintenanceRequests.filter(m => m.id !== id));
+  };
+
+  // --- HANDLERS RESERVAS ---
+  const handleAddAmenity = async (data: Omit<Amenity, 'id'>) => {
+      if(!consortium) return;
+      const created = await addAmenity(consortium.id, data);
+      setAmenities([...amenities, created as Amenity]);
+  };
+
+  const handleDeleteAmenity = async (id: string) => {
+      if(!consortium) return;
+      await deleteAmenity(consortium.id, id);
+      setAmenities(amenities.filter(a => a.id !== id));
+  };
+
+  const handleAddBooking = async (data: Omit<Booking, 'id'>) => {
+      if(!consortium) return;
+      const created = await addBooking(consortium.id, data);
+      setBookings([created as Booking, ...bookings]);
+  };
+
+  const handleDeleteBooking = async (id: string) => {
+      if(!consortium) return;
+      await deleteBooking(consortium.id, id);
+      setBookings(bookings.filter(b => b.id !== id));
+  };
+
   if (!user || !consortium) {
     return (
       <AuthView 
@@ -128,43 +238,76 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-100">
-      <Sidebar currentView={view} onChangeView={setView} consortiumName={consortium.name} onSwitchConsortium={() => setConsortium(null)} onLogout={() => setUser(null)} userRole={user.role} />
-      <main className="flex-1 overflow-y-auto p-8 ml-64">
-        <div className="max-w-7xl mx-auto">
+    <div className="flex h-screen bg-slate-100 flex-col md:flex-row">
+      <div className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between shadow-md z-20">
+          <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-slate-300 hover:text-white">
+              <Menu className="w-6 h-6" />
+          </button>
+          <span className="font-bold truncate">{consortium.name}</span>
+          <div className="w-6"></div>
+      </div>
+
+      <Sidebar 
+        currentView={view} 
+        onChangeView={setView} 
+        consortiumName={consortium.name} 
+        onSwitchConsortium={() => setConsortium(null)} 
+        onLogout={() => setUser(null)} 
+        userRole={user.role}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        badges={menuBadges}
+      />
+      
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 md:ml-64 h-[calc(100vh-64px)] md:h-screen">
+        <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {loading && <div className="text-center p-4">Cargando datos...</div>}
 
           {!loading && view === 'dashboard' && (
             <Dashboard 
-                units={units} 
-                expenses={expenses} 
-                settings={settings} 
-                reserveHistory={[]} 
-                userRole={user.role} // <--- Pasamos el Rol
-                consortiumId={consortium.id} // <--- Pasamos el ID del Consorcio
-                onDataReset={loadConsortiumData} // <--- Función de recarga tras borrado
+                units={units} expenses={expenses} payments={payments} settings={settings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}}
             />
+          )}
+
+          {!loading && view === 'announcements' && (
+             <AnnouncementsView announcements={announcements} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />
+          )}
+
+          {!loading && view === 'maintenance' && (
+             <MaintenanceView 
+                requests={maintenanceRequests}
+                units={units}
+                userRole={user.role}
+                userEmail={user.email}
+                onAdd={handleAddMaintenance}
+                onUpdate={handleUpdateMaintenance}
+                onDelete={handleDeleteMaintenance}
+             />
+          )}
+
+          {!loading && view === 'amenities' && (
+             <AmenitiesView 
+                amenities={amenities}
+                bookings={bookings}
+                units={units}
+                userRole={user.role}
+                userEmail={user.email}
+                onAddAmenity={handleAddAmenity}
+                onDeleteAmenity={handleDeleteAmenity}
+                onAddBooking={handleAddBooking}
+                onDeleteBooking={handleDeleteBooking}
+             />
           )}
 
           {!loading && view === 'units' && <UnitsView units={units} setUnits={setUnits} consortiumId={consortium.id} />}
           
           {!loading && view === 'expenses' && (
-            <ExpensesView 
-                expenses={expenses} 
-                setExpenses={setExpenses} 
-                reserveBalance={settings.reserveFundBalance}
-                consortiumId={consortium.id} 
-            />
+            <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} consortiumId={consortium.id} />
           )}
           
           {!loading && view === 'settlement' && (
             <SettlementView 
-                units={units} 
-                expenses={expenses} 
-                setExpenses={setExpenses}
-                settings={settings} 
-                consortiumId={consortium.id}
-                consortiumName={consortium.name}
+                units={units} expenses={expenses} setExpenses={setExpenses} settings={settings} consortiumId={consortium.id} consortiumName={consortium.name}
                 updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})}
                 onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})}
                 onCloseMonth={handleCloseMonth}
@@ -175,20 +318,23 @@ function App() {
           
           {!loading && view === 'user_portal' && (
             <UserPortal 
-                userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} settings={settings}
+                userEmail={user.email} units={units} expenses={expenses} history={history} payments={payments} settings={settings} announcements={announcements}
+                debtAdjustments={debtAdjustments} 
                 onReportPayment={handleReportPayment} 
             />
           )}
           
-          {!loading && view === 'debtors' && <DebtorsView units={units} payments={payments} history={history} debtAdjustments={debtAdjustments} setDebtAdjustments={setDebtAdjustments} />}
+          {!loading && view === 'debtors' && (
+            <DebtorsView 
+                units={units} payments={payments} history={history} 
+                debtAdjustments={debtAdjustments} 
+                onAddAdjustment={handleAddDebtAdjustment} 
+                onDeleteAdjustment={handleDeleteDebtAdjustment} 
+            />
+          )}
           
           {!loading && view === 'collections' && (
-             <CollectionsView 
-                payments={payments} 
-                units={units} 
-                onAddPayment={handleAdminAddPayment}
-                onUpdateStatus={handlePaymentStatusChange}
-             />
+             <CollectionsView payments={payments} units={units} onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange} />
           )}
           
           {!loading && view === 'settings' && (

@@ -13,11 +13,11 @@
     "@google/generative-ai": "^0.24.1",
     "firebase": "^12.6.0",
     "jspdf": "^3.0.4",
-    "jspdf-autotable": "^5.0.2",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "recharts": "^3.5.1"
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.2",

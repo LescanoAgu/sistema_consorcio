@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Expense, ExpenseDistributionType } from '../types';
-import { Plus, Trash2, DollarSign, Tag, Paperclip, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
-import { addExpense, deleteExpense } from '../services/firestoreService'; // ✅ IMPORTANTE
+import { Plus, Trash2, DollarSign, Tag, Paperclip, CheckCircle, Loader2, AlertCircle, FileText } from 'lucide-react';
+import { addExpense, deleteExpense, uploadExpenseReceipt } from '../services/firestoreService';
 
 interface ExpensesViewProps {
   expenses: Expense[];
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
   reserveBalance: number;
-  consortiumId: string; // ✅ NUEVO PROP
+  consortiumId: string;
 }
 
 const EXPENSE_CATEGORIES = [
@@ -18,7 +18,6 @@ const EXPENSE_CATEGORIES = [
 const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, reserveBalance, consortiumId }) => {
   const [isFormOpen, setIsFormOpen] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   
   const [newExpense, setNewExpense] = useState<Partial<Expense>>({
     description: '',
@@ -48,6 +47,23 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     }, {} as Record<string, Expense[]>);
   }, [expenses]);
 
+  // --- SUBIDA REAL DE ARCHIVOS ---
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+          const file = e.target.files[0];
+          setIsUploading(true);
+          try {
+              const url = await uploadExpenseReceipt(file);
+              setNewExpense(curr => ({ ...curr, attachmentUrl: url }));
+          } catch (error) {
+              console.error("Error subiendo archivo:", error);
+              alert("Error al subir el comprobante. Intente nuevamente.");
+          } finally {
+              setIsUploading(false);
+          }
+      }
+  }
+
   const handleAdd = async () => {
     if (!newExpense.description) return alert("Falta descripción");
     const amount = Number(newExpense.amount) || 0;
@@ -60,21 +76,18 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
         const covered = currentAvailableBalance > 0 ? currentAvailableBalance : 0;   
         const remainder = amount - covered;
         
-        // CASO A: Fondo Vacío -> Todo a Extraordinaria
         if (covered <= 0) {
             if(confirm(`⚠️ EL FONDO ESTÁ VACÍO ($0.00)\n\n¿Desea cargar los $${amount.toLocaleString()} como EXPENSA EXTRAORDINARIA?`)) {
-                const expenseExtra: Expense = {
-                    id: 'temp',
+                // CORRECCIÓN: No pasamos 'id' aquí
+                const expenseExtra = {
                     description: `${newExpense.description} (Saldo)`,
                     amount: amount,
                     date: dateToUse,
-                    category: 'Extraordinary',
+                    category: 'Extraordinary' as const,
                     itemCategory: newExpense.itemCategory || 'Otros',
                     distributionType: ExpenseDistributionType.PRORATED,
                     attachmentUrl: newExpense.attachmentUrl
                 };
-                
-                // Guardar en Firebase
                 const saved = await addExpense(consortiumId, expenseExtra);
                 setExpenses([...expenses, saved]);
                 resetForm();
@@ -83,31 +96,29 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
             return;
         }
 
-        // CASO B: Split Automático
         if (confirm(`⚠️ SALDO INSUFICIENTE\n\nQuedan: $${covered.toLocaleString()}\nFaltan: $${remainder.toLocaleString()}\n\n¿Dividir automáticamente?`)) {
-            const expenseReserve: Expense = {
-                id: 'temp1',
+            // CORRECCIÓN: Quitamos el id: 'temp1'
+            const expenseReserve = {
                 description: `${newExpense.description} (Parte Fondo)`,
                 amount: covered,
                 date: dateToUse,
-                category: 'Ordinary', 
+                category: 'Ordinary' as const, 
                 itemCategory: newExpense.itemCategory || 'Otros',
                 distributionType: ExpenseDistributionType.FROM_RESERVE,
-                attachmentUrl: newExpense.attachmentUrl
+                attachmentUrl: newExpense.attachmentUrl 
             };
 
-            const expenseExtra: Expense = {
-                id: 'temp2',
+            // CORRECCIÓN: Quitamos el id: 'temp2'
+            const expenseExtra = {
                 description: `${newExpense.description} (Saldo)`,
                 amount: remainder,
                 date: dateToUse,
-                category: 'Extraordinary', 
+                category: 'Extraordinary' as const, 
                 itemCategory: newExpense.itemCategory || 'Otros',
                 distributionType: ExpenseDistributionType.PRORATED,
                 attachmentUrl: newExpense.attachmentUrl
             };
 
-            // Guardar ambos en Firebase
             const saved1 = await addExpense(consortiumId, expenseReserve);
             const saved2 = await addExpense(consortiumId, expenseExtra);
 
@@ -118,8 +129,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     }
 
     // --- CARGA NORMAL ---
-    const expense: Expense = {
-      id: 'temp', // El ID real lo da Firebase
+    // CORRECCIÓN: Creamos el objeto SIN la propiedad 'id'
+    const expenseData = {
       description: newExpense.description || '',
       amount: amount,
       date: dateToUse,
@@ -130,8 +141,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     };
 
     try {
-        // ✅ GUARDADO REAL EN FIREBASE
-        const savedExpense = await addExpense(consortiumId, expense);
+        const savedExpense = await addExpense(consortiumId, expenseData);
         setExpenses([...expenses, savedExpense]);
         resetForm();
     } catch (e) {
@@ -151,31 +161,13 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
   const handleDelete = async (id: string) => {
     if(confirm('¿Eliminar gasto?')) {
         try {
-            await deleteExpense(consortiumId, id); // ✅ BORRADO REAL
+            await deleteExpense(consortiumId, id);
             setExpenses(expenses.filter(e => e.id !== id));
         } catch(e) {
             alert("Error al eliminar");
         }
     }
   };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          const file = e.target.files[0];
-          setIsUploading(true);
-          const interval = setInterval(() => {
-              setUploadProgress((prev) => {
-                  if (prev >= 100) {
-                      clearInterval(interval);
-                      setIsUploading(false);
-                      setNewExpense(curr => ({ ...curr, attachmentUrl: `ticket_${file.name}` }));
-                      return 100;
-                  }
-                  return prev + 20;
-              });
-          }, 100);
-      }
-  }
 
   return (
     <div className="space-y-6">
@@ -290,12 +282,12 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                     <label className="block text-sm font-medium text-slate-700 mb-1">Comprobante (PDF/Foto)</label>
                     {isUploading ? (
                         <div className="w-full h-[42px] px-4 border border-indigo-200 rounded-lg flex items-center bg-indigo-50 text-sm text-indigo-700">
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin"/> Subiendo... {uploadProgress}%
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin"/> Subiendo a la nube...
                         </div>
                     ) : (
                         <label className={`flex items-center w-full px-3 py-2 border rounded-lg cursor-pointer transition-colors ${newExpense.attachmentUrl ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 hover:bg-slate-50 text-slate-500'}`}>
                             {newExpense.attachmentUrl ? (
-                                <><CheckCircle className="w-4 h-4 mr-2" /> <span className="truncate flex-1">{newExpense.attachmentUrl.replace('ticket_', '')}</span></>
+                                <><CheckCircle className="w-4 h-4 mr-2" /> <span className="truncate flex-1">¡Archivo Cargado!</span></>
                             ) : (
                                 <><Paperclip className="w-4 h-4 mr-2" /> <span className="flex-1">Adjuntar archivo...</span></>
                             )}
@@ -349,7 +341,20 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                             {gastosAgrupados[cat].map(e => (
                                 <tr key={e.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="px-6 py-3 text-slate-500 whitespace-nowrap">{new Date(e.date).toLocaleDateString()}</td>
-                                    <td className="px-6 py-3 font-medium text-slate-800">{e.description}</td>
+                                    <td className="px-6 py-3 font-medium text-slate-800">
+                                        {e.description}
+                                        {/* BOTÓN PARA VER EL ADJUNTO SI EXISTE */}
+                                        {e.attachmentUrl && (
+                                            <a 
+                                                href={e.attachmentUrl} 
+                                                target="_blank" 
+                                                rel="noreferrer" 
+                                                className="inline-flex items-center ml-2 text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded text-[10px]"
+                                            >
+                                                <FileText className="w-3 h-3 mr-1" /> Ver Factura
+                                            </a>
+                                        )}
+                                    </td>
                                     <td className="px-6 py-3">
                                         <div className="flex flex-col items-start gap-1">
                                             <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${e.category === 'Ordinary' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-purple-50 text-purple-700 border-purple-100'}`}>
