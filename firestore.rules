@@ -3,19 +3,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. REGLA PARA LA LISTA DE CONSORCIOS (Solo lectura pública)
-    // Permite que cualquier usuario (incluso no logueado) lea la lista para poder seleccionar uno.
-    match /consorcios/{consortiumId} {
-      allow read: if true; 
-      
-      // Proteger la escritura: Solo usuarios autenticados pueden crear, editar o borrar consorcios.
+    // 1. REGLA PARA LA LISTA DE CONSORCIOS
+    // CAMBIO IMPORTANTE: Usamos 'consortiums' (inglés) para coincidir con firestoreService.ts
+    match /consortiums/{consortiumId} {
+      // Permite leer la lista para seleccionarlo en el login
+      allow read: if true;
+      // Solo usuarios autenticados pueden crear, editar o borrar
       allow create, update, delete: if request.auth != null;
     }
 
-    // 2. REGLA PARA DATOS SENSIBLES (Gastos, Unidades, Liquidaciones, etc.)
-    // Aplica a todas las subcolecciones dentro de cualquier consorcio.
-    match /consorcios/{consortiumId}/{subcollection}/{document=**} {
-      // Requiere autenticación para leer y escribir estos datos.
+    // 2. REGLA PARA DATOS SENSIBLES (Gastos, Unidades, etc.)
+    // CAMBIO IMPORTANTE: Usamos 'consortiums' aquí también
+    match /consortiums/{consortiumId}/{subcollection}/{document=**} {
+      // Requiere estar logueado para ver o tocar los datos internos
       allow read, write: if request.auth != null;
     }
   }
