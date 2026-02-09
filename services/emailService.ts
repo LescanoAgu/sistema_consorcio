@@ -2,7 +2,7 @@ import emailjs from '@emailjs/browser';
 import { Unit } from '../types';
 
 // REEMPLAZA ESTOS VALORES CON LOS TUYOS DE EMAILJS
-const SERVICE_ID = 'ku5b•••••••••••••••••';
+const SERVICE_ID = 'service_ujpohj7';
 const PUBLIC_KEY = 'lgbzpFx02o6XhVAFw';
 const TEMPLATE_ID_ANNOUNCEMENT = 'template_mmvgspu';
 const TEMPLATE_ID_SETTLEMENT = 'template_zuox6yl';

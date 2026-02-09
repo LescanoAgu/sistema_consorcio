@@ -4,20 +4,21 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
-// TUS CLAVES VAN AQUÍ
+// AHORA LEEMOS DESDE EL ENTORNO (SEGURO)
 const firebaseConfig = {
-  apiKey: "AIzaSyDR9ZeCU4Cbt4uFwszb_wOH7Ruq2z-LHVE",
-  authDomain: "sistema-consorcio-v2.firebaseapp.com",
-  projectId: "sistema-consorcio-v2",
-  storageBucket: "sistema-consorcio-v2.firebasestorage.app",
-  messagingSenderId: "161822155934",
-  appId: "1:161822155934:web:d6e7ef43fd0a079fd0478f",
-  measurementId: "G-Z4V8YM8D3X"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 // Inicializar Firebase
 const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
+
 // Exportar los servicios
 export const db = getFirestore(app);
 export const auth = getAuth(app);
