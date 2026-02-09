@@ -34,3 +34,6 @@ dist-ssr
 
 # Firebase cache
 .firebase/
+
+*.json
+*.yml
