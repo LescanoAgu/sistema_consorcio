@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # PASO CLAVE: Instalar y Construir con las variables inyectadas
+      # ESTE ES EL PASO CORREGIDO:
       - run: npm ci && npm run build
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
