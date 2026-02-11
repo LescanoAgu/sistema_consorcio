@@ -56,24 +56,46 @@ export const registerUserAccess = async (email: string, consortiumId: string) =>
     }
 };
 
-// --- UNITS ---
-export const getUnits = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/units`));
+// --- UNITS (CORREGIDO PARA SEGURIDAD Y TIPOS) ---
+export const getUnits = async (consortiumId: string, userEmail: string | null = null, isAdmin: boolean = true) => {
+    const unitsRef = collection(db, `consortiums/${consortiumId}/units`);
+    let q;
+
+    if (isAdmin) {
+        // Si es Admin, trae todo
+        q = query(unitsRef);
+    } else {
+        // Si es Usuario, filtra por email (COINCIDE CON REGLA DE SEGURIDAD)
+        if (!userEmail) return [];
+        q = query(unitsRef, where('authorizedEmails', 'array-contains', userEmail));
+    }
+
     const snapshot = await getDocs(q);
-    const list = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Unit));
+    // AQUÍ ESTABA EL ERROR: Agregamos 'as any' para permitir el spread
+    const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id } as Unit));
     return list.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true, sensitivity: 'base' }));
 };
 
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
-    if (unit.linkedEmail) await registerUserAccess(unit.linkedEmail, consortiumId);
+    // Registramos acceso para todos los emails cargados
+    if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
+        for (const email of unit.authorizedEmails) {
+            await registerUserAccess(email, consortiumId);
+        }
+    }
     return { id: docRef.id, ...unit };
 };
 
 export const updateUnit = async (consortiumId: string, unit: Unit) => {
     const docRef = doc(db, `consortiums/${consortiumId}/units`, unit.id);
     await updateDoc(docRef, { ...unit });
-    if (unit.linkedEmail) await registerUserAccess(unit.linkedEmail, consortiumId);
+    // Actualizamos acceso
+    if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
+        for (const email of unit.authorizedEmails) {
+            await registerUserAccess(email, consortiumId);
+        }
+    }
 };
 
 export const deleteUnit = async (consortiumId: string, unitId: string) => {
@@ -259,7 +281,7 @@ export const getPayments = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
 };
 
-// --- SETTINGS (UPDATED: InterestRate) ---
+// --- SETTINGS ---
 export const getSettings = async (consortiumId: string): Promise<ConsortiumSettings> => {
     const docRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
     const snap = await getDoc(docRef);
@@ -267,7 +289,7 @@ export const getSettings = async (consortiumId: string): Promise<ConsortiumSetti
         const data = snap.data();
         return {
             ...data,
-            interestRate: data.interestRate !== undefined ? data.interestRate : 5 // Default 5%
+            interestRate: data.interestRate !== undefined ? data.interestRate : 5 
         } as ConsortiumSettings;
     } else {
         return { 

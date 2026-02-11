@@ -82,12 +82,17 @@ function App() {
       }
   }, [consortiumList]);
 
-  // 3. Cargar datos
+  // 3. Cargar datos (ACTUALIZADO CON SEGURIDAD)
   useEffect(() => {
-    if (consortium && consortium.id) {
+    if (consortium && consortium.id && user) {
         setLoading(true);
+
+        // Verificamos si este usuario es realmente Admin de este consorcio
+        const isConsortiumAdmin = (consortium.adminIds || []).includes(user.uid);
+
         Promise.all([
-            getUnits(consortium.id), 
+            // Pasamos el email y el flag de admin para filtrar correctamente
+            getUnits(consortium.id, user.email, isConsortiumAdmin), 
             getExpenses(consortium.id), 
             getHistory(consortium.id), 
             getSettings(consortium.id),
@@ -118,18 +123,25 @@ function App() {
             setLoading(false);
         });
     }
-  }, [consortium]);
+  }, [consortium, user]); // Agregué 'user' a las dependencias
 
   // 4. Rol
   useEffect(() => {
+      // Nota: Este efecto es visual para la UI.
+      // La seguridad real ya la aplicamos en la carga de datos (getUnits).
       if (user && units.length > 0) {
-          const ownerUnit = units.find(u => u.linkedEmail === user.email);
-          if (ownerUnit && user.role !== 'USER') {
-              setUser(prev => prev ? ({ ...prev, role: 'USER' }) : null);
-              setView('user_portal');
+          // Buscamos si el email está en alguna lista de autorizados
+          const myUnits = units.filter(u => u.authorizedEmails && u.authorizedEmails.includes(user.email));
+          
+          if (myUnits.length > 0 && user.role !== 'USER') {
+              // Si tiene unidades pero NO es admin del consorcio actual
+              if (consortium && !(consortium.adminIds || []).includes(user.uid)) {
+                  setUser(prev => prev ? ({ ...prev, role: 'USER' }) : null);
+                  setView('user_portal');
+              }
           } 
       }
-  }, [units, user?.email]);
+  }, [units, user?.email, consortium]);
 
   // Handlers
   const handleSelectConsortium = (c: Consortium) => {
@@ -167,9 +179,7 @@ function App() {
   };
   const handleReportPayment = async (data: any) => {
       if(!consortium || !user) return;
-      // Nota: En UserPortal multi-unit, pasamos la unidad seleccionada en data, aquí simplificamos buscando la primera por compatibilidad
-      // Idealmente UserPortal debería pasar unitId. Por ahora mantenemos compatibilidad.
-      const myUnit = units.find(u => u.id === data.unitId) || units.find(u => u.linkedEmail === user.email);
+      const myUnit = units.find(u => u.id === data.unitId) || units.find(u => u.authorizedEmails?.includes(user.email));
       if (!myUnit) { alert("Error de unidad."); return; }
       let attachmentUrl = '';
       if (data.file) attachmentUrl = await uploadPaymentReceipt(data.file);
@@ -187,7 +197,6 @@ function App() {
       await updatePayment(consortium.id, id, { status: newStatus });
       setPayments(payments.map(p => p.id === id ? { ...p, status: newStatus } : p));
   };
-  // (Resto de handlers Add/Delete announcements, etc. se mantienen igual, omitidos para brevedad, copiar del anterior si faltan)
   const handleAddAnnouncement = async (data: any) => {
       if(!consortium) return;
       const created = await addAnnouncement(consortium.id, data);

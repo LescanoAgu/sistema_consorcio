@@ -1,11 +1,11 @@
 import emailjs from '@emailjs/browser';
 import { Unit } from '../types';
 
-// REEMPLAZA ESTOS VALORES CON LOS TUYOS DE EMAILJS
-const SERVICE_ID = 'service_ujpohj7';
-const PUBLIC_KEY = 'lgbzpFx02o6XhVAFw';
-const TEMPLATE_ID_ANNOUNCEMENT = 'template_mmvgspu';
-const TEMPLATE_ID_SETTLEMENT = 'template_zuox6yl';
+// AHORA SÍ: Leemos desde las variables de entorno seguras
+const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+const PUBLIC_KEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+const TEMPLATE_ID_ANNOUNCEMENT = import.meta.env.VITE_EMAILJS_TEMPLATE_ID_ANNOUNCEMENT;
+const TEMPLATE_ID_SETTLEMENT = import.meta.env.VITE_EMAILJS_TEMPLATE_ID_SETTLEMENT;
 
 export const initEmailService = () => {
     emailjs.init(PUBLIC_KEY);
@@ -18,7 +18,6 @@ export const sendAnnouncementEmail = async (units: Unit[], title: string, conten
     
     console.log(`Enviando avisos a ${recipients.length} propietarios...`);
 
-    // EmailJS gratis tiene límite de velocidad, enviamos en serie
     const promises = recipients.map(unit => {
         const templateParams = {
             to_email: unit.linkedEmail,

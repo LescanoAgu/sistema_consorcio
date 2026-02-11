@@ -7,7 +7,6 @@ export enum ExpenseDistributionType {
 export type UserRole = 'DEV' | 'ADMIN' | 'USER';
 export type MaintenanceStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE';
 
-// --- NUEVO: Documentos ---
 export interface ConsortiumDocument {
   id: string;
   title: string;
@@ -39,7 +38,8 @@ export interface Unit {
   id: string;
   unitNumber: string;
   ownerName: string;
-  linkedEmail?: string;
+  // CAMBIO IMPORTANTE: Lista de emails (Dueño + Inquilinos)
+  authorizedEmails: string[]; 
   proratePercentage: number; 
   initialBalance: number; 
 }
@@ -150,7 +150,7 @@ export interface AppSettings {
 
 export interface ExpenseTemplate {
   id: string;
-  alias: string; // Nombre corto para identificarla (ej: "Abono Ascensor")
+  alias: string;
   description: string;
   amount: number;
   category: 'Ordinary' | 'Extraordinary';
@@ -158,5 +158,4 @@ export interface ExpenseTemplate {
   distributionType: ExpenseDistributionType;
 }
 
-// Agregamos 'documents' a las vistas
 export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities' | 'profile' | 'documents';

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Unit } from '../types';
-import { Plus, Edit2, Trash2, Search, Mail, Home, User, Save, X, Upload, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Mail, Home, User, X, Upload, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { addUnit, updateUnit, deleteUnit } from '../services/firestoreService';
 import * as XLSX from 'xlsx';
 
@@ -17,10 +17,11 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
   const [isImporting, setIsImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Estado del formulario (ahora emailsInput es un string para manejar comas)
   const [formData, setFormData] = useState({
     unitNumber: '',
     ownerName: '',
-    linkedEmail: '',
+    authorizedEmailsInput: '', 
     proratePercentage: '', 
     initialBalance: ''     
   });
@@ -32,7 +33,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
 
   const handleOpenCreate = () => {
       setEditingId(null);
-      setFormData({ unitNumber: '', ownerName: '', linkedEmail: '', proratePercentage: '', initialBalance: '' });
+      setFormData({ unitNumber: '', ownerName: '', authorizedEmailsInput: '', proratePercentage: '', initialBalance: '' });
       setIsModalOpen(true);
   };
 
@@ -41,7 +42,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
       setFormData({
           unitNumber: unit.unitNumber,
           ownerName: unit.ownerName,
-          linkedEmail: unit.linkedEmail || '',
+          // Convertimos el array de emails a string separado por comas para editar
+          authorizedEmailsInput: unit.authorizedEmails ? unit.authorizedEmails.join(', ') : '',
           proratePercentage: unit.proratePercentage.toString(),
           initialBalance: unit.initialBalance.toString()
       });
@@ -50,12 +52,18 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
 
   const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!consortiumId) return alert("Error: No se identificó el consorcio. Refresque la página."); // <--- VALIDACIÓN
+      if (!consortiumId) return alert("Error: No se identificó el consorcio. Refresque la página.");
       if (!formData.unitNumber || !formData.ownerName) return alert("Número y Propietario obligatorios");
 
       setIsSubmitting(true);
       const finalPercentage = parseFloat(formData.proratePercentage) || 0;
       const finalBalance = parseFloat(formData.initialBalance) || 0;
+
+      // PROCESAR EMAILS: De string "a@a.com, b@b.com" a array ["a@a.com", "b@b.com"]
+      const emailsArray = formData.authorizedEmailsInput
+          .split(',')
+          .map(email => email.trim())
+          .filter(email => email.length > 0 && email.includes('@'));
 
       try {
           if (editingId) {
@@ -63,7 +71,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                   id: editingId, 
                   unitNumber: formData.unitNumber,
                   ownerName: formData.ownerName,
-                  linkedEmail: formData.linkedEmail,
+                  authorizedEmails: emailsArray,
                   proratePercentage: finalPercentage,
                   initialBalance: finalBalance
               };
@@ -73,7 +81,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
               const newUnitData = {
                   unitNumber: formData.unitNumber,
                   ownerName: formData.ownerName,
-                  linkedEmail: formData.linkedEmail,
+                  authorizedEmails: emailsArray,
                   proratePercentage: finalPercentage,
                   initialBalance: finalBalance
               };
@@ -99,18 +107,17 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
       }
   };
 
-  // --- IMPORTACIÓN MASIVA EXCEL ---
+  // --- IMPORTACIÓN MASIVA EXCEL (Actualizado para multiples mails) ---
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // VALIDACIÓN CRÍTICA: Si no hay ID, frenamos antes de que explote Firebase
       if (!consortiumId) {
-          alert("Error crítico: El ID del consorcio no está cargado. Por favor, recarga la página (F5) e intenta nuevamente.");
+          alert("Error crítico: El ID del consorcio no está cargado. Por favor, recarga la página.");
           return;
       }
 
-      if (!confirm("⚠️ Se importarán unidades desde el Excel. Asegúrese de que el archivo tenga las columnas: 'Unidad', 'Propietario', 'Email', 'Porcentaje', 'SaldoInicial'.")) return;
+      if (!confirm("⚠️ Se importarán unidades. Asegúrese de que el Excel tenga las columnas: 'Unidad', 'Propietario', 'Emails', 'Porcentaje', 'SaldoInicial'.")) return;
 
       setIsImporting(true);
       const reader = new FileReader();
@@ -124,17 +131,19 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
               const data = XLSX.utils.sheet_to_json(ws);
 
               let count = 0;
-              // Cast explícito para evitar error de TypeScript 'any'
               for (const row of (data as any[])) {
-                  // Mapeo flexible de columnas (funciona con mayúsculas/minúsculas)
                   const unitNumber = row['Unidad'] || row['unidad'] || row['UF'];
                   const ownerName = row['Propietario'] || row['propietario'] || row['Nombre'];
                   
                   if (unitNumber && ownerName) {
+                      // Procesa emails del excel (puede venir uno solo o varios separados por coma)
+                      const rawEmails = row['Emails'] || row['emails'] || row['Email'] || '';
+                      const emailsArray = String(rawEmails).split(',').map(e => e.trim()).filter(e => e.includes('@'));
+
                       const newUnit = {
                           unitNumber: String(unitNumber),
                           ownerName: String(ownerName),
-                          linkedEmail: row['Email'] || row['email'] || '',
+                          authorizedEmails: emailsArray,
                           proratePercentage: parseFloat(row['Porcentaje'] || row['porcentaje'] || 0),
                           initialBalance: parseFloat(row['SaldoInicial'] || row['saldo'] || 0)
                       };
@@ -150,7 +159,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
               alert("Error al procesar el archivo Excel. Verifique el formato.");
           } finally {
               setIsImporting(false);
-              e.target.value = ''; // Reset input
+              e.target.value = ''; 
           }
       };
       reader.readAsBinaryString(file);
@@ -158,8 +167,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
 
   const downloadTemplate = () => {
       const ws = XLSX.utils.json_to_sheet([
-          { Unidad: "1A", Propietario: "Juan Perez", Email: "juan@mail.com", Porcentaje: 5.5, SaldoInicial: 0 },
-          { Unidad: "1B", Propietario: "Maria Gomez", Email: "maria@mail.com", Porcentaje: 4.2, SaldoInicial: 1000 }
+          { Unidad: "1A", Propietario: "Juan Perez", Emails: "juan@mail.com, inquilino@mail.com", Porcentaje: 5.5, SaldoInicial: 0 },
+          { Unidad: "1B", Propietario: "Maria Gomez", Emails: "maria@mail.com", Porcentaje: 4.2, SaldoInicial: 1000 }
       ]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Plantilla Unidades");
@@ -171,11 +180,10 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Unidades Funcionales</h2>
-           <p className="text-slate-500 text-sm">Gestión de propietarios e inquilinos</p>
+           <p className="text-slate-500 text-sm">Gestión de propietarios e inquilinos (Multi-usuario)</p>
         </div>
         
         <div className="flex gap-2 w-full md:w-auto flex-wrap">
-            {/* BUSCADOR */}
             <div className="relative flex-1 md:w-48">
                 <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                 <input 
@@ -187,7 +195,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                 />
             </div>
 
-            {/* BOTONES IMPORTAR / EXPORTAR */}
             <button onClick={downloadTemplate} className="text-slate-500 hover:text-indigo-600 p-2 border rounded-lg" title="Descargar Plantilla Excel">
                 <FileSpreadsheet className="w-5 h-5"/>
             </button>
@@ -234,11 +241,20 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                           <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
                               <User className="w-4 h-4 text-indigo-500"/> {unit.ownerName}
                           </h3>
-                          {unit.linkedEmail && (
-                              <p className="text-sm text-slate-500 flex items-center gap-2">
-                                  <Mail className="w-3 h-3"/> {unit.linkedEmail}
-                              </p>
+                          
+                          {/* Visualización de Múltiples Emails */}
+                          {unit.authorizedEmails && unit.authorizedEmails.length > 0 ? (
+                              <div className="flex flex-col gap-1">
+                                  {unit.authorizedEmails.map((email, idx) => (
+                                      <p key={idx} className="text-xs text-slate-500 flex items-center gap-2 bg-slate-50 p-1 rounded">
+                                          <Mail className="w-3 h-3 text-slate-400"/> {email}
+                                      </p>
+                                  ))}
+                              </div>
+                          ) : (
+                              <p className="text-xs text-slate-400 italic pl-1">Sin emails vinculados</p>
                           )}
+
                           <div className="pt-3 mt-3 border-t border-slate-50 flex justify-between items-center text-sm">
                               <span className="text-slate-500">Prorrateo:</span>
                               <span className="font-mono font-bold bg-indigo-50 text-indigo-700 px-2 rounded">
@@ -277,10 +293,20 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                           <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Propietario</label>
                           <input required type="text" className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" placeholder="Ej: Juan Pérez" value={formData.ownerName} onChange={e => setFormData({...formData, ownerName: e.target.value})} />
                       </div>
+                      
+                      {/* CAMPO DE EMAILS MÚLTIPLES */}
                       <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-1">Email Vinculado</label>
-                          <input type="email" className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" placeholder="juan@email.com" value={formData.linkedEmail} onChange={e => setFormData({...formData, linkedEmail: e.target.value})} />
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Emails Autorizados (separar por coma)</label>
+                          <input 
+                            type="text" 
+                            className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" 
+                            placeholder="dueño@mail.com, inquilino@mail.com" 
+                            value={formData.authorizedEmailsInput} 
+                            onChange={e => setFormData({...formData, authorizedEmailsInput: e.target.value})} 
+                          />
+                          <p className="text-xs text-slate-400 mt-1">Estos usuarios podrán ver esta unidad.</p>
                       </div>
+
                       {!editingId && (
                           <div>
                               <label className="block text-sm font-medium text-slate-700 mb-1">Saldo Inicial / Deuda</label>

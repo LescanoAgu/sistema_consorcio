@@ -2,44 +2,75 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Función auxiliar: Verifica si el usuario actual está en la lista de admins del consorcio
+    // --- FUNCIONES AUXILIARES ---
+
+    // 1. ¿Es Admin de ESTE consorcio?
     function isAdmin(consortiumId) {
       return request.auth.uid in get(/databases/$(database)/documents/consortiums/$(consortiumId)).data.adminIds;
     }
-
-    // 1. Acceso de Usuario (Cada uno lee su propio perfil de accesos)
-    match /user_access/{email} {
-      allow read: if request.auth.token.email == email;
-      // Escritura permitida temporalmente para registros automáticos
-      allow write: if request.auth != null; 
+    
+    // 2. ¿Tiene permiso para crear más consorcios? (Control SaaS)
+    function canCreateConsortium() {
+      // Busca la ficha del cliente en 'saas_admins'
+      let adminDoc = get(/databases/$(database)/documents/saas_admins/$(request.auth.uid));
+      // Pasa si existe el doc Y si no superó su límite
+      return adminDoc != null && adminDoc.data.activeConsortiums < adminDoc.data.maxConsortiums;
     }
 
-    // 2. Colección Consorcios
+    // --- REGLAS POR COLECCIÓN ---
+
+    // 1. Colección de Control SaaS (Solo legible por el dueño del plan)
+    match /saas_admins/{userId} {
+      allow read: if request.auth.uid == userId;
+      allow write: if false; // Solo tú desde Firebase Console puedes editar esto
+    }
+
+    // 2. Perfiles de usuario (Accesos rápidos)
+    match /user_access/{email} {
+      allow read: if request.auth.token.email == email;
+      allow write: if request.auth != null;
+    }
+
+    // 3. Consorcios
     match /consortiums/{consortiumId} {
-      // Crear: Cualquier usuario logueado
-      allow create: if request.auth != null;
+      // Crear: Solo si tiene plan SaaS activo
+      allow create: if request.auth != null && canCreateConsortium();
       
-      // Leer: Cualquier usuario logueado (necesario para listar y seleccionar)
-      allow read: if request.auth != null;
-      
-      // Modificar/Borrar Consorcio: SOLO ADMINS
+      // Leer: Si es Admin del consorcio O un usuario logueado (necesario para la UI inicial)
+      // Idealmente aquí filtraríamos más, pero por ahora el filtro fuerte está en las subcolecciones.
+      allow read: if request.auth != null; 
+
+      // Modificar/Borrar: Solo Admins de ese consorcio
       allow update, delete: if isAdmin(consortiumId);
 
-      // --- SUBCOLECCIONES (Unidades, Gastos, Historia) ---
-      match /{document=**} {
-        // Leer: Usuarios logueados (Vecinos y Admin)
-        allow read: if request.auth != null;
+      // --- SUBCOLECCIONES ---
+      
+      // A. Unidades (PRIVACIDAD ESTRICTA)
+      match /units/{unitId} {
+        // Leer: Solo si soy Admin O si mi email está en la lista de autorizados de ESA unidad
+        allow read: if isAdmin(consortiumId) || (request.auth.token.email in resource.data.authorizedEmails);
         
-        // Escribir/Borrar datos sensibles: SOLO ADMINS
+        // Escribir: Solo Admin
+        allow write: if isAdmin(consortiumId);
+      }
+
+      // B. Gastos, Liquidaciones (Admins y Vecinos ven, solo Admin edita)
+      match /expenses/{expenseId} {
+        allow read: if request.auth != null; 
         allow write: if isAdmin(consortiumId);
       }
       
-      // --- EXCEPCIÓN: PAGOS ---
-      // Los vecinos necesitan poder CREAR pagos (subir comprobante)
+      match /settlements/{settlementId} {
+         allow read: if request.auth != null;
+         allow write: if isAdmin(consortiumId);
+      }
+      
+      // C. Pagos (Vecinos crean, Admin gestiona)
       match /payments/{paymentId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null; // Vecino informa pago
-        allow update, delete: if isAdmin(consortiumId); // Solo admin aprueba o borra
+        allow create: if request.auth != null;
+        // Solo puede ver su propio pago o si es admin
+        allow read: if request.auth.uid == resource.data.userId || isAdmin(consortiumId);
+        allow update, delete: if isAdmin(consortiumId);
       }
     }
   }
