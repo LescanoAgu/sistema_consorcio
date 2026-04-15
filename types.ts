@@ -34,14 +34,23 @@ export interface Booking {
   createdAt: string;
 }
 
+export interface DebtItem {
+  id: string;
+  period: string;       
+  baseAmount: number;   
+  interestRate: number; 
+  interestAmount: number; 
+  total: number;        
+}
+
 export interface Unit {
   id: string;
   unitNumber: string;
   ownerName: string;
-  // CAMBIO IMPORTANTE: Lista de emails (Dueño + Inquilinos)
   authorizedEmails: string[]; 
   proratePercentage: number; 
   initialBalance: number; 
+  debts?: DebtItem[]; 
 }
 
 export interface Expense {
@@ -126,12 +135,13 @@ export interface SettlementRecord {
   unitDetails: { unitId: string; totalToPay: number }[]; 
 }
 
+// --- NUEVO: ESTRUCTURA DEL LIBRO MAYOR DE RESERVA ---
 export interface ReserveTransaction {
     id: string;
     date: string;
-    amount: number; 
+    amount: number; // Positivo (Ingreso), Negativo (Egreso)
     description: string; 
-    balanceAfter: number;
+    type: 'SYSTEM' | 'MANUAL' | 'INITIAL';
 }
 
 export interface Consortium {
@@ -140,7 +150,7 @@ export interface Consortium {
   address: string;
   cuit?: string;
   image?: string;
-  adminIds?: string[]; // Array de UIDs de admins
+  adminIds?: string[];
 }
 
 export interface AppSettings {
@@ -158,4 +168,4 @@ export interface ExpenseTemplate {
   distributionType: ExpenseDistributionType;
 }
 
-export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities' | 'profile' | 'documents';
+export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities' | 'profile' | 'documents' | 'management' | 'accounting';

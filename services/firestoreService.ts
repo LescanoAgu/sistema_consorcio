@@ -3,7 +3,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; 
 import { db } from '../src/config/firebase'; 
-import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, DebtAdjustment, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ExpenseTemplate } from '../types';
+import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, DebtAdjustment, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ExpenseTemplate, ReserveTransaction } from '../types';
 
 // --- UTILIDADES ---
 export const clearCollection = async (consortiumId: string, collectionName: string) => {
@@ -56,29 +56,25 @@ export const registerUserAccess = async (email: string, consortiumId: string) =>
     }
 };
 
-// --- UNITS (CORREGIDO PARA SEGURIDAD Y TIPOS) ---
+// --- UNITS ---
 export const getUnits = async (consortiumId: string, userEmail: string | null = null, isAdmin: boolean = true) => {
     const unitsRef = collection(db, `consortiums/${consortiumId}/units`);
     let q;
 
     if (isAdmin) {
-        // Si es Admin, trae todo
         q = query(unitsRef);
     } else {
-        // Si es Usuario, filtra por email (COINCIDE CON REGLA DE SEGURIDAD)
         if (!userEmail) return [];
         q = query(unitsRef, where('authorizedEmails', 'array-contains', userEmail));
     }
 
     const snapshot = await getDocs(q);
-    // AQUÍ ESTABA EL ERROR: Agregamos 'as any' para permitir el spread
     const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id } as Unit));
     return list.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true, sensitivity: 'base' }));
 };
 
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
-    // Registramos acceso para todos los emails cargados
     if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
         for (const email of unit.authorizedEmails) {
             await registerUserAccess(email, consortiumId);
@@ -87,11 +83,11 @@ export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     return { id: docRef.id, ...unit };
 };
 
-export const updateUnit = async (consortiumId: string, unit: Unit) => {
-    const docRef = doc(db, `consortiums/${consortiumId}/units`, unit.id);
-    await updateDoc(docRef, { ...unit });
-    // Actualizamos acceso
-    if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
+export const updateUnit = async (consortiumId: string, unitId: string, updates: Partial<Unit>, unit?: Unit) => {
+    const docRef = doc(db, `consortiums/${consortiumId}/units`, unitId);
+    await updateDoc(docRef, { ...updates });
+    // Si viene la unidad completa, actualizamos accesos
+    if (unit && unit.authorizedEmails && unit.authorizedEmails.length > 0) {
         for (const email of unit.authorizedEmails) {
             await registerUserAccess(email, consortiumId);
         }
@@ -322,4 +318,18 @@ export const addExpenseTemplate = async (consortiumId: string, data: Omit<Expens
 };
 export const deleteExpenseTemplate = async (consortiumId: string, id: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/expense_templates`, id));
+};
+
+// --- RESERVE TRANSACTIONS (NUEVO LIBRO MAYOR) ---
+export const getReserveTransactions = async (consortiumId: string) => {
+    const q = query(collection(db, `consortiums/${consortiumId}/reserve_transactions`), orderBy('date', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ReserveTransaction));
+};
+export const addReserveTransaction = async (consortiumId: string, data: Omit<ReserveTransaction, 'id'>) => {
+    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/reserve_transactions`), data);
+    return { id: docRef.id, ...data };
+};
+export const deleteReserveTransaction = async (consortiumId: string, id: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/reserve_transactions`, id));
 };

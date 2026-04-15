@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Users, Receipt, Calculator, Building2, HandCoins, History, LogOut, ArrowLeftRight, AlertTriangle, UserCheck, Megaphone, X, Wrench, CalendarCheck, User, FolderOpen } from 'lucide-react';
+import { LayoutDashboard, Building2, LogOut, ArrowLeftRight, UserCheck, Megaphone, X, Wrench, CalendarCheck, User, FolderOpen, LayoutTemplate, PieChart, Receipt, History } from 'lucide-react';
 import { ViewState, UserRole } from '../types';
 
 interface SidebarProps {
@@ -17,25 +17,25 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortiumName, onSwitchConsortium, onLogout, userRole, isOpen, onClose, badges = {} }) => {
   
   const allItems = [
-    // ADMIN & DEV & USER Views
+    // ADMIN & DEV Views
     { id: 'dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['DEV', 'ADMIN'] },
+    
+    // USER ONLY (Su propio portal completo)
     { id: 'user_portal', label: 'Mi Unidad', icon: UserCheck, roles: ['USER'] },
     
-    // COMM
+    // COMPARTIDO COMUNICACIÓN Y AMENITIES
     { id: 'announcements', label: 'Novedades', icon: Megaphone, roles: ['DEV', 'ADMIN', 'USER'] },
-    { id: 'documents', label: 'Documentos', icon: FolderOpen, roles: ['DEV', 'ADMIN', 'USER'] }, // <--- NUEVO
+    { id: 'documents', label: 'Documentos', icon: FolderOpen, roles: ['DEV', 'ADMIN', 'USER'] }, 
     { id: 'amenities', label: 'Reservas', icon: CalendarCheck, roles: ['DEV', 'ADMIN', 'USER'] },
     { id: 'maintenance', label: 'Mantenimiento', icon: Wrench, roles: ['DEV', 'ADMIN', 'USER'] },
     
-    // ADMIN ONLY
-    { id: 'units', label: 'Unidades', icon: Users, roles: ['DEV', 'ADMIN'] },
-    { id: 'debtors', label: 'Deudores', icon: AlertTriangle, roles: ['DEV', 'ADMIN'] },
-    { id: 'collections', label: 'Cobros', icon: HandCoins, roles: ['DEV', 'ADMIN'] },
-    { id: 'settlement', label: 'Liquidación', icon: Calculator, roles: ['DEV', 'ADMIN'] },
+    // GESTIÓN UNIFICADA (ADMIN ONLY)
+    { id: 'management', label: 'Gestión Integral', icon: LayoutTemplate, roles: ['DEV', 'ADMIN'] },
+    { id: 'accounting', label: 'Contabilidad', icon: PieChart, roles: ['DEV', 'ADMIN'] },
     
-    // SHARED
-    { id: 'expenses', label: 'Gastos', icon: Receipt, roles: ['DEV', 'ADMIN', 'USER'] },
-    { id: 'history', label: 'Historial', icon: History, roles: ['DEV', 'ADMIN', 'USER'] },
+    // VIEJOS ENLACES MANTENIDOS SOLO PARA USER (Por si acceden directamente, aunque usan el portal)
+    { id: 'expenses', label: 'Gastos', icon: Receipt, roles: ['USER'] },
+    { id: 'history', label: 'Historial', icon: History, roles: ['USER'] },
     
     // SETTINGS
     { id: 'settings', label: 'Configuración', icon: Building2, roles: ['DEV', 'ADMIN'] },

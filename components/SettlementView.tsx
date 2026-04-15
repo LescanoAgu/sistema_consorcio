@@ -2,9 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { Unit, Expense, ExpenseDistributionType, SettlementRecord, ConsortiumSettings, ViewState, Consortium } from '../types';
 import { Archive, FileText, Calculator, Calendar, User, Download } from 'lucide-react';
 import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
-import { sendSettlementEmail } from '../services/emailService';
 
-// --- FUNCIÓN AUXILIAR PARA EL LOGO ---
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
+};
+
 const convertImgToBase64 = async (url: string): Promise<string | null> => {
   if (!url) return null;
   try {
@@ -19,7 +21,6 @@ const convertImgToBase64 = async (url: string): Promise<string | null> => {
       };
     });
   } catch (e) {
-    console.error("Error convirtiendo imagen", e);
     return null;
   }
 };
@@ -47,7 +48,6 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
   const [firstDate, setFirstDate] = useState(nextMonth.toISOString().split('T')[0]);
   const [secondDate, setSecondDate] = useState(nextMonthEnd.toISOString().split('T')[0]);
 
-  // CÁLCULOS
   const totalOrdinary = expenses.filter(e => e.category === 'Ordinary' && e.distributionType !== ExpenseDistributionType.FROM_RESERVE).reduce((a, b) => a + b.amount, 0);
   const totalExtraordinary = expenses.filter(e => e.category === 'Extraordinary' && e.distributionType !== ExpenseDistributionType.FROM_RESERVE).reduce((a, b) => a + b.amount, 0);
   const totalReserveSpent = expenses.filter(e => e.distributionType === ExpenseDistributionType.FROM_RESERVE).reduce((a, b) => a + b.amount, 0);
@@ -70,40 +70,20 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       }).sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
   }, [units, totalOrdinary, totalExtraordinary, reserveContribution]);
 
-  // --- PREPARAR DATOS COMUNES ---
   const preparePDFData = async () => {
       let logoBase64 = null;
-      if (settings.logoUrl) {
-          logoBase64 = await convertImgToBase64(settings.logoUrl);
-      }
+      if (settings.logoUrl) logoBase64 = await convertImgToBase64(settings.logoUrl);
 
       const consortiumData: any = {
-          id: consortiumId,
-          name: consortiumName,
-          address: settings.address || '',
-          cuit: settings.cuit,
-          image: logoBase64,
-          bankName: settings.bankName,
-          bankCBU: settings.bankCBU,
-          bankAlias: settings.bankAlias,
-          bankHolder: settings.bankHolder,
-          adminIds: []
+          id: consortiumId, name: consortiumName, address: settings.address || '', cuit: settings.cuit,
+          image: logoBase64, bankName: settings.bankName, bankCBU: settings.bankCBU, bankAlias: settings.bankAlias, bankHolder: settings.bankHolder, adminIds: []
       };
 
       const dummyRecord: SettlementRecord = {
-          id: 'preview',
-          month: 'BORRADOR / VISTA PREVIA',
-          dateClosed: new Date().toISOString(),
-          totalExpenses: totalOrdinary + totalExtraordinary,
-          totalCollected: 0,
-          reserveBalanceStart: settings.reserveFundBalance,
-          reserveContribution,
-          reserveExpense: totalReserveSpent,
-          reserveBalanceAtClose: newReserveBalance,
-          firstExpirationDate: firstDate,
-          secondExpirationDate: secondDate,
-          snapshotExpenses: expenses,
-          couponMessage,
+          id: 'preview', month: 'BORRADOR / VISTA PREVIA', dateClosed: new Date().toISOString(),
+          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected: 0, reserveBalanceStart: settings.reserveFundBalance,
+          reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
+          firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, couponMessage,
           unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
       };
 
@@ -117,102 +97,74 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       setIsProcessing(false);
   };
 
-  // --- FUNCIÓN DE PRUEBA ---
   const handleTestCoupons = async () => {
       if (!confirm("Esto descargará los primeros 3 cupones individuales. ¿Continuar?")) return;
-      
       setIsProcessing(true);
       const { consortiumData, dummyRecord } = await preparePDFData();
-
       const validTestUnits = unitDebts.filter(u => u.total > 0 && u.unitNumber).slice(0, 3);
-
       if (validTestUnits.length === 0) {
           alert("No hay unidades con deuda calculada para probar.");
           setIsProcessing(false);
           return;
       }
-
       validTestUnits.forEach(debtItem => {
           const rawUnit = units.find(u => u.id === debtItem.unitId);
-          
+          // AQUI SE CORRIGE LA INYECCIÓN DE DEUDAS PARA LA PRUEBA
           const safeUnit: Unit = {
-              id: debtItem.unitId,
-              unitNumber: debtItem.unitNumber || '?',
+              id: debtItem.unitId, 
+              unitNumber: debtItem.unitNumber || '?', 
               ownerName: debtItem.owner || '?',
-              proratePercentage: Number(rawUnit?.proratePercentage || 0),
-              initialBalance: rawUnit?.initialBalance || 0,
-              authorizedEmails: rawUnit?.authorizedEmails || []
+              proratePercentage: Number(rawUnit?.proratePercentage || 0), 
+              initialBalance: rawUnit?.initialBalance || 0, 
+              authorizedEmails: rawUnit?.authorizedEmails || [],
+              debts: rawUnit?.debts || [] // <-- INCLUIDO
           };
-          
           generateIndividualCouponPDF(dummyRecord, safeUnit, consortiumData);
       });
-
       setIsProcessing(false);
   };
 
-  // --- CIERRE DEFINITIVO (CORREGIDO PARA DESCARGAR TODO BIEN) ---
   const handleClose = async () => {
       if(!confirm("¿CONFIRMAR CIERRE DEFINITIVO?\n\n1. Se guardará el historial.\n2. Se actualizará la caja.\n3. Se DESCARGARÁN todos los cupones a tu PC.")) return;
-      
       setIsProcessing(true);
       
-      // 1. Preparamos los datos RICOS (con Banco y Logo)
       const { consortiumData } = await preparePDFData();
 
       const record: SettlementRecord = {
-          id: '', 
-          month: new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' }),
-          dateClosed: new Date().toISOString(),
-          totalExpenses: totalOrdinary + totalExtraordinary,
-          totalCollected: 0, 
-          reserveBalanceStart: settings.reserveFundBalance,
-          reserveContribution,
-          reserveExpense: totalReserveSpent,
-          reserveBalanceAtClose: newReserveBalance,
-          firstExpirationDate: firstDate,
-          secondExpirationDate: secondDate,
-          snapshotExpenses: expenses,
-          couponMessage,
+          id: '', month: new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' }), dateClosed: new Date().toISOString(),
+          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected: 0, reserveBalanceStart: settings.reserveFundBalance,
+          reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
+          firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, couponMessage,
           unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
       };
 
-      // Sobreescribimos el record del PDF para que tenga los datos finales
       const finalRecordForPDF = { ...record };
 
       try {
-          // 2. Guardar en Base de Datos
           onCloseMonth(record);
-
-          // 3. DESCARGA MASIVA DE CUPONES (Reemplaza al email)
-          // Filtramos unidades con deuda > 0
           const unitsToPrint = unitDebts.filter(u => u.total > 0);
           
-          console.log("Generando PDFs para", unitsToPrint.length, "unidades...");
-
-          // Usamos un retraso pequeño entre descargas para no bloquear el navegador
           let delay = 0;
           unitsToPrint.forEach((debtItem) => {
               setTimeout(() => {
                   const rawUnit = units.find(u => u.id === debtItem.unitId);
-                  // Construimos la unidad SEGURA (igual que en Test)
+                  // AQUI SE CORRIGE LA INYECCIÓN DE DEUDAS PARA EL CIERRE REAL
                   const safeUnit: Unit = {
-                      id: debtItem.unitId,
-                      unitNumber: debtItem.unitNumber || '?',
+                      id: debtItem.unitId, 
+                      unitNumber: debtItem.unitNumber || '?', 
                       ownerName: debtItem.owner || '?',
-                      proratePercentage: Number(rawUnit?.proratePercentage || 0),
-                      initialBalance: rawUnit?.initialBalance || 0,
-                      authorizedEmails: rawUnit?.authorizedEmails || []
+                      proratePercentage: Number(rawUnit?.proratePercentage || 0), 
+                      initialBalance: rawUnit?.initialBalance || 0, 
+                      authorizedEmails: rawUnit?.authorizedEmails || [],
+                      debts: rawUnit?.debts || [] // <-- INCLUIDO
                   };
-                  // Generar y Descargar
                   generateIndividualCouponPDF(finalRecordForPDF, safeUnit, consortiumData);
               }, delay);
-              delay += 500; // 0.5 segundos entre cada descarga
+              delay += 500;
           });
 
           alert(`Liquidación Cerrada Exitosamente.\n\nSe están descargando ${unitsToPrint.length} cupones de pago.`);
-
       } catch (error) {
-          console.error(error);
           alert("Error al cerrar el mes.");
       } finally {
           setIsProcessing(false);
@@ -241,18 +193,16 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="space-y-6">
-              {/* TOTALES */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                   <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><Calculator className="w-5 h-5 text-indigo-500"/> Resumen Financiero</h3>
                   <div className="space-y-3">
-                      <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Ordinarios</span><span className="font-bold">${totalOrdinary.toFixed(2)}</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Extraordinarios</span><span className="font-bold">${totalExtraordinary.toFixed(2)}</span></div>
-                      <div className="flex justify-between text-sm pt-2 border-t"><span className="text-slate-600">+ Fondo Reserva (Aporte)</span><span className="font-bold text-emerald-600">${reserveContribution.toFixed(2)}</span></div>
-                      <div className="flex justify-between text-lg pt-2 border-t border-slate-100 font-bold"><span className="text-slate-800">Total a Prorratear</span><span className="text-indigo-600">${(totalOrdinary + totalExtraordinary + reserveContribution).toFixed(2)}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Ordinarios</span><span className="font-bold">{formatCurrency(totalOrdinary)}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Extraordinarios</span><span className="font-bold">{formatCurrency(totalExtraordinary)}</span></div>
+                      <div className="flex justify-between text-sm pt-2 border-t"><span className="text-slate-600">+ Fondo Reserva (Aporte)</span><span className="font-bold text-emerald-600">{formatCurrency(reserveContribution)}</span></div>
+                      <div className="flex justify-between text-lg pt-2 border-t border-slate-100 font-bold"><span className="text-slate-800">Total a Prorratear</span><span className="text-indigo-600">{formatCurrency(totalOrdinary + totalExtraordinary + reserveContribution)}</span></div>
                   </div>
               </div>
 
-              {/* FECHAS DE VENCIMIENTO */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                   <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><Calendar className="w-5 h-5 text-indigo-500"/> Vencimientos</h3>
                   <div className="space-y-4">
@@ -267,7 +217,6 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
                   </div>
               </div>
 
-              {/* MENSAJE EN CUPON */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                   <h3 className="font-bold text-slate-700 mb-2 text-sm">Mensaje en Liquidación</h3>
                   <textarea 
@@ -280,7 +229,6 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
               </div>
           </div>
 
-          {/* TABLA DE PRORRATEO */}
           <div className="md:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
               <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><User className="w-5 h-5 text-indigo-500"/> Distribución por Unidad</h3>
               <div className="flex-1 overflow-y-auto pr-2">
@@ -294,7 +242,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
                                   <td className="px-3 py-2 font-bold text-slate-700">{u.unitNumber}</td>
                                   <td className="px-3 py-2 text-slate-600 truncate max-w-[150px]">{u.owner}</td>
                                   <td className="px-3 py-2 text-right text-slate-500">{units.find(un => un.id === u.unitId)?.proratePercentage}%</td>
-                                  <td className="px-3 py-2 text-right font-bold text-emerald-600">${u.total.toFixed(2)}</td>
+                                  <td className="px-3 py-2 text-right font-bold text-emerald-600">{formatCurrency(u.total)}</td>
                               </tr>
                           ))}
                       </tbody>

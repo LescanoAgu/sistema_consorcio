@@ -17,7 +17,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
   const [isImporting, setIsImporting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Estado del formulario (ahora emailsInput es un string para manejar comas)
   const [formData, setFormData] = useState({
     unitNumber: '',
     ownerName: '',
@@ -42,7 +41,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
       setFormData({
           unitNumber: unit.unitNumber,
           ownerName: unit.ownerName,
-          // Convertimos el array de emails a string separado por comas para editar
           authorizedEmailsInput: unit.authorizedEmails ? unit.authorizedEmails.join(', ') : '',
           proratePercentage: unit.proratePercentage.toString(),
           initialBalance: unit.initialBalance.toString()
@@ -59,7 +57,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
       const finalPercentage = parseFloat(formData.proratePercentage) || 0;
       const finalBalance = parseFloat(formData.initialBalance) || 0;
 
-      // PROCESAR EMAILS: De string "a@a.com, b@b.com" a array ["a@a.com", "b@b.com"]
       const emailsArray = formData.authorizedEmailsInput
           .split(',')
           .map(email => email.trim())
@@ -75,7 +72,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                   proratePercentage: finalPercentage,
                   initialBalance: finalBalance
               };
-              await updateUnit(consortiumId, unitToUpdate);
+              // Corrección aquí: Enviamos los 4 parámetros requeridos por firestoreService
+              await updateUnit(consortiumId, editingId, unitToUpdate, unitToUpdate);
               setUnits(units.map(u => u.id === editingId ? unitToUpdate : u));
           } else {
               const newUnitData = {
@@ -107,7 +105,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
       }
   };
 
-  // --- IMPORTACIÓN MASIVA EXCEL (Actualizado para multiples mails) ---
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -136,7 +133,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                   const ownerName = row['Propietario'] || row['propietario'] || row['Nombre'];
                   
                   if (unitNumber && ownerName) {
-                      // Procesa emails del excel (puede venir uno solo o varios separados por coma)
                       const rawEmails = row['Emails'] || row['emails'] || row['Email'] || '';
                       const emailsArray = String(rawEmails).split(',').map(e => e.trim()).filter(e => e.includes('@'));
 
@@ -242,7 +238,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                               <User className="w-4 h-4 text-indigo-500"/> {unit.ownerName}
                           </h3>
                           
-                          {/* Visualización de Múltiples Emails */}
                           {unit.authorizedEmails && unit.authorizedEmails.length > 0 ? (
                               <div className="flex flex-col gap-1">
                                   {unit.authorizedEmails.map((email, idx) => (
@@ -294,7 +289,6 @@ const UnitsView: React.FC<UnitsViewProps> = ({ units, setUnits, consortiumId }) 
                           <input required type="text" className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" placeholder="Ej: Juan Pérez" value={formData.ownerName} onChange={e => setFormData({...formData, ownerName: e.target.value})} />
                       </div>
                       
-                      {/* CAMPO DE EMAILS MÚLTIPLES */}
                       <div>
                           <label className="block text-sm font-medium text-slate-700 mb-1">Emails Autorizados (separar por coma)</label>
                           <input 

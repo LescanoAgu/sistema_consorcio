@@ -1,11 +1,11 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Unit, Expense, SettlementRecord, Payment, ConsortiumSettings, Announcement, DebtAdjustment, Booking, MaintenanceRequest, ConsortiumDocument } from '../types';
+import { Unit, Expense, SettlementRecord, Payment, ConsortiumSettings, Announcement, DebtAdjustment, Booking, MaintenanceRequest, ConsortiumDocument, Consortium } from '../types';
 import { CheckCircle, AlertCircle, TrendingUp, Download, Building, Users, Upload, X, Paperclip, Megaphone, Calendar, Wrench, FileText, ChevronDown } from 'lucide-react';
 import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
 interface UserPortalProps {
   userEmail: string;
-  consortiumName: string;
+  consortium: Consortium; 
   units: Unit[];
   expenses: Expense[];
   history: SettlementRecord[];
@@ -20,22 +20,18 @@ interface UserPortalProps {
 }
 
 const UserPortal: React.FC<UserPortalProps> = ({ 
-    userEmail, consortiumName, units, expenses, history, payments, settings, announcements, debtAdjustments = [], 
+    userEmail, consortium, units, expenses, history, payments, settings, announcements, debtAdjustments = [], 
     myBookings = [], myTickets = [], documents = [], onReportPayment 
 }) => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // LOGICA MULTI-UNIDAD
-  // 1. Encontrar todas las unidades del usuario
   const myUnits = useMemo(() => {
       const owned = units.filter(u => u.linkedEmail === userEmail);
       if (owned.length > 0) return owned;
-      // Fallback para demo
       return units.filter(u => u.ownerName === 'Usuario Demo');
   }, [units, userEmail]);
 
-  // 2. Estado para la unidad seleccionada actualmente (por defecto la primera)
   const [selectedUnitId, setSelectedUnitId] = useState<string>('');
 
   useEffect(() => {
@@ -44,12 +40,10 @@ const UserPortal: React.FC<UserPortalProps> = ({
       }
   }, [myUnits]);
 
-  // 3. Obtener el objeto completo de la unidad seleccionada
   const currentUnit = useMemo(() => 
       myUnits.find(u => u.id === selectedUnitId) || myUnits[0], 
   [selectedUnitId, myUnits]);
 
-  // --- FILTROS BASADOS EN LA UNIDAD SELECCIONADA ---
   const unitBookings = useMemo(() => myBookings.filter(b => b.unitId === currentUnit?.id && new Date(b.date) >= new Date()).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()), [myBookings, currentUnit]);
   const unitTickets = useMemo(() => myTickets.filter(t => t.unitId === currentUnit?.id && t.status !== 'DONE'), [myTickets, currentUnit]);
   const recentDocs = useMemo(() => documents.slice(0, 3), [documents]);
@@ -69,7 +63,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
     return { balance: (initial + totalSettled + totalAdjustments) - totalPaid };
   }, [currentUnit, history, payments, debtAdjustments]);
 
-  // ESTADO DE FORMULARIO PAGO
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
@@ -81,7 +74,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
       setIsSubmitting(true);
       try {
           await onReportPayment({ 
-              unitId: currentUnit.id, // IMPORTANTE: Enviar ID de la unidad seleccionada
+              unitId: currentUnit.id, 
               amount: parseFloat(amount), date, method: 'Transferencia', notes, file 
           });
           setShowPaymentModal(false);
@@ -94,7 +87,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
 
   return (
     <div className="space-y-6 relative">
-      {/* HEADER CON SELECTOR MULTI-UNIDAD */}
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-6 text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex-1">
             <h2 className="text-2xl font-bold mb-1">Hola, {currentUnit.ownerName}</h2>
@@ -123,9 +115,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
               <Upload className="w-5 h-5" /> Informar Pago
           </button>
       </div>
-
-      {/* ... (RESTO DEL CÓDIGO IGUAL QUE ANTES: Anuncios, Estado de Cuenta, Historial...) ... */}
-      {/* Solo nos aseguramos que use 'currentUnit' y 'status' que ya definimos arriba */}
       
       {announcements.length > 0 && (
           <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-l-indigo-500 border border-slate-200">
@@ -193,14 +182,14 @@ const UserPortal: React.FC<UserPortalProps> = ({
                                       </div>
                                       
                                       <button 
-                                        onClick={() => generateSettlementPDF(rec, consortiumName, units, settings)}
+                                        onClick={() => generateSettlementPDF(rec, consortium, units)}
                                         className="text-slate-600 hover:text-indigo-600 text-xs border border-slate-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
                                       >
                                           <FileText className="w-3 h-3"/> General
                                       </button>
                                       
                                       <button 
-                                        onClick={() => generateIndividualCouponPDF(rec, currentUnit.id, consortiumName, units, settings)}
+                                        onClick={() => generateIndividualCouponPDF(rec, currentUnit, consortium)}
                                         className="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
                                       >
                                           <Download className="w-3 h-3"/> Mi Cupón

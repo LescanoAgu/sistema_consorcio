@@ -1,8 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Expense, ExpenseDistributionType, ExpenseTemplate } from '../types';
-import { Plus, Trash2, DollarSign, Tag, Paperclip, CheckCircle, Loader2, AlertCircle, FileText, Download, Bookmark, X, Save, Upload, FileSpreadsheet, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Tag, Paperclip, CheckCircle, Loader2, FileText, Download, Bookmark, X, Save, Upload, FileSpreadsheet, Edit2 } from 'lucide-react';
 import { addExpense, deleteExpense, updateExpense, uploadExpenseReceipt, getExpenseTemplates, addExpenseTemplate, deleteExpenseTemplate } from '../services/firestoreService';
 import * as XLSX from 'xlsx';
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount || 0);
+};
 
 interface ExpensesViewProps {
   expenses: Expense[];
@@ -75,13 +79,9 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     
     try {
         const expenseData = {
-            description: newExpense.description || '',
-            amount: amount,
-            date: newExpense.date || new Date().toISOString().split('T')[0],
-            category: newExpense.category as any,
-            itemCategory: newExpense.itemCategory || 'Otros',
-            distributionType: newExpense.distributionType as any,
-            attachmentUrl: newExpense.attachmentUrl
+            description: newExpense.description || '', amount: amount, date: newExpense.date || new Date().toISOString().split('T')[0],
+            category: newExpense.category as any, itemCategory: newExpense.itemCategory || 'Otros',
+            distributionType: newExpense.distributionType as any, attachmentUrl: newExpense.attachmentUrl
         };
 
         if (editingId) {
@@ -95,7 +95,6 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
             const saved = await addExpense(consortiumId, expenseData);
             setExpenses(prev => [...prev, saved]);
         }
-        
         resetForm();
     } catch (e) { alert("Error al guardar."); }
   };
@@ -105,8 +104,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     setIsFormOpen(false);
     setNewExpense({
         description: '', amount: 0, date: new Date().toISOString().split('T')[0],
-        category: 'Ordinary', itemCategory: 'Mantenimiento',
-        distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
+        category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
     });
   }
 
@@ -117,7 +115,6 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
     }
   };
 
-  // --- IMPORTACIÓN EXCEL CORREGIDA ---
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -130,22 +127,16 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
               const bstr = evt.target?.result;
               const wb = XLSX.read(bstr, { type: 'binary' });
               const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-
               let count = 0;
-              // CORRECCIÓN AQUÍ: (data as any[])
               for (const row of (data as any[])) {
                   const desc = row['Descripcion'] || row['Descripción'] || row['Concepto'];
                   const amount = parseFloat(row['Monto'] || row['Importe'] || 0);
-                  
                   if (desc && amount > 0) {
                       const newExp = {
-                          description: String(desc),
-                          amount: amount,
+                          description: String(desc), amount: amount,
                           date: row['Fecha'] ? new Date(row['Fecha']).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                          category: 'Ordinary' as const,
-                          itemCategory: row['Rubro'] || 'Otros',
-                          distributionType: ExpenseDistributionType.PRORATED,
-                          attachmentUrl: ''
+                          category: 'Ordinary' as const, itemCategory: row['Rubro'] || 'Otros',
+                          distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
                       };
                       const saved = await addExpense(consortiumId, newExp);
                       setExpenses(prev => [...prev, saved]);
@@ -240,7 +231,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                               <div className="absolute right-0 top-10 w-64 bg-white rounded-xl shadow-xl border z-50 overflow-hidden max-h-60 overflow-y-auto">
                                   {templates.map(t => (
                                       <div key={t.id} onClick={() => handleLoadTemplate(t)} className="p-3 border-b hover:bg-indigo-50 cursor-pointer flex justify-between">
-                                          <div><p className="font-bold text-xs">{t.alias}</p><p className="text-[10px] text-slate-500">${t.amount}</p></div>
+                                          <div><p className="font-bold text-xs">{t.alias}</p><p className="text-[10px] text-slate-500">{formatCurrency(t.amount)}</p></div>
                                           <button onClick={(e) => handleDeleteTemplate(e, t.id)}><Trash2 className="w-3 h-3 text-slate-300 hover:text-red-500"/></button>
                                       </div>
                                   ))}
@@ -309,7 +300,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                                     {e.description}
                                     {e.attachmentUrl && <a href={e.attachmentUrl} target="_blank" rel="noreferrer" className="ml-2 text-indigo-600 hover:underline text-xs bg-indigo-50 px-1 rounded"><FileText className="w-3 h-3 inline"/> Ver</a>}
                                 </td>
-                                <td className="px-6 py-3 text-right font-bold text-slate-700">${(e.amount || 0).toLocaleString()}</td>
+                                <td className="px-6 py-3 text-right font-bold text-slate-700">{formatCurrency(e.amount)}</td>
                                 <td className="px-6 py-3 text-right w-24">
                                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button onClick={() => handleOpenEdit(e)} className="p-1 hover:bg-indigo-100 text-indigo-600 rounded"><Edit2 className="w-4 h-4"/></button>

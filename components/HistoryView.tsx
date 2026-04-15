@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
-import { SettlementRecord, Unit, ConsortiumSettings } from '../types';
+import { SettlementRecord, Unit, ConsortiumSettings, Consortium } from '../types';
 import { ChevronDown, ChevronRight, FileText, Calendar, Download, User } from 'lucide-react';
-// IMPORTANTE: Importamos los generadores
 import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
 interface HistoryViewProps {
   history: SettlementRecord[];
-  consortiumName: string;
+  consortium: Consortium; 
   units: Unit[];
-  settings: ConsortiumSettings; // <--- Agregado para recibir la configuración
+  settings: ConsortiumSettings; 
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, units, settings }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ history, consortium, units, settings }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggleExpand = (id: string) => {
@@ -20,14 +19,15 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortiumName, unit
 
   const handleDownloadGeneral = (e: React.MouseEvent, record: SettlementRecord) => {
     e.stopPropagation();
-    // Pasamos settings al generador
-    generateSettlementPDF(record, consortiumName, units, settings);
+    generateSettlementPDF(record, consortium, units);
   };
 
   const handleDownloadCoupon = (e: React.MouseEvent, record: SettlementRecord, unitId: string) => {
       e.stopPropagation();
-      // Pasamos settings al generador
-      generateIndividualCouponPDF(record, unitId, consortiumName, units, settings);
+      const unit = units.find(u => u.id === unitId);
+      if (unit) {
+          generateIndividualCouponPDF(record, unit, consortium);
+      }
   };
 
   if (history.length === 0) {
