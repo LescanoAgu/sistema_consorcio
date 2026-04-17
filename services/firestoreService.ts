@@ -86,7 +86,6 @@ export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
 export const updateUnit = async (consortiumId: string, unitId: string, updates: Partial<Unit>, unit?: Unit) => {
     const docRef = doc(db, `consortiums/${consortiumId}/units`, unitId);
     await updateDoc(docRef, { ...updates });
-    // Si viene la unidad completa, actualizamos accesos
     if (unit && unit.authorizedEmails && unit.authorizedEmails.length > 0) {
         for (const email of unit.authorizedEmails) {
             await registerUserAccess(email, consortiumId);
@@ -238,10 +237,8 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
     if (!snapshot.empty) {
         const existingDoc = snapshot.docs[0];
         await updateDoc(doc(db, `consortiums/${consortiumId}/history`, existingDoc.id), record as any);
-        console.log("Liquidación actualizada.");
     } else {
         await addDoc(historyRef, record);
-        console.log("Nueva liquidación creada.");
     }
 
     for (const id of expenseIdsToRemove) {
@@ -275,6 +272,11 @@ export const getPayments = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
+};
+
+// NUEVO: ELIMINAR PAGO DIRECTAMENTE DESDE LA BASE DE DATOS
+export const deletePayment = async (consortiumId: string, paymentId: string) => {
+    await deleteDoc(doc(db, `consortiums/${consortiumId}/payments`, paymentId));
 };
 
 // --- SETTINGS ---

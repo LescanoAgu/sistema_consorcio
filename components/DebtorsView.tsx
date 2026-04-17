@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Unit, DebtItem, SettlementRecord, Payment, Consortium } from '../types';
-import { Search, Plus, Trash2, Save, Users, ChevronRight, AlertTriangle, CheckSquare, Download, AlertCircle } from 'lucide-react';
+import { Search, Plus, Trash2, Save, Users, ChevronRight, AlertTriangle, CheckSquare, Download, AlertCircle, Clock } from 'lucide-react';
 import { generateDebtDetailPDF } from '../services/pdfService';
 
 const formatCurrency = (amount: number) => {
@@ -31,43 +31,58 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     setBulkInterestRate('');
   };
 
-  const suggestedDebt = useMemo(() => {
-    if (!selectedUnit || history.length === 0) return null;
-    
-    const lastSettlement = history[0]; 
-    const unitDetail = lastSettlement.unitDetails?.find(d => d.unitId === selectedUnit.id);
-    if (!unitDetail || unitDetail.totalToPay <= 0) return null;
+  // --- NUEVO: MOTOR DE CÁLCULO SEPARADO (DEUDA VS PENDIENTE) ---
+  const getUnitDebt = (unit: Unit | null) => {
+      if (!unit) return { historical: 0, current: 0, total: 0, pendingPeriod: '' };
 
-    const settlementDate = new Date(lastSettlement.dateClosed).getTime();
-    const paidSinceThen = payments
-        .filter(p => p.unitId === selectedUnit.id && p.status === 'APPROVED' && new Date(p.date).getTime() >= settlementDate)
-        .reduce((sum, p) => sum + p.amount, 0);
+      // 1. Histórico (Deuda Base + Meses en Morosidad)
+      const historical = (unit.debts || []).reduce((acc, d) => acc + d.total, 0) + (unit.initialBalance || 0);
+      
+      // 2. Pendiente (Liquidación actual aún no pagada y no pasada a morosidad)
+      let current = 0;
+      let pendingPeriod = '';
+      
+      if (history.length > 0) {
+          const lastSettlement = history[0]; 
+          const unitDetail = lastSettlement.unitDetails?.find(d => d.unitId === unit.id);
+          
+          if (unitDetail) {
+              const isAlreadyInDebts = (unit.debts || []).some(d => d.period === lastSettlement.month);
+              if (!isAlreadyInDebts) {
+                  const settlementDate = new Date(lastSettlement.dateClosed).getTime();
+                  const paidSinceThen = payments
+                      .filter(p => p.unitId === unit.id && p.status === 'APPROVED' && new Date(p.date).getTime() >= settlementDate)
+                      .reduce((sum, p) => sum + p.amount, 0);
+                  
+                  const amountOwed = unitDetail.totalToPay - paidSinceThen;
+                  if (amountOwed > 1) { 
+                      current = amountOwed;
+                      pendingPeriod = lastSettlement.month;
+                  }
+              }
+          }
+      }
 
-    const amountOwed = unitDetail.totalToPay - paidSinceThen;
-
-    if (amountOwed > 1) {
-        return {
-            period: lastSettlement.month,
-            amount: amountOwed
-        };
-    }
-    return null;
-  }, [selectedUnit, history, payments]);
+      return { historical, current, total: historical + current, pendingPeriod };
+  };
 
   const addSuggestedDebt = () => {
-      if (!suggestedDebt) return;
-      const exists = editingDebts.some(d => d.period === suggestedDebt.period);
+      if (!selectedUnit) return;
+      const debtObj = getUnitDebt(selectedUnit);
+      if (debtObj.current <= 0) return;
+
+      const exists = editingDebts.some(d => d.period === debtObj.pendingPeriod);
       if (exists) {
           alert("El período ya está en la lista de deudas.");
           return;
       }
       const newDebt: DebtItem = {
           id: Math.random().toString(36).substr(2, 9),
-          period: suggestedDebt.period,
-          baseAmount: Number(suggestedDebt.amount.toFixed(2)),
+          period: debtObj.pendingPeriod,
+          baseAmount: Number(debtObj.current.toFixed(2)),
           interestRate: 0,
           interestAmount: 0,
-          total: Number(suggestedDebt.amount.toFixed(2))
+          total: Number(debtObj.current.toFixed(2))
       };
       setEditingDebts([...editingDebts, newDebt]);
   };
@@ -75,11 +90,7 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
   const addDebtRow = () => {
     const newDebt: DebtItem = {
       id: Math.random().toString(36).substr(2, 9),
-      period: '',
-      baseAmount: 0,
-      interestRate: 0,
-      interestAmount: 0,
-      total: 0
+      period: '', baseAmount: 0, interestRate: 0, interestAmount: 0, total: 0
     };
     setEditingDebts([...editingDebts, newDebt]);
   };
@@ -87,6 +98,13 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
   const removeDebtRow = (id: string) => {
     setEditingDebts(editingDebts.filter(d => d.id !== id));
     setSelectedDebtIds(selectedDebtIds.filter(selectedId => selectedId !== id));
+  };
+
+  const clearAllDebts = () => {
+      if (confirm('⚠️ ¿Estás seguro de eliminar TODAS las deudas de esta unidad?\n\n(Debes hacer click en "Guardar Sistema" luego para confirmar)')) {
+          setEditingDebts([]);
+          setSelectedDebtIds([]);
+      }
   };
 
   const updateDebtField = (id: string, field: keyof DebtItem, value: string) => {
@@ -165,10 +183,9 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
       generateDebtDetailPDF(tempUnit, consortium);
   };
 
-  // Sumamos la deuda desglosada MÁS el saldo inicial de la unidad (Deuda base/existente)
-  const debtsTotal = editingDebts.reduce((sum, d) => sum + d.total, 0);
-  const initialBalance = selectedUnit?.initialBalance || 0;
-  const totalDebt = debtsTotal + initialBalance;
+  const currentUnitDebt = getUnitDebt(selectedUnit);
+  // Recalculamos la deuda histórica en tiempo real según lo que el usuario está editando en pantalla
+  const realTimeHistoricalDebt = editingDebts.reduce((sum, d) => sum + d.total, 0) + (selectedUnit?.initialBalance || 0);
 
   const filteredUnits = units.filter(u => 
     u.unitNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -181,13 +198,15 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
           <div>
             <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                 <AlertTriangle className="w-6 h-6 text-red-600" />
-                Gestión de Morosidad Histórica
+                Gestión de Deudas y Pendientes
             </h2>
-            <p className="text-slate-500">Carga deudas anteriores, suma recargos por mora y exporta a PDF.</p>
+            <p className="text-slate-500">Visualiza saldos pendientes del mes y administra la morosidad histórica.</p>
           </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* LISTADO DE UNIDADES CON DOBLE ETIQUETA */}
         <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[700px]">
           <div className="p-4 border-b border-slate-100">
             <div className="relative">
@@ -203,7 +222,7 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
           </div>
           <div className="overflow-y-auto flex-1">
             {filteredUnits.map(unit => {
-              const uDebt = (unit.debts || []).reduce((sum, d) => sum + d.total, 0) + (unit.initialBalance || 0);
+              const uDebtObj = getUnitDebt(unit);
               return (
                 <button
                   key={unit.id}
@@ -212,16 +231,29 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                     selectedUnit?.id === unit.id ? 'bg-indigo-50 border-l-4 border-indigo-500' : 'hover:bg-slate-50 border-l-4 border-transparent'
                   }`}
                 >
-                  <div className="text-left">
-                    <p className="font-bold text-slate-800">UF {unit.unitNumber}</p>
-                    <p className="text-xs text-slate-500 truncate w-40">{unit.ownerName}</p>
+                  <div className="text-left flex-1">
+                    <p className="font-bold text-slate-800">{unit.unitNumber}</p>
+                    <p className="text-xs text-slate-500 truncate w-32">{unit.ownerName}</p>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-sm font-bold ${uDebt > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                      {formatCurrency(uDebt)}
-                    </p>
-                    <ChevronRight className="w-4 h-4 text-slate-300 ml-auto mt-1" />
+                  
+                  <div className="text-right flex flex-col items-end gap-1 pr-2">
+                      {uDebtObj.historical > 0 && (
+                          <span className="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded border border-red-200 shadow-sm flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3"/> {formatCurrency(uDebtObj.historical)}
+                          </span>
+                      )}
+                      {uDebtObj.current > 0 && (
+                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded border border-amber-200 shadow-sm flex items-center gap-1">
+                              <Clock className="w-3 h-3"/> {formatCurrency(uDebtObj.current)}
+                          </span>
+                      )}
+                      {uDebtObj.total <= 0 && (
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                              Al día
+                          </span>
+                      )}
                   </div>
+                  <ChevronRight className="w-4 h-4 text-slate-300" />
                 </button>
               );
             })}
@@ -232,53 +264,60 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
           {selectedUnit ? (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col h-[700px]">
               
-              <div className="flex justify-between items-start mb-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-slate-100 pb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Detalle de Deuda: UF {selectedUnit.unitNumber}</h2>
+                  <h2 className="text-lg font-bold text-slate-900">Detalle: {selectedUnit.unitNumber}</h2>
                   <p className="text-sm text-slate-500">{selectedUnit.ownerName}</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs text-slate-500 uppercase font-bold">Total Histórico Adeudado</p>
-                  <p className="text-3xl font-black text-red-600">
-                    {formatCurrency(totalDebt)}
-                  </p>
+                
+                <div className="flex gap-4 text-right">
+                    {currentUnitDebt.current > 0 && (
+                        <div className="bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">
+                            <p className="text-[10px] text-amber-600 uppercase font-bold tracking-wider">Mes Pendiente</p>
+                            <p className="text-xl font-black text-amber-600">{formatCurrency(currentUnitDebt.current)}</p>
+                        </div>
+                    )}
+                    <div className="bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+                        <p className="text-[10px] text-red-600 uppercase font-bold tracking-wider">Deuda Histórica</p>
+                        <p className="text-xl font-black text-red-600">{formatCurrency(realTimeHistoricalDebt)}</p>
+                    </div>
                 </div>
               </div>
 
-              {suggestedDebt && (
-                  <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
+              {currentUnitDebt.current > 0 && (
+                  <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-3 text-amber-800">
-                          <AlertCircle className="w-5 h-5 text-amber-600" />
+                          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
                           <div>
-                              <p className="font-bold text-sm">Se detectó saldo impago del último mes</p>
-                              <p className="text-xs text-amber-700">Período {suggestedDebt.period}: {formatCurrency(suggestedDebt.amount)}</p>
+                              <p className="font-bold text-sm">Saldo impago del mes actual detectado</p>
+                              <p className="text-xs text-amber-700">Período {currentUnitDebt.pendingPeriod}: {formatCurrency(currentUnitDebt.current)}</p>
                           </div>
                       </div>
                       <button 
                           onClick={addSuggestedDebt}
-                          className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold text-sm rounded-lg transition-colors border border-amber-300"
+                          className="w-full sm:w-auto px-4 py-2 bg-white hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-lg transition-colors border border-amber-300 shadow-sm"
                       >
-                          + Cargar a la Deuda
+                          + Pasar a Morosidad
                       </button>
                   </div>
               )}
 
               {editingDebts.length > 0 && (
-                  <div className="mb-4 p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center gap-4">
+                  <div className="mb-4 p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center gap-4 flex-wrap">
                       <div className="flex items-center gap-2">
                           <CheckSquare className="w-5 h-5 text-indigo-600"/>
                           <span className="text-sm font-bold text-indigo-800">
                               {selectedDebtIds.length} seleccionados
                           </span>
                       </div>
-                      <div className="h-6 w-px bg-indigo-200 mx-2"></div>
-                      <div className="flex items-center gap-2 flex-1">
+                      <div className="h-6 w-px bg-indigo-200 mx-2 hidden sm:block"></div>
+                      <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                           <span className="text-sm text-indigo-700">Aplicar interés:</span>
                           <input 
                               type="number" 
                               step="0.1"
                               placeholder="Ej: 7.3"
-                              className="w-24 p-1.5 border border-indigo-200 rounded text-sm outline-none focus:border-indigo-500"
+                              className="w-20 p-1.5 border border-indigo-200 rounded text-sm outline-none focus:border-indigo-500"
                               value={bulkInterestRate}
                               onChange={(e) => setBulkInterestRate(e.target.value === '' ? '' : Number(e.target.value))}
                           />
@@ -286,9 +325,9 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                           <button 
                               onClick={applyBulkInterest}
                               disabled={selectedDebtIds.length === 0 || bulkInterestRate === ''}
-                              className="ml-auto px-4 py-1.5 bg-indigo-600 text-white text-sm font-bold rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                              className="ml-auto px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
                           >
-                              Aplicar a Seleccionados
+                              Aplicar Lote
                           </button>
                       </div>
                   </div>
@@ -311,19 +350,18 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                   <div className="col-span-2 text-right">Subtotal</div>
                 </div>
 
-                {/* Mostrar el Saldo Inicial / Deuda Existente */}
-                {initialBalance > 0 && (
+                {selectedUnit.initialBalance > 0 && (
                   <div className="grid grid-cols-12 gap-2 items-center p-3 rounded-lg bg-orange-50 border border-orange-200 text-orange-800">
                     <div className="col-span-1"></div>
-                    <div className="col-span-3 font-bold text-sm">Saldo Inicial / Deuda Previa</div>
-                    <div className="col-span-2 font-medium">{formatCurrency(initialBalance)}</div>
+                    <div className="col-span-3 font-bold text-sm">Saldo Inicial</div>
+                    <div className="col-span-2 font-medium">{formatCurrency(selectedUnit.initialBalance)}</div>
                     <div className="col-span-2">-</div>
                     <div className="col-span-2">-</div>
-                    <div className="col-span-2 text-right font-bold">{formatCurrency(initialBalance)}</div>
+                    <div className="col-span-2 text-right font-bold">{formatCurrency(selectedUnit.initialBalance)}</div>
                   </div>
                 )}
 
-                {editingDebts.length === 0 && initialBalance === 0 && (
+                {editingDebts.length === 0 && selectedUnit.initialBalance === 0 && (
                   <div className="text-center py-12 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200">
                     <p className="text-slate-400 font-medium">Esta unidad no registra deuda histórica.</p>
                   </div>
@@ -381,6 +419,7 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                       <button 
                         onClick={() => removeDebtRow(debt.id)}
                         className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                        title="Eliminar fila"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -388,12 +427,24 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                   </div>
                 ))}
 
-                <button
-                  onClick={addDebtRow}
-                  className="w-full py-3 mt-4 border-2 border-dashed border-slate-200 rounded-lg text-slate-500 text-sm font-bold hover:bg-slate-50 hover:text-indigo-600 flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Agregar Nuevo Mes Manualmente
-                </button>
+                <div className="flex gap-2 mt-4">
+                    <button
+                        onClick={addDebtRow}
+                        className="flex-1 py-3 border-2 border-dashed border-slate-200 rounded-lg text-slate-500 text-sm font-bold hover:bg-slate-50 hover:text-indigo-600 flex items-center justify-center gap-2 transition-colors"
+                    >
+                        <Plus className="w-4 h-4" /> Agregar Deuda Manual
+                    </button>
+                    
+                    {editingDebts.length > 0 && (
+                        <button
+                            onClick={clearAllDebts}
+                            className="px-4 py-3 border-2 border-red-200 bg-red-50 rounded-lg text-red-600 text-sm font-bold hover:bg-red-100 flex items-center justify-center gap-2 transition-colors shadow-sm"
+                            title="Borrar todas las deudas de la lista"
+                        >
+                            <Trash2 className="w-4 h-4" /> Vaciar Lista
+                        </button>
+                    )}
+                </div>
               </div>
 
               <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
@@ -401,7 +452,7 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                     onClick={exportPDF}
                     className="flex items-center gap-2 px-6 py-3 border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors"
                 >
-                    <Download className="w-5 h-5"/> Descargar PDF
+                    <Download className="w-4 h-4"/> PDF Deuda
                 </button>
                 <button
                   onClick={saveDebts}
@@ -416,7 +467,7 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
             <div className="h-[700px] flex flex-col items-center justify-center bg-white rounded-xl shadow-sm border border-slate-200 text-slate-400">
               <Users className="w-16 h-16 mb-4 opacity-20" />
               <p className="text-lg">Selecciona una unidad en el panel izquierdo</p>
-              <p className="text-sm">Para administrar y exportar sus deudas mes a mes</p>
+              <p className="text-sm">Para administrar y visualizar sus saldos</p>
             </div>
           )}
         </div>

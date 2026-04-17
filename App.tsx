@@ -18,7 +18,7 @@ import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementReco
 import { auth } from './src/config/firebase'; 
 import { 
     getUnits, getExpenses, getHistory, createConsortium, 
-    saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment,
+    saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment, deletePayment,
     getAnnouncements, addAnnouncement, deleteAnnouncement,
     getDebtAdjustments, addDebtAdjustment, deleteDebtAdjustment,
     getMaintenanceRequests, addMaintenanceRequest, updateMaintenanceRequest, deleteMaintenanceRequest,
@@ -193,6 +193,12 @@ function App() {
       await updatePayment(consortium.id, id, { status: newStatus });
       setPayments(payments.map(p => p.id === id ? { ...p, status: newStatus } : p));
   };
+
+  const handleDeletePayment = async (id: string) => {
+      if(!consortium) return;
+      await deletePayment(consortium.id, id);
+      setPayments(payments.filter(p => p.id !== id));
+  };
   
   const handleUpdateUnit = async (unitId: string, updates: Partial<Unit>) => {
       if (!consortium) return;
@@ -319,15 +325,16 @@ function App() {
         <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {loading && <div className="text-center p-4">Cargando datos...</div>}
 
-          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} settings={settings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}} />}
+          {/* ACÁ LE PASAMOS history A DASHBOARD */}
+          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={settings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}} />}
+          
           {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
           {!loading && view === 'documents' && <DocumentsView documents={documents} userRole={user.role} onAdd={handleAddDocument} onDelete={handleDeleteDocument} />}
           {!loading && view === 'maintenance' && <MaintenanceView requests={maintenanceRequests} units={units} userRole={user.role} userEmail={user.email} onAdd={handleAddMaintenance} onUpdate={handleUpdateMaintenance} onDelete={handleDeleteMaintenance} />}
           {!loading && view === 'amenities' && <AmenitiesView amenities={amenities} bookings={bookings} units={units} userRole={user.role} userEmail={user.email} onAddAmenity={handleAddAmenity} onDeleteAmenity={handleDeleteAmenity} onAddBooking={handleAddBooking} onDeleteBooking={handleDeleteBooking} />}
           
-          {!loading && view === 'expenses' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} consortiumId={consortium.id} />}
+          {!loading && view === 'expenses' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} consortiumId={consortium.id} units={units} />}
           
-          {/* AQUÍ CORREGIMOS EL PASO DE CONSORTIUM */}
           {!loading && view === 'history' && <HistoryView history={history} consortium={consortium} units={units} settings={settings} />}
           
           {!loading && view === 'user_portal' && (
@@ -354,6 +361,7 @@ function App() {
                 units={units} setUnits={setUnits} consortiumId={consortium.id}
                 history={history} payments={payments} debtAdjustments={debtAdjustments} consortium={consortium}
                 onUpdateUnit={handleUpdateUnit} onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange}
+                onDeletePayment={handleDeletePayment} 
             />
           )}
           

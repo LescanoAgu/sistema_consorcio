@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Expense, ExpenseDistributionType, ExpenseTemplate } from '../types';
-import { Plus, Trash2, Tag, Paperclip, CheckCircle, Loader2, FileText, Download, Bookmark, X, Save, Upload, FileSpreadsheet, Edit2 } from 'lucide-react';
+import { Expense, ExpenseDistributionType, ExpenseTemplate, Unit } from '../types';
+import { Plus, Trash2, Tag, Paperclip, CheckCircle, Loader2, FileText, Download, Bookmark, X, Save, Upload, FileSpreadsheet, Edit2, Users } from 'lucide-react';
 import { addExpense, deleteExpense, updateExpense, uploadExpenseReceipt, getExpenseTemplates, addExpenseTemplate, deleteExpenseTemplate } from '../services/firestoreService';
 import * as XLSX from 'xlsx';
 
@@ -13,6 +13,7 @@ interface ExpensesViewProps {
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
   reserveBalance: number;
   consortiumId: string;
+  units: Unit[]; // ESTO ES CLAVE PARA PODER SELECCIONARLAS
 }
 
 const EXPENSE_CATEGORIES = [
@@ -20,7 +21,7 @@ const EXPENSE_CATEGORIES = [
   'Seguros', 'Sueldos y Cargas', 'Limpieza', 'Bancarios', 'Otros'
 ];
 
-const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, reserveBalance, consortiumId }) => {
+const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, reserveBalance, consortiumId, units }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -29,9 +30,13 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
   const [templates, setTemplates] = useState<ExpenseTemplate[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
 
+  // ESTADO PARA SABER SI APLICA A TODAS O SOLO A ALGUNAS
+  const [appliesToAll, setAppliesToAll] = useState(true);
+
   const [newExpense, setNewExpense] = useState<Partial<Expense>>({
     description: '', amount: 0, date: new Date().toISOString().split('T')[0],
-    category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
+    category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: '',
+    affectedUnitIds: [] // AQUÍ SE GUARDAN LAS UNIDADES SELECCIONADAS
   });
 
   useEffect(() => {
@@ -68,8 +73,18 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
   const handleOpenEdit = (e: Expense) => {
       setEditingId(e.id);
       setNewExpense(e);
+      setAppliesToAll(!e.affectedUnitIds || e.affectedUnitIds.length === 0);
       setIsFormOpen(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleUnitToggle = (unitId: string) => {
+      const current = newExpense.affectedUnitIds || [];
+      if (current.includes(unitId)) {
+          setNewExpense({ ...newExpense, affectedUnitIds: current.filter(id => id !== unitId) });
+      } else {
+          setNewExpense({ ...newExpense, affectedUnitIds: [...current, unitId] });
+      }
   };
 
   const handleSave = async () => {
@@ -81,8 +96,13 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
         const expenseData = {
             description: newExpense.description || '', amount: amount, date: newExpense.date || new Date().toISOString().split('T')[0],
             category: newExpense.category as any, itemCategory: newExpense.itemCategory || 'Otros',
-            distributionType: newExpense.distributionType as any, attachmentUrl: newExpense.attachmentUrl
+            distributionType: newExpense.distributionType as any, attachmentUrl: newExpense.attachmentUrl,
+            affectedUnitIds: appliesToAll ? [] : (newExpense.affectedUnitIds || [])
         };
+
+        if (!appliesToAll && expenseData.affectedUnitIds.length === 0) {
+            return alert("Debes seleccionar al menos una unidad si no aplica a todas.");
+        }
 
         if (editingId) {
             await updateExpense(consortiumId, editingId, expenseData);
@@ -102,9 +122,10 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
   const resetForm = () => {
     setEditingId(null);
     setIsFormOpen(false);
+    setAppliesToAll(true);
     setNewExpense({
         description: '', amount: 0, date: new Date().toISOString().split('T')[0],
-        category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
+        category: 'Ordinary', itemCategory: 'Mantenimiento', distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: '', affectedUnitIds: []
     });
   }
 
@@ -136,7 +157,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                           description: String(desc), amount: amount,
                           date: row['Fecha'] ? new Date(row['Fecha']).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                           category: 'Ordinary' as const, itemCategory: row['Rubro'] || 'Otros',
-                          distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: ''
+                          distributionType: ExpenseDistributionType.PRORATED, attachmentUrl: '',
+                          affectedUnitIds: [] 
                       };
                       const saved = await addExpense(consortiumId, newExp);
                       setExpenses(prev => [...prev, saved]);
@@ -163,7 +185,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
   const handleExportExcel = () => {
       const data = expenses.map(e => ({
           Fecha: new Date(e.date).toLocaleDateString(), Rubro: e.itemCategory, Descripción: e.description,
-          Monto: e.amount, Comprobante: e.attachmentUrl ? 'Sí' : 'No'
+          Monto: e.amount, Comprobante: e.attachmentUrl ? 'Sí' : 'No', 
+          Destino: (!e.affectedUnitIds || e.affectedUnitIds.length === 0) ? 'Todas las Unidades' : `${e.affectedUnitIds.length} Unidades Específicas`
       }));
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
@@ -175,12 +198,13 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
       if (!newExpense.description) return alert("Escribe descripción.");
       const alias = prompt("Nombre plantilla:", newExpense.description);
       if(!alias) return;
-      const tpl = await addExpenseTemplate(consortiumId, { alias, description: newExpense.description, amount: newExpense.amount||0, category: newExpense.category as any, itemCategory: newExpense.itemCategory||'', distributionType: newExpense.distributionType as any });
+      const tpl = await addExpenseTemplate(consortiumId, { alias, description: newExpense.description, amount: newExpense.amount||0, category: newExpense.category as any, itemCategory: newExpense.itemCategory||'', distributionType: newExpense.distributionType as any, affectedUnitIds: appliesToAll ? [] : newExpense.affectedUnitIds });
       setTemplates([...templates, tpl]);
   };
   
   const handleLoadTemplate = (t: ExpenseTemplate) => {
-      setNewExpense({ ...newExpense, description: t.description, amount: t.amount, category: t.category, itemCategory: t.itemCategory, distributionType: t.distributionType });
+      setNewExpense({ ...newExpense, description: t.description, amount: t.amount, category: t.category, itemCategory: t.itemCategory, distributionType: t.distributionType, affectedUnitIds: t.affectedUnitIds || [] });
+      setAppliesToAll(!t.affectedUnitIds || t.affectedUnitIds.length === 0);
       setShowTemplates(false);
   };
   
@@ -213,7 +237,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
 
             {!isFormOpen && (
                 <button onClick={() => { setIsFormOpen(true); setEditingId(null); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700 shadow-lg shadow-indigo-200 font-bold text-sm">
-                    <Plus className="w-4 h-4 mr-2" /> Nuevo
+                    <Plus className="w-4 h-4 mr-2" /> Nuevo Gasto
                 </button>
             )}
         </div>
@@ -251,33 +275,67 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                 </div>
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Monto ($)</label>
-                    <input type="number" step="0.01" className="w-full p-2 border rounded outline-none font-bold" value={newExpense.amount||''} onChange={e => setNewExpense({ ...newExpense, amount: parseFloat(e.target.value)||0 })} />
+                    <input type="number" step="0.01" className="w-full p-2 border rounded outline-none font-bold text-indigo-700" value={newExpense.amount||''} onChange={e => setNewExpense({ ...newExpense, amount: parseFloat(e.target.value)||0 })} />
                 </div>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha</label><input type="date" className="w-full p-2 border rounded" value={newExpense.date} onChange={e => setNewExpense({ ...newExpense, date: e.target.value })} /></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Rubro</label><select className="w-full p-2 border rounded" value={newExpense.itemCategory} onChange={e => setNewExpense({ ...newExpense, itemCategory: e.target.value })}>{EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label><select className="w-full p-2 border rounded" value={newExpense.category} onChange={e => setNewExpense({ ...newExpense, category: e.target.value as any })}><option value="Ordinary">Ordinario</option><option value="Extraordinary">Extraordinario</option></select></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha</label><input type="date" className="w-full p-2 border rounded outline-none" value={newExpense.date} onChange={e => setNewExpense({ ...newExpense, date: e.target.value })} /></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Rubro</label><select className="w-full p-2 border rounded outline-none" value={newExpense.itemCategory} onChange={e => setNewExpense({ ...newExpense, itemCategory: e.target.value })}>{EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo de Gasto</label><select className="w-full p-2 border rounded outline-none" value={newExpense.category} onChange={e => setNewExpense({ ...newExpense, category: e.target.value as any })}><option value="Ordinary">Ordinario</option><option value="Extraordinary">Extraordinario</option></select></div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Distribución</label><select className="w-full p-2 border rounded" value={newExpense.distributionType} onChange={e => setNewExpense({ ...newExpense, distributionType: e.target.value as any })}><option value={ExpenseDistributionType.PRORATED}>Prorrateo</option><option value={ExpenseDistributionType.FROM_RESERVE}>Fondo Reserva</option></select></div>
+            {/* SECCIÓN DE ASIGNACIÓN Y DISTRIBUCIÓN (LA MAGIA) */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comprobante</label>
-                    <label className={`flex items-center w-full p-2 border rounded cursor-pointer ${newExpense.attachmentUrl ? 'bg-emerald-50 border-emerald-200' : 'hover:bg-slate-50'}`}>
-                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : (newExpense.attachmentUrl ? <CheckCircle className="w-4 h-4 text-emerald-600 mr-2"/> : <Paperclip className="w-4 h-4 text-slate-400 mr-2"/>)}
-                        <span className="text-sm truncate">{newExpense.attachmentUrl ? 'Adjunto Cargado' : 'Subir archivo...'}</span>
-                        <input type="file" className="hidden" onChange={handleFileChange} />
-                    </label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Users className="w-4 h-4"/> ¿A quién afecta este gasto?</label>
+                    <div className="flex gap-4 mb-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" checked={appliesToAll} onChange={() => setAppliesToAll(true)} className="text-indigo-600 focus:ring-indigo-500" />
+                            <span className="text-sm font-medium">A todas las UF</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" checked={!appliesToAll} onChange={() => setAppliesToAll(false)} className="text-indigo-600 focus:ring-indigo-500" />
+                            <span className="text-sm font-medium">Seleccionar Específicas</span>
+                        </label>
+                    </div>
+                    {!appliesToAll && (
+                        <div className="h-32 overflow-y-auto bg-white border border-slate-200 rounded p-2 grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            {units.map(u => (
+                                <label key={u.id} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 cursor-pointer">
+                                    <input type="checkbox" checked={(newExpense.affectedUnitIds || []).includes(u.id)} onChange={() => handleUnitToggle(u.id)} className="rounded text-indigo-600"/>
+                                    {u.unitNumber}
+                                </label>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex flex-col justify-between">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2">¿Cómo se divide el gasto?</label>
+                        <select className="w-full p-2 border border-slate-200 rounded outline-none bg-white font-medium text-slate-700" value={newExpense.distributionType} onChange={e => setNewExpense({ ...newExpense, distributionType: e.target.value as any })}>
+                            <option value={ExpenseDistributionType.PRORATED}>Porcentaje de Prorrateo (Tradicional)</option>
+                            <option value={ExpenseDistributionType.EQUAL_PARTS}>Partes Iguales (Equitativo)</option>
+                            <option value={ExpenseDistributionType.FROM_RESERVE}>Pagar con Fondo de Reserva (No se cobra)</option>
+                        </select>
+                    </div>
+                    <div className="mt-4">
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comprobante de Pago</label>
+                        <label className={`flex items-center w-full p-2 border rounded cursor-pointer ${newExpense.attachmentUrl ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white hover:bg-slate-50 text-slate-500'}`}>
+                            {isUploading ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : (newExpense.attachmentUrl ? <CheckCircle className="w-4 h-4 mr-2"/> : <Paperclip className="w-4 h-4 mr-2"/>)}
+                            <span className="text-sm truncate font-medium">{newExpense.attachmentUrl ? 'Adjunto Cargado (Click para cambiar)' : 'Subir foto o PDF...'}</span>
+                            <input type="file" className="hidden" onChange={handleFileChange} />
+                        </label>
+                    </div>
                 </div>
             </div>
 
-            <div className="flex justify-between pt-4 border-t mt-4">
-                {!editingId && <button onClick={handleSaveTemplate} className="text-indigo-600 text-xs font-bold hover:underline flex items-center"><Save className="w-3 h-3 mr-1"/> Guardar Plantilla</button>}
-                <div className="flex gap-2">
-                    <button onClick={resetForm} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded">Cancelar</button>
-                    <button onClick={handleSave} className="px-6 py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700">{editingId ? 'Actualizar' : 'Guardar'}</button>
+            <div className="flex justify-between pt-4 border-t border-slate-100 mt-4">
+                {!editingId && <button onClick={handleSaveTemplate} className="text-indigo-600 text-xs font-bold hover:underline flex items-center"><Save className="w-3 h-3 mr-1"/> Guardar como Plantilla</button>}
+                <div className="flex gap-2 ml-auto">
+                    <button onClick={resetForm} className="px-6 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
+                    <button onClick={handleSave} className="px-8 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-md">{editingId ? 'Actualizar Gasto' : 'Guardar Gasto'}</button>
                 </div>
             </div>
           </div>
@@ -287,30 +345,44 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
       <div className="space-y-6 mt-8">
           {Object.keys(gastosAgrupados).sort().map(cat => (
              <div key={cat} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                 <div className="bg-slate-50 px-6 py-2 border-b font-bold text-slate-700 text-sm uppercase flex justify-between items-center">
-                     <span><Tag className="w-3 h-3 inline mr-2"/> {cat}</span>
-                     <span className="text-xs bg-white px-2 rounded border">{gastosAgrupados[cat].length}</span>
+                 <div className="bg-slate-50 px-6 py-3 border-b border-slate-200 font-bold text-slate-700 text-sm uppercase flex justify-between items-center">
+                     <span className="flex items-center"><Tag className="w-4 h-4 inline mr-2 text-indigo-500"/> {cat}</span>
+                     <span className="text-xs bg-white px-2 py-0.5 rounded border font-medium text-slate-500">{gastosAgrupados[cat].length} ítems</span>
                  </div>
-                 <table className="w-full text-sm text-left">
-                    <tbody className="divide-y divide-slate-100">
-                        {gastosAgrupados[cat].map(e => (
-                            <tr key={e.id} className="hover:bg-slate-50 group">
-                                <td className="px-6 py-3 text-slate-500 w-32">{new Date(e.date).toLocaleDateString()}</td>
-                                <td className="px-6 py-3 font-medium text-slate-800">
-                                    {e.description}
-                                    {e.attachmentUrl && <a href={e.attachmentUrl} target="_blank" rel="noreferrer" className="ml-2 text-indigo-600 hover:underline text-xs bg-indigo-50 px-1 rounded"><FileText className="w-3 h-3 inline"/> Ver</a>}
-                                </td>
-                                <td className="px-6 py-3 text-right font-bold text-slate-700">{formatCurrency(e.amount)}</td>
-                                <td className="px-6 py-3 text-right w-24">
-                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => handleOpenEdit(e)} className="p-1 hover:bg-indigo-100 text-indigo-600 rounded"><Edit2 className="w-4 h-4"/></button>
-                                        <button onClick={() => handleDelete(e.id)} className="p-1 hover:bg-red-100 text-red-600 rounded"><Trash2 className="w-4 h-4"/></button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                 </table>
+                 <div className="overflow-x-auto">
+                     <table className="w-full text-sm text-left">
+                        <tbody className="divide-y divide-slate-100">
+                            {gastosAgrupados[cat].map(e => (
+                                <tr key={e.id} className="hover:bg-slate-50 group transition-colors">
+                                    <td className="px-6 py-4 text-slate-500 w-32">{new Date(e.date).toLocaleDateString()}</td>
+                                    <td className="px-6 py-4 font-medium text-slate-800">
+                                        <div className="flex flex-col">
+                                            <span>{e.description}</span>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                {(!e.affectedUnitIds || e.affectedUnitIds.length === 0) ? (
+                                                    <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-bold">Todas las Unidades</span>
+                                                ) : (
+                                                    <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold">{e.affectedUnitIds.length} Unidades Afectadas</span>
+                                                )}
+                                                <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-bold">{e.distributionType === 'EQUAL_PARTS' ? 'Partes Iguales' : e.distributionType === 'PRORATED' ? 'Prorrateo' : 'Fondo Reserva'}</span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        {e.attachmentUrl && <a href={e.attachmentUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:text-indigo-800 transition-colors" title="Ver Comprobante"><FileText className="w-5 h-5 inline"/></a>}
+                                    </td>
+                                    <td className="px-6 py-4 text-right font-black text-slate-700">{formatCurrency(e.amount)}</td>
+                                    <td className="px-6 py-4 text-right w-24">
+                                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => handleOpenEdit(e)} className="p-1.5 hover:bg-indigo-100 text-indigo-600 rounded transition-colors"><Edit2 className="w-4 h-4"/></button>
+                                            <button onClick={() => handleDelete(e.id)} className="p-1.5 hover:bg-red-100 text-red-600 rounded transition-colors"><Trash2 className="w-4 h-4"/></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                     </table>
+                 </div>
              </div>
           ))}
       </div>

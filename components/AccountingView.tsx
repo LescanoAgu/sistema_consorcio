@@ -58,7 +58,7 @@ const AccountingView: React.FC<AccountingViewProps> = (props) => {
       </div>
 
       <div className="animate-fade-in">
-          {activeTab === 'GASTOS' && <ExpensesView expenses={props.expenses} setExpenses={props.setExpenses} reserveBalance={props.settings.reserveFundBalance} consortiumId={props.consortiumId} />}
+          {activeTab === 'GASTOS' && <ExpensesView expenses={props.expenses} setExpenses={props.setExpenses} reserveBalance={props.settings.reserveFundBalance} consortiumId={props.consortiumId} units={props.units} />}
           {activeTab === 'LIQUIDACION' && <SettlementView units={props.units} expenses={props.expenses} settings={props.settings} setExpenses={props.setExpenses} consortiumId={props.consortiumId} consortiumName={props.consortiumName} updateReserveBalance={props.updateReserveBalance} onUpdateBankSettings={props.onUpdateBankSettings} onCloseMonth={props.onCloseMonth} onChangeView={handleChangeView as any} />}
           {activeTab === 'HISTORIAL' && <HistoryView history={props.history} consortium={props.consortium} units={props.units} settings={props.settings} />}
           {activeTab === 'RESERVA' && <ReserveView transactions={props.reserveTransactions} consortium={props.consortium} onAddTransaction={props.onAddReserveTransaction} onDeleteTransaction={props.onDeleteReserveTransaction} />}

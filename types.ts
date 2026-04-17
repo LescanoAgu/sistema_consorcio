@@ -63,6 +63,7 @@ export interface Expense {
   itemCategory: string; 
   attachmentUrl?: string; 
   liquidacionId?: string | null;
+  affectedUnitIds?: string[]; // NUEVO: Si está vacío, aplica a todas. Si tiene IDs, solo a esas.
 }
 
 export interface Payment {
@@ -135,11 +136,10 @@ export interface SettlementRecord {
   unitDetails: { unitId: string; totalToPay: number }[]; 
 }
 
-// --- NUEVO: ESTRUCTURA DEL LIBRO MAYOR DE RESERVA ---
 export interface ReserveTransaction {
     id: string;
     date: string;
-    amount: number; // Positivo (Ingreso), Negativo (Egreso)
+    amount: number; 
     description: string; 
     type: 'SYSTEM' | 'MANUAL' | 'INITIAL';
 }
@@ -166,6 +166,7 @@ export interface ExpenseTemplate {
   category: 'Ordinary' | 'Extraordinary';
   itemCategory: string;
   distributionType: ExpenseDistributionType;
+  affectedUnitIds?: string[]; // NUEVO
 }
 
 export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities' | 'profile' | 'documents' | 'management' | 'accounting';

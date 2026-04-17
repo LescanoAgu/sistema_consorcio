@@ -16,6 +16,7 @@ interface ManagementViewProps {
   onUpdateUnit: (id: string, updates: Partial<Unit>) => Promise<void>;
   onAddPayment: (p: Omit<Payment, 'id'>) => Promise<void>;
   onUpdateStatus: (id: string, s: 'APPROVED' | 'REJECTED') => Promise<void>;
+  onDeletePayment: (id: string) => Promise<void>; // NUEVO
 }
 
 const ManagementView: React.FC<ManagementViewProps> = (props) => {
@@ -23,7 +24,6 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
 
   return (
     <div className="space-y-6">
-      {/* HEADER PRINCIPAL DE GESTIÓN */}
       <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-2xl font-black flex items-center gap-3">
@@ -33,7 +33,6 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
             <p className="text-slate-400 mt-1">Administración centralizada de cobros, morosidad y datos de unidades.</p>
           </div>
           
-          {/* BOTONERA NAVEGACIÓN INTERNA */}
           <div className="flex bg-slate-800 p-1.5 rounded-xl w-full md:w-auto">
               <button 
                   onClick={() => setActiveTab('COBROS')} 
@@ -56,7 +55,6 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
           </div>
       </div>
 
-      {/* RENDERIZADO DEL SUB-MÓDULO SELECCIONADO */}
       <div className="animate-fade-in">
           {activeTab === 'COBROS' && (
               <CollectionsView 
@@ -82,6 +80,11 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
                   units={props.units} 
                   setUnits={props.setUnits} 
                   consortiumId={props.consortiumId} 
+                  payments={props.payments}
+                  history={props.history}
+                  consortium={props.consortium}
+                  onUpdateUnit={props.onUpdateUnit} // NUEVO
+                  onDeletePayment={props.onDeletePayment} // NUEVO
               />
           )}
       </div>
