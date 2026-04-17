@@ -63,7 +63,7 @@ export interface Expense {
   itemCategory: string; 
   attachmentUrl?: string; 
   liquidacionId?: string | null;
-  affectedUnitIds?: string[]; // NUEVO: Si está vacío, aplica a todas. Si tiene IDs, solo a esas.
+  affectedUnitIds?: string[]; 
 }
 
 export interface Payment {
@@ -166,7 +166,19 @@ export interface ExpenseTemplate {
   category: 'Ordinary' | 'Extraordinary';
   itemCategory: string;
   distributionType: ExpenseDistributionType;
-  affectedUnitIds?: string[]; // NUEVO
+  affectedUnitIds?: string[]; 
+}
+
+export interface JoinRequest {
+  id: string;
+  userEmail: string;
+  firstName: string; // NUEVO
+  lastName: string;  // NUEVO
+  message: string;   // NUEVO
+  consortiumId: string;
+  consortiumName: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  date: string;
 }
 
 export type ViewState = 'dashboard' | 'units' | 'expenses' | 'settlement' | 'collections' | 'history' | 'debtors' | 'user_portal' | 'settings' | 'announcements' | 'maintenance' | 'amenities' | 'profile' | 'documents' | 'management' | 'accounting';

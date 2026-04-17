@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Building2, LogOut, ArrowLeftRight, UserCheck, Megaphone, X, Wrench, CalendarCheck, User, FolderOpen, LayoutTemplate, PieChart, Receipt, History } from 'lucide-react';
+import { LayoutDashboard, Building2, LogOut, ArrowLeftRight, Megaphone, X, Wrench, CalendarCheck, User, LayoutTemplate, PieChart, Home } from 'lucide-react';
 import { ViewState, UserRole } from '../types';
 
 interface SidebarProps {
@@ -20,22 +20,17 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
     // ADMIN & DEV Views
     { id: 'dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['DEV', 'ADMIN'] },
     
-    // USER ONLY (Su propio portal completo)
-    { id: 'user_portal', label: 'Mi Unidad', icon: UserCheck, roles: ['USER'] },
+    // USER ONLY
+    { id: 'user_portal', label: 'Mis Unidades', icon: Home, roles: ['USER'] },
     
-    // COMPARTIDO COMUNICACIÓN Y AMENITIES
+    // COMPARTIDO
     { id: 'announcements', label: 'Novedades', icon: Megaphone, roles: ['DEV', 'ADMIN', 'USER'] },
-    { id: 'documents', label: 'Documentos', icon: FolderOpen, roles: ['DEV', 'ADMIN', 'USER'] }, 
     { id: 'amenities', label: 'Reservas', icon: CalendarCheck, roles: ['DEV', 'ADMIN', 'USER'] },
     { id: 'maintenance', label: 'Mantenimiento', icon: Wrench, roles: ['DEV', 'ADMIN', 'USER'] },
     
     // GESTIÓN UNIFICADA (ADMIN ONLY)
     { id: 'management', label: 'Gestión Integral', icon: LayoutTemplate, roles: ['DEV', 'ADMIN'] },
     { id: 'accounting', label: 'Contabilidad', icon: PieChart, roles: ['DEV', 'ADMIN'] },
-    
-    // VIEJOS ENLACES MANTENIDOS SOLO PARA USER (Por si acceden directamente, aunque usan el portal)
-    { id: 'expenses', label: 'Gastos', icon: Receipt, roles: ['USER'] },
-    { id: 'history', label: 'Historial', icon: History, roles: ['USER'] },
     
     // SETTINGS
     { id: 'settings', label: 'Configuración', icon: Building2, roles: ['DEV', 'ADMIN'] },
@@ -47,16 +42,12 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
   return (
     <>
       {isOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={onClose}
-        />
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={onClose} />
       )}
 
       <aside className={`
         fixed top-0 left-0 z-50 h-screen w-64 bg-slate-900 text-white flex flex-col transition-transform duration-300 ease-in-out shadow-2xl
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'} 
-        md:translate-x-0 md:shadow-none
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:shadow-none
       `}>
         <div className="p-6 border-b border-slate-800 flex justify-between items-center">
           <div>
@@ -80,26 +71,16 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
               return (
                 <li key={item.id} className="mb-1">
                   <button
-                    onClick={() => {
-                      onChangeView(item.id as ViewState);
-                      onClose(); 
-                    }}
+                    onClick={() => { onChangeView(item.id as ViewState); onClose(); }}
                     className={`w-full flex items-center justify-between px-6 py-3 transition-all duration-200 ${
-                      isActive
-                        ? 'bg-indigo-600/10 text-indigo-400 border-r-4 border-indigo-500'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-white border-r-4 border-transparent'
+                      isActive ? 'bg-indigo-600/10 text-indigo-400 border-r-4 border-indigo-500' : 'text-slate-400 hover:bg-slate-800 hover:text-white border-r-4 border-transparent'
                     }`}
                   >
                     <div className="flex items-center">
                       <Icon className={`w-5 h-5 mr-3 ${isActive ? 'text-indigo-400' : ''}`} />
                       <span className="font-medium text-sm">{item.label}</span>
                     </div>
-                    
-                    {badgeCount > 0 && (
-                      <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
-                        {badgeCount}
-                      </span>
-                    )}
+                    {badgeCount > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">{badgeCount}</span>}
                   </button>
                 </li>
               );
