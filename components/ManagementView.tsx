@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Unit, SettlementRecord, Payment, DebtAdjustment, Consortium, JoinRequest } from '../types';
+import { Unit, SettlementRecord, Payment, Consortium, JoinRequest } from '../types';
 import CollectionsView from './CollectionsView';
 import DebtorsView from './DebtorsView';
 import UnitsView from './UnitsView';
@@ -12,7 +12,6 @@ interface ManagementViewProps {
   consortiumId: string;
   history: SettlementRecord[];
   payments: Payment[];
-  debtAdjustments: DebtAdjustment[];
   consortium: Consortium;
   onUpdateUnit: (id: string, updates: Partial<Unit>) => Promise<void>;
   onAddPayment: (p: Omit<Payment, 'id'>) => Promise<void>;
@@ -88,7 +87,7 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
       </div>
 
       <div className="animate-fade-in">
-          {activeTab === 'COBROS' && <CollectionsView payments={props.payments} units={props.units} history={props.history} debtAdjustments={props.debtAdjustments} onAddPayment={props.onAddPayment} onUpdateStatus={props.onUpdateStatus} />}
+          {activeTab === 'COBROS' && <CollectionsView payments={props.payments} units={props.units} history={props.history} onAddPayment={props.onAddPayment} onUpdateStatus={props.onUpdateStatus} onUpdateUnit={props.onUpdateUnit} />}
           {activeTab === 'DEUDAS' && <DebtorsView units={props.units} history={props.history} payments={props.payments} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} />}
           {activeTab === 'UNIDADES' && <UnitsView units={props.units} setUnits={props.setUnits} consortiumId={props.consortiumId} payments={props.payments} history={props.history} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} onDeletePayment={props.onDeletePayment} />}
           

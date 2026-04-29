@@ -14,13 +14,12 @@ import MaintenanceView from './components/MaintenanceView';
 import AmenitiesView from './components/AmenitiesView'; 
 import ProfileView from './components/ProfileView';
 import DocumentsView from './components/DocumentsView'; 
-import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, DebtAdjustment, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ReserveTransaction } from './types';
+import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ReserveTransaction } from './types';
 import { auth } from './src/config/firebase'; 
 import { 
     getUnits, getExpenses, getHistory, createConsortium, 
     saveSettlement, getSettings, saveSettings, createPayment, uploadPaymentReceipt, getPayments, updatePayment, deletePayment,
     getAnnouncements, addAnnouncement, deleteAnnouncement,
-    getDebtAdjustments, addDebtAdjustment, deleteDebtAdjustment,
     getMaintenanceRequests, addMaintenanceRequest, updateMaintenanceRequest, deleteMaintenanceRequest,
     getAmenities, addAmenity, deleteAmenity, getBookings, addBooking, deleteBooking,
     getAdminConsortiums, getUserConsortiums, 
@@ -37,7 +36,6 @@ function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [history, setHistory] = useState<SettlementRecord[]>([]);
-  const [debtAdjustments, setDebtAdjustments] = useState<DebtAdjustment[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]); 
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [amenities, setAmenities] = useState<Amenity[]>([]); 
@@ -92,16 +90,15 @@ function App() {
             getSettings(consortium.id),
             getPayments(consortium.id),
             getAnnouncements(consortium.id),
-            getDebtAdjustments(consortium.id),
             getMaintenanceRequests(consortium.id),
             getAmenities(consortium.id), 
             getBookings(consortium.id),
             getDocuments(consortium.id),
             getReserveTransactions(consortium.id)
         ])
-        .then(([u, e, h, s, p, a, d, m, am, b, docs, rt]) => { 
+        .then(([u, e, h, s, p, a, m, am, b, docs, rt]) => { 
             setUnits(u); setExpenses(e); setHistory(h); setSettings(s); 
-            setPayments(p); setAnnouncements(a); setDebtAdjustments(d);
+            setPayments(p); setAnnouncements(a); 
             setMaintenanceRequests(m); setAmenities(am); setBookings(b);
             setDocuments(docs); setReserveTransactions(rt); setLoading(false); 
         })
@@ -325,7 +322,6 @@ function App() {
         <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {loading && <div className="text-center p-4">Cargando datos...</div>}
 
-          {/* ACÁ LE PASAMOS history A DASHBOARD */}
           {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={settings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}} />}
           
           {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
@@ -338,7 +334,7 @@ function App() {
           {!loading && view === 'history' && <HistoryView history={history} consortium={consortium} units={units} settings={settings} />}
           
           {!loading && view === 'user_portal' && (
-            <UserPortal userEmail={user.email} consortium={consortium} units={units} expenses={expenses} history={history} payments={payments} settings={settings} announcements={announcements} debtAdjustments={debtAdjustments} myBookings={bookings} myTickets={maintenanceRequests} documents={documents} onReportPayment={handleReportPayment} />
+            <UserPortal userEmail={user.email} consortium={consortium} units={units} expenses={expenses} history={history} payments={payments} settings={settings} announcements={announcements} myBookings={bookings} myTickets={maintenanceRequests} documents={documents} onReportPayment={handleReportPayment} />
           )}
           
           {!loading && view === 'accounting' && (
@@ -359,7 +355,7 @@ function App() {
           {!loading && view === 'management' && (
             <ManagementView 
                 units={units} setUnits={setUnits} consortiumId={consortium.id}
-                history={history} payments={payments} debtAdjustments={debtAdjustments} consortium={consortium}
+                history={history} payments={payments} consortium={consortium}
                 onUpdateUnit={handleUpdateUnit} onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange}
                 onDeletePayment={handleDeletePayment} 
             />

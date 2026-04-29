@@ -77,14 +77,6 @@ export interface Payment {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-export interface DebtAdjustment {
-  id: string;
-  unitId: string;
-  amount: number; 
-  date: string;
-  description: string; 
-}
-
 export interface Announcement {
   id: string;
   title: string;
@@ -172,9 +164,9 @@ export interface ExpenseTemplate {
 export interface JoinRequest {
   id: string;
   userEmail: string;
-  firstName: string; // NUEVO
-  lastName: string;  // NUEVO
-  message: string;   // NUEVO
+  firstName: string; 
+  lastName: string;  
+  message: string;   
   consortiumId: string;
   consortiumName: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';

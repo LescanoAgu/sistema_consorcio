@@ -3,7 +3,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; 
 import { db } from '../src/config/firebase'; 
-import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, DebtAdjustment, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ExpenseTemplate, ReserveTransaction, JoinRequest } from '../types';
+import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ExpenseTemplate, ReserveTransaction, JoinRequest } from '../types';
 
 export const clearCollection = async (consortiumId: string, collectionName: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/${collectionName}`));
@@ -145,19 +145,6 @@ export const deleteAnnouncement = async (consortiumId: string, id: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/announcements`, id));
 };
 
-export const getDebtAdjustments = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/debt_adjustments`), orderBy('date', 'desc'));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as DebtAdjustment));
-};
-export const addDebtAdjustment = async (consortiumId: string, data: Omit<DebtAdjustment, 'id'>) => {
-    const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/debt_adjustments`), data);
-    return { id: docRef.id, ...data };
-};
-export const deleteDebtAdjustment = async (consortiumId: string, id: string) => {
-    await deleteDoc(doc(db, `consortiums/${consortiumId}/debt_adjustments`, id));
-};
-
 export const getMaintenanceRequests = async (consortiumId: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/maintenance`), orderBy('date', 'desc'));
     const snapshot = await getDocs(q);
@@ -223,7 +210,7 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
 };
 
 export const getHistory = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/history`), orderBy('month', 'desc'));
+    const q = query(collection(db, `consortiums/${consortiumId}/history`), orderBy('dateClosed', 'desc'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SettlementRecord));
 };
@@ -302,7 +289,6 @@ export const deleteReserveTransaction = async (consortiumId: string, id: string)
     await deleteDoc(doc(db, `consortiums/${consortiumId}/reserve_transactions`, id));
 };
 
-// --- NUEVAS FUNCIONES DE SOLICITUDES DE INGRESO (JOIN REQUESTS) ---
 export const getAllConsortiums = async () => {
     const snapshot = await getDocs(collection(db, 'consortiums'));
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Consortium));

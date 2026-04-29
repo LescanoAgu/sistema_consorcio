@@ -31,7 +31,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
   
   const myUnits = useMemo(() => {
       const owned = units.filter(u => u.authorizedEmails?.includes(userEmail));
-      return owned.length > 0 ? owned : units.filter(u => u.ownerName === 'Usuario Demo'); // Fallback por seguridad visual
+      return owned.length > 0 ? owned : units.filter(u => u.ownerName === 'Usuario Demo'); 
   }, [units, userEmail]);
 
   const [selectedUnitId, setSelectedUnitId] = useState<string>('');
@@ -44,7 +44,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
 
   const currentUnit = useMemo(() => myUnits.find(u => u.id === selectedUnitId) || myUnits[0], [selectedUnitId, myUnits]);
 
-  // Mismo motor matemático de deuda exacto al del admin
   const currentUnitDebt = useMemo(() => {
       if (!currentUnit) return { historical: 0, current: 0, total: 0, pendingPeriod: '' };
 
@@ -113,7 +112,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
             <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-200 mb-1">Panel del Propietario</h2>
             <h1 className="text-3xl font-black mb-4 truncate">{currentUnit.ownerName}</h1>
             
-            {/* PESTAÑAS DE UNIDADES (Si tiene más de 1) */}
             {myUnits.length > 1 ? (
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                     {myUnits.map(u => (
@@ -155,7 +153,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
               
-              {/* ESTADO DE CUENTA PRECISO */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                   <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">Estado de Cuenta Actual</h3>
                   <div className="flex flex-col md:flex-row gap-8 items-center justify-between">
@@ -188,7 +185,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
                       </div>
                   </div>
                   
-                  {/* Desglose si debe algo */}
                   {currentUnitDebt.total > 1 && (
                       <div className="mt-6 pt-4 border-t border-slate-100 flex flex-wrap gap-4">
                           {currentUnitDebt.historical > 0 && <span className="text-xs font-bold bg-red-50 text-red-700 px-3 py-1 rounded-lg border border-red-100">Deuda Anterior: {formatCurrency(currentUnitDebt.historical)}</span>}
@@ -197,7 +193,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
                   )}
               </div>
 
-              {/* HISTORIAL Y CUPONES */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-5 bg-slate-50 border-b border-slate-200">
                       <h3 className="font-bold text-slate-800">Tus Expensas Anteriores</h3>
@@ -205,7 +200,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
                   <div className="divide-y divide-slate-100">
                       {history.length > 0 ? history.slice(0, 5).map(rec => {
                           const detail = rec.unitDetails?.find(d => d.unitId === currentUnit.id);
-                          // Si esta UF no participó en esta liquidación, no la mostramos (muy raro pero posible)
                           if (!detail) return null;
                           
                           return (
@@ -247,7 +241,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
               </div>
           </div>
 
-          {/* COLUMNA LATERAL */}
           <div className="space-y-6">
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-4 border-b border-slate-100"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Calendar className="w-4 h-4 text-emerald-500"/> Mis Reservas Próximas</h3></div>
@@ -275,7 +268,6 @@ const UserPortal: React.FC<UserPortalProps> = ({
           </div>
       </div>
 
-      {/* MODAL INFORMAR PAGO */}
       {showPaymentModal && (
           <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">

@@ -121,23 +121,13 @@ function addPageNumbers(doc: jsPDF) {
     }
 }
 
-function drawRow(doc: jsPDF, label: string, amount: number, x1: number, x2: number, y: number, isBoldLabel = false) {
-    doc.setFontSize(10);
-    doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
-    doc.setFont("helvetica", isBoldLabel ? "bold" : "normal");
-    doc.text(label, x1, y);
-    doc.setFont("helvetica", "normal");
-    const textAmount = formatCurrency(Math.abs(amount));
-    const sign = amount < 0 ? "-" : "";
-    doc.text(`${sign} ${textAmount}`, x2, y, { align: 'right' });
-}
-
 // --- GENERADOR CUPÓN INDIVIDUAL ---
 
 const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
 
+    // --- PÁGINA 1: LIQUIDACIÓN DEL MES ---
     drawHeader(doc, consortium, "CUPÓN DE PAGO INDIVIDUAL", settlement);
 
     let finalY = 50;
@@ -201,7 +191,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     const exactAmountToPayMonth = detail ? detail.totalToPay : 0;
     const reserveContributionForUnit = (settlement.reserveContribution || 0) * (Number(unit.proratePercentage) / 100);
 
-    const bodyRows: any[][] = [['CONCEPTO', 'IMPORTE']];
+    const bodyRows: any[][] = [['CONCEPTO DEL PERÍODO', 'IMPORTE']];
 
     if (ordTotal > 0 || (ordTotal === 0 && extTotal === 0)) {
         bodyRows.push(['Expensas Ordinarias (Tu Cuota Parte)', formatCurrency(ordTotal)]);
@@ -220,24 +210,15 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
 
     let totalHistoricalDebt = 0;
     const initialBalance = unit.initialBalance || 0;
-    
-    if ((unit.debts && unit.debts.length > 0) || initialBalance > 0) {
-        bodyRows.push([{ content: 'DEUDA PENDIENTE Y RECARGOS', colSpan: 2, styles: { fontStyle: 'bold', textColor: [255, 255, 255], fillColor: THEME.secondary } }]);
-        
-        if (initialBalance > 0) { 
-            bodyRows.push(['Saldo Inicial / Deuda Previa', formatCurrency(initialBalance)]); 
-            totalHistoricalDebt += initialBalance; 
-        }
-        
-        if (unit.debts) {
-            unit.debts.forEach(debt => {
-                const label = `Deuda ${debt.period} (Cap: ${formatCurrency(debt.baseAmount)} | Int: ${debt.interestRate}%)`;
-                bodyRows.push([label, formatCurrency(debt.total)]); 
-                totalHistoricalDebt += debt.total;
-            });
-        }
-    } else {
-        bodyRows.push(['Deuda Anterior', '$ 0,00']);
+    if (initialBalance > 0) totalHistoricalDebt += initialBalance;
+    if (unit.debts) {
+        unit.debts.forEach(debt => totalHistoricalDebt += debt.total);
+    }
+
+    // SI HAY DEUDA, AGREGAMOS EL SUBTOTAL Y UNA FILA DE RESUMEN
+    if (totalHistoricalDebt > 0) {
+        bodyRows.push([{ content: 'SUBTOTAL MES ACTUAL', styles: { fontStyle: 'bold' } }, { content: formatCurrency(exactAmountToPayMonth), styles: { fontStyle: 'bold' } }]);
+        bodyRows.push([{ content: 'DEUDA HISTÓRICA / SALDO PENDIENTE (Ver detalle en Anexo)', styles: { fontStyle: 'italic', textColor: THEME.secondary } }, { content: formatCurrency(totalHistoricalDebt), styles: { fontStyle: 'bold', textColor: [220, 38, 38] } }]);
     }
 
     const finalTotalToPay = exactAmountToPayMonth + totalHistoricalDebt;
@@ -255,12 +236,12 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         },
         alternateRowStyles: { fillColor: THEME.stripe },
         didParseCell: (data) => {
-            if (data.row.index === 0 && data.section === 'body' && data.row.raw[0] === 'CONCEPTO') {
+            if (data.row.index === 0 && data.section === 'body' && data.row.raw[0] === 'CONCEPTO DEL PERÍODO') {
                 data.cell.styles.fillColor = THEME.secondary; 
                 data.cell.styles.textColor = [255,255,255]; 
                 data.cell.styles.fontStyle = 'bold';
             }
-            if (data.row.index === bodyRows.length - 1) {
+            if (data.row.index === bodyRows.length - 1) { // Última fila: TOTAL A PAGAR
                 data.cell.styles.fontStyle = 'bold'; 
                 data.cell.styles.fontSize = 14; 
                 data.cell.styles.textColor = [255,255,255]; 
@@ -272,7 +253,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // @ts-ignore
     finalY = doc.lastAutoTable.finalY + 15;
 
-    // Caja Bancaria
+    // Caja Bancaria en la Hoja 1
     doc.setDrawColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
     doc.setFillColor(THEME.stripe[0], THEME.stripe[1], THEME.stripe[2]);
     doc.roundedRect(14, finalY, pageWidth - 28, 28, 2, 2, 'FD');
@@ -288,17 +269,72 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     
     const bankInfo = consortium as any;
     doc.text(`Banco: ${bankInfo.bankName || 'A definir'}`, 20, finalY + 15);
-    
-    if(bankInfo.bankHolder) {
-        doc.text(`Titular: ${bankInfo.bankHolder}`, 100, finalY + 15); 
-    }
-    
+    if(bankInfo.bankHolder) doc.text(`Titular: ${bankInfo.bankHolder}`, 100, finalY + 15); 
     doc.setFont("helvetica", "bold"); 
     doc.text(`CBU: ${bankInfo.bankCBU || '-'}`, 20, finalY + 22);
     doc.text(`Alias: ${bankInfo.bankAlias || '-'}`, 100, finalY + 22);
     
     finalY += 35;
     drawFooter(doc, settlement, pageWidth, finalY);
+
+    // --- PÁGINA 2: ANEXO DE DEUDA (SOLO SE CREA SI HAY DEUDA) ---
+    if (totalHistoricalDebt > 0) {
+        doc.addPage();
+        drawHeader(doc, consortium, "ANEXO: DETALLE DE DEUDA", settlement);
+        
+        let anexoY = 50;
+        
+        doc.setFontSize(16);
+        doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Unidad: ${unit.unitNumber || '-'}`, 14, anexoY);
+        
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
+        doc.text(`Propietario: ${unit.ownerName || 'A designar'}`, 14, anexoY + 7);
+
+        anexoY += 15;
+
+        const debtRows: any[][] = [];
+        
+        if (initialBalance > 0) {
+            debtRows.push(['Saldo Inicial / Deuda Previa', formatCurrency(initialBalance), '-', formatCurrency(initialBalance)]);
+        }
+        
+        if (unit.debts) {
+            unit.debts.forEach(debt => {
+                const interestDetail = debt.interestAmount > 0 ? `${formatCurrency(debt.interestAmount)} (${debt.interestRate}%)` : '-';
+                debtRows.push([debt.period, formatCurrency(debt.baseAmount), interestDetail, formatCurrency(debt.total)]);
+            });
+        }
+
+        debtRows.push(['TOTAL DEUDA ACUMULADA', '', '', formatCurrency(totalHistoricalDebt)]);
+
+        autoTable(doc, {
+            startY: anexoY,
+            head: [['PERÍODO / CONCEPTO', 'IMPORTE BASE', 'INTERÉS', 'SUBTOTAL']],
+            body: debtRows,
+            theme: 'plain',
+            headStyles: { fillColor: THEME.secondary, textColor: [255,255,255], fontStyle: 'bold' },
+            bodyStyles: { fontSize: 10, textColor: THEME.text, cellPadding: 4 },
+            columnStyles: { 
+                0: { cellWidth: 70 }, 
+                1: { halign: 'right' }, 
+                2: { halign: 'center' }, 
+                3: { halign: 'right', fontStyle: 'bold' } 
+            },
+            alternateRowStyles: { fillColor: THEME.stripe },
+            didParseCell: (data) => {
+                if (data.row.index === debtRows.length - 1 && data.section === 'body') {
+                    // Fila de Total de Deuda
+                    data.cell.styles.fillColor = [254, 226, 226]; // Fondo rojo clarito
+                    data.cell.styles.textColor = [220, 38, 38];   // Texto rojo oscuro
+                    data.cell.styles.fontSize = 11;
+                }
+            }
+        });
+    }
 
     return doc;
 };
