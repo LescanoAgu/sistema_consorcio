@@ -27,376 +27,346 @@ const UnitsView: React.FC<UnitsViewProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
 
-  const [ledgerUnit, setLedgerUnit] = useState<Unit | null>(null);
-
+  // Estado del formulario manual ajustado
   const [formData, setFormData] = useState({
-    unitNumber: '', ownerName: '', authorizedEmailsInput: '', proratePercentage: '', initialBalance: ''     
+    block: '', // Campo para Complejo Norte/Sur
+    unitNumber: '',
+    ownerName: '',
+    proratePercentage: '',
+    initialBalance: '',
+    authorizedEmailsStr: ''
   });
 
+  // --- FUNCIÓN PARA DESCARGAR EL EXCEL DE PRUEBA (PLANTILLA) ---
+  const handleDownloadTemplate = () => {
+    const templateData = [
+      {
+        "Sector": "Complejo Norte",
+        "Unidad": "Local 1",
+        "Propietario": "Juan Pérez",
+        "Porcentaje Prorrateo": 5,
+        "Saldo Inicial": 0,
+        "Emails Autorizados": "juan.perez@email.com"
+      },
+      {
+        "Sector": "Complejo Sur",
+        "Unidad": "Local 14",
+        "Propietario": "Ana López",
+        "Porcentaje Prorrateo": 4.5,
+        "Saldo Inicial": -15000,
+        "Emails Autorizados": "ana.lopez@email.com"
+      },
+      {
+        "Sector": "General",
+        "Unidad": "Administración",
+        "Propietario": "Consorcio",
+        "Porcentaje Prorrateo": 0,
+        "Saldo Inicial": 0,
+        "Emails Autorizados": ""
+      }
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla Unidades");
+
+    worksheet['!cols'] = [
+      { wch: 18 }, // Sector
+      { wch: 12 }, // Unidad
+      { wch: 25 }, // Propietario
+      { wch: 22 }, // Porcentaje Prorrateo
+      { wch: 15 }, // Saldo Inicial
+      { wch: 45 }  // Emails Autorizados
+    ];
+
+    XLSX.writeFile(workbook, "plantilla_importar_unidades.xlsx");
+  };
+
+  // --- FUNCIÓN PARA IMPORTAR EL EXCEL ---
+  const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const json: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+        const importedUnits: Unit[] = [];
+
+        for (const row of json) {
+          const block = String(row["Sector"] || row["Bloque"] || "").trim();
+          const unitNumber = String(row["Unidad"] || "").trim();
+          const ownerName = String(row["Propietario"] || "").trim();
+          const proratePercentage = parseFloat(row["Porcentaje Prorrateo"] || row["Coeficiente"]) || 0;
+          const initialBalance = parseFloat(row["Saldo Inicial"]) || 0;
+          const emailsStr = String(row["Emails Autorizados"] || "").trim();
+
+          if (!unitNumber || !ownerName) continue;
+
+          const authorizedEmails = emailsStr
+            ? emailsStr.split(',').map(email => email.trim().toLowerCase()).filter(Boolean)
+            : [];
+
+          const newUnitData = {
+            block,
+            unitNumber,
+            ownerName,
+            proratePercentage,
+            initialBalance,
+            authorizedEmails
+          };
+
+          const createdUnit = await addUnit(consortiumId, newUnitData);
+          importedUnits.push(createdUnit as Unit);
+        }
+
+        setUnits(prev => [...prev, ...importedUnits].sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })));
+        alert(`¡Importación exitosa! Se cargaron ${importedUnits.length} unidades correctamente.`);
+      } catch (err) {
+        console.error(err);
+        alert("Ocurrió un error al procesar el archivo Excel. Verifica el formato.");
+      } finally {
+        setIsImporting(false);
+        e.target.value = ''; 
+      }
+    };
+
+    reader.readAsBinaryString(file);
+  };
+
+  // --- BUSCADOR Y ACCIONES MANUALES ---
   const filteredUnits = units.filter(u => 
     u.unitNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.ownerName.toLowerCase().includes(searchTerm.toLowerCase())
+    u.ownerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (u.block && u.block.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const handleOpenCreate = () => {
-      setEditingId(null);
-      setFormData({ unitNumber: '', ownerName: '', authorizedEmailsInput: '', proratePercentage: '', initialBalance: '' });
-      setIsModalOpen(true);
-  };
+  const handleSubmitManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.unitNumber.trim() || !formData.ownerName.trim()) return;
 
-  const handleOpenEdit = (unit: Unit) => {
-      setEditingId(unit.id);
-      setFormData({
-          unitNumber: unit.unitNumber, ownerName: unit.ownerName,
-          authorizedEmailsInput: unit.authorizedEmails ? unit.authorizedEmails.join(', ') : '',
-          proratePercentage: unit.proratePercentage.toString(),
-          initialBalance: unit.initialBalance.toString()
-      });
-      setIsModalOpen(true);
-  };
+    setIsSubmitting(true);
+    try {
+      const authorizedEmails = formData.authorizedEmailsStr
+        ? formData.authorizedEmailsStr.split(',').map(em => em.trim().toLowerCase()).filter(Boolean)
+        : [];
 
-  const handleSave = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!consortiumId) return alert("Error: No se identificó el consorcio. Refresque la página.");
-      if (!formData.unitNumber || !formData.ownerName) return alert("Identificador y Propietario obligatorios");
-
-      setIsSubmitting(true);
-      const finalPercentage = parseFloat(formData.proratePercentage) || 0;
-      const finalBalance = parseFloat(formData.initialBalance) || 0;
-
-      const emailsArray = formData.authorizedEmailsInput.split(',').map(email => email.trim()).filter(email => email.length > 0 && email.includes('@'));
-
-      try {
-          if (editingId) {
-              const unitToUpdate: Unit = { 
-                  id: editingId, unitNumber: formData.unitNumber, ownerName: formData.ownerName,
-                  authorizedEmails: emailsArray, proratePercentage: finalPercentage, initialBalance: finalBalance
-              };
-              await updateUnit(consortiumId, editingId, unitToUpdate, unitToUpdate);
-              setUnits(units.map(u => u.id === editingId ? { ...u, ...unitToUpdate } : u));
-          } else {
-              const newUnitData = {
-                  unitNumber: formData.unitNumber, ownerName: formData.ownerName,
-                  authorizedEmails: emailsArray, proratePercentage: finalPercentage, initialBalance: finalBalance
-              };
-              const createdUnit = await addUnit(consortiumId, newUnitData);
-              setUnits([...units, createdUnit]);
-          }
-          setIsModalOpen(false);
-      } catch (error) {
-          alert("Error al guardar la unidad.");
-      } finally {
-          setIsSubmitting(false);
-      }
-  };
-
-  const handleDelete = async (id: string) => {
-      if (!confirm("¿Estás seguro de eliminar esta unidad?")) return;
-      try {
-          await deleteUnit(consortiumId, id);
-          setUnits(units.filter(u => u.id !== id));
-      } catch (error) {
-          alert("Error al eliminar la unidad.");
-      }
-  };
-
-  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file || !consortiumId) return;
-      if (!confirm("⚠️ Se importarán unidades. Columnas necesarias: 'Unidad', 'Propietario', 'Emails', 'Porcentaje', 'SaldoInicial'.")) return;
-
-      setIsImporting(true);
-      const reader = new FileReader();
-      
-      reader.onload = async (evt) => {
-          try {
-              const bstr = evt.target?.result;
-              const wb = XLSX.read(bstr, { type: 'binary' });
-              const ws = wb.Sheets[wb.SheetNames[0]];
-              const data = XLSX.utils.sheet_to_json(ws);
-
-              let count = 0;
-              for (const row of (data as any[])) {
-                  const unitNumber = row['Unidad'] || row['unidad'] || row['UF'] || row['Identificador'];
-                  const ownerName = row['Propietario'] || row['propietario'] || row['Nombre'];
-                  
-                  if (unitNumber && ownerName) {
-                      const rawEmails = row['Emails'] || row['emails'] || row['Email'] || '';
-                      const emailsArray = String(rawEmails).split(',').map(e => e.trim()).filter(e => e.includes('@'));
-
-                      const newUnit = {
-                          unitNumber: String(unitNumber), ownerName: String(ownerName),
-                          authorizedEmails: emailsArray,
-                          proratePercentage: parseFloat(row['Porcentaje'] || row['porcentaje'] || 0),
-                          initialBalance: parseFloat(row['SaldoInicial'] || row['saldo'] || 0)
-                      };
-                      const saved = await addUnit(consortiumId, newUnit);
-                      setUnits(prev => [...prev, saved]);
-                      count++;
-                  }
-              }
-              alert(`¡Importación exitosa! Se cargaron ${count} unidades.`);
-          } catch (error) {
-              alert("Error al procesar el archivo Excel. Verifique el formato.");
-          } finally {
-              setIsImporting(false);
-              e.target.value = ''; 
-          }
+      const unitData = {
+        block: formData.block.trim(),
+        unitNumber: formData.unitNumber.trim(),
+        ownerName: formData.ownerName.trim(),
+        proratePercentage: parseFloat(formData.proratePercentage) || 0,
+        initialBalance: parseFloat(formData.initialBalance) || 0,
+        authorizedEmails
       };
-      reader.readAsBinaryString(file);
+
+      if (editingUnit) {
+        await onUpdateUnit(editingUnit.id, unitData);
+        setUnits(prev => prev.map(u => u.id === editingUnit.id ? { ...u, ...unitData } : u));
+        setEditingUnit(null);
+      } else {
+        const created = await addUnit(consortiumId, unitData);
+        setUnits(prev => [...prev, created as Unit].sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })));
+      }
+
+      setIsModalOpen(false);
+      setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '' });
+    } catch (err) {
+      alert("Error al guardar la unidad.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  // --- LÓGICA SEGURA Y ELIMINABLE DEL ESTADO DE CUENTA ---
-  const getLedgerItems = (u: Unit) => {
-      const items: any[] = [];
-      if (u.initialBalance) {
-          items.push({ id: 'initial', type: 'INITIAL', date: '-', concept: 'Saldo Inicial / Deuda Previa', charge: u.initialBalance, payment: 0 });
-      }
-      if (u.debts) {
-          u.debts.forEach(d => {
-              items.push({ id: d.id, type: 'DEBT', date: d.period, concept: `Deuda Histórica / Recargo (${d.interestRate}%)`, charge: d.total, payment: 0 });
-          });
-      }
-      (payments || []).filter(p => p.unitId === u.id && p.status === 'APPROVED').forEach(p => {
-          items.push({ id: p.id, type: 'PAYMENT', date: new Date(p.date).toLocaleDateString(), concept: `Pago Realizado (${p.method})`, charge: 0, payment: p.amount });
-      });
-      return items;
+  const handleEditClick = (u: Unit) => {
+    setEditingUnit(u);
+    setFormData({
+      block: u.block || '',
+      unitNumber: u.unitNumber,
+      ownerName: u.ownerName,
+      proratePercentage: String(u.proratePercentage || 0),
+      initialBalance: String(u.initialBalance || 0),
+      authorizedEmailsStr: (u.authorizedEmails || []).join(', ')
+    });
+    setIsModalOpen(true);
   };
 
-  const handleDeleteLedgerItem = async (item: any) => {
-      if (!ledgerUnit) return;
-      if (!confirm("⚠️ ¿Estás seguro de eliminar este registro?\nEsta acción es irreversible y afectará el balance de inmediato.")) return;
-
-      try {
-          if (item.type === 'INITIAL') {
-              await onUpdateUnit(ledgerUnit.id, { initialBalance: 0 });
-              setLedgerUnit({ ...ledgerUnit, initialBalance: 0 });
-          } else if (item.type === 'DEBT') {
-              const newDebts = (ledgerUnit.debts || []).filter(d => d.id !== item.id);
-              await onUpdateUnit(ledgerUnit.id, { debts: newDebts });
-              setLedgerUnit({ ...ledgerUnit, debts: newDebts });
-          } else if (item.type === 'PAYMENT') {
-              await onDeletePayment(item.id);
-          }
-      } catch (error) {
-          alert("Error al eliminar el registro.");
-      }
+  const handleDeleteClick = async (id: string) => {
+    if (!window.confirm("¿Seguro que deseas eliminar esta unidad funcional? Esto no borrará sus pagos históricos de Firestore.")) return;
+    try {
+      await deleteUnit(consortiumId, id);
+      setUnits(prev => prev.filter(u => u.id !== id));
+    } catch (e) {
+      alert("Error al eliminar.");
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-           <h2 className="text-2xl font-bold text-slate-800">Unidades Funcionales</h2>
-           <p className="text-slate-500 text-sm">Gestión de propietarios e inquilinos (Multi-usuario)</p>
+      
+      {/* SECCIÓN DE BOTONES SUPERIORES */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+        <div className="relative flex-1 w-full">
+          <Search className="w-5 h-5 text-slate-400 absolute left-3 top-3" />
+          <input 
+            type="text" 
+            className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-slate-700"
+            placeholder="Buscar por UF, Propietario o Sector..." 
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
         </div>
-        
-        <div className="flex gap-2 w-full md:w-auto flex-wrap">
-            <div className="relative flex-1 md:w-48">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                <input 
-                    type="text" placeholder="Buscar..." 
-                    className="w-full pl-10 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                />
-            </div>
-            
-            <label className={`cursor-pointer bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 px-4 py-2 rounded-lg flex items-center shadow-sm font-medium ${isImporting ? 'opacity-50 cursor-wait' : ''}`}>
-                {isImporting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <Upload className="w-4 h-4 mr-2" />}
-                <span className="text-sm">Importar Excel</span>
-                <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleImportExcel} disabled={isImporting} />
-            </label>
 
-            <button onClick={handleOpenCreate} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg flex items-center shadow-sm font-medium">
-                <Plus className="w-4 h-4 mr-2" /> Nueva
-            </button>
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button 
+            onClick={handleDownloadTemplate}
+            className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 border border-slate-200"
+          >
+            <Download className="w-4 h-4" />
+            <span>Descargar Plantilla</span>
+          </button>
+
+          <label className="flex-1 sm:flex-none px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 border border-emerald-200 cursor-pointer">
+            {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            <span>{isImporting ? 'Importando...' : 'Importar Excel'}</span>
+            <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelImport} disabled={isImporting} />
+          </label>
+
+          <button 
+            onClick={() => {
+              setEditingUnit(null);
+              setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '' });
+              setIsModalOpen(true);
+            }} 
+            className="flex-1 sm:flex-none px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Nueva Unidad</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredUnits.length === 0 ? (
-              <div className="col-span-full py-12 text-center text-slate-400 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200">
-                  <Home className="w-12 h-12 mx-auto mb-2 opacity-20"/>
-                  <p>No se encontraron unidades.</p>
-              </div>
-          ) : (
-              filteredUnits.map(unit => (
-                  <div key={unit.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 hover:border-indigo-300 transition-all group">
-                      <div className="flex justify-between items-start mb-3">
-                          <div className="bg-slate-100 text-slate-700 font-bold px-3 py-1 rounded text-sm">
-                              {unit.unitNumber}
-                          </div>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={() => handleOpenEdit(unit)} className="p-1.5 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg">
-                                  <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => handleDelete(unit.id)} className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg">
-                                  <Trash2 className="w-4 h-4" />
-                              </button>
-                          </div>
+      {/* TABLA DE UNIDADES */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-bold tracking-wider">
+              <tr>
+                <th className="px-6 py-4">Sector / Complejo</th>
+                <th className="px-6 py-4">UF / Unidad</th>
+                <th className="px-6 py-4">Propietario / Inquilino</th>
+                <th className="px-6 py-4 text-right">Prorrateo (%)</th>
+                <th className="px-6 py-4 text-right">Saldo Inicial</th>
+                <th className="px-6 py-4">Emails Vinculados</th>
+                <th className="px-6 py-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredUnits.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-8 text-slate-400 font-medium">No se encontraron unidades funcionales cargadas.</td>
+                </tr>
+              ) : (
+                filteredUnits.map((u) => (
+                  <tr key={u.id} className="hover:bg-slate-50/80 transition-colors group">
+                    <td className="px-6 py-4 font-bold text-indigo-600">
+                      {u.block ? <span className="bg-indigo-50 px-2.5 py-1 rounded-md text-[11px] border border-indigo-100 uppercase tracking-wide">{u.block}</span> : <span className="text-slate-300 text-xs">-</span>}
+                    </td>
+                    <td className="px-6 py-4 font-bold text-slate-800">{u.unitNumber}</td>
+                    <td className="px-6 py-4 text-slate-700 font-medium">{u.ownerName}</td>
+                    <td className="px-6 py-4 text-right font-mono text-slate-600 font-semibold">{(u.proratePercentage || 0).toFixed(4)}</td>
+                    <td className={`px-6 py-4 text-right font-mono font-bold ${u.initialBalance && u.initialBalance < 0 ? 'text-rose-600' : 'text-slate-600'}`}>
+                        {formatCurrency(u.initialBalance || 0)}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-1 max-w-[200px]">
+                        {(u.authorizedEmails || []).length === 0 ? (
+                          <span className="text-xs text-slate-400 italic">Ninguno asignado</span>
+                        ) : (
+                          u.authorizedEmails.map((em, idx) => (
+                            <span key={idx} className="text-[11px] bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-md flex items-center gap-1 border border-slate-200">
+                              <Mail className="w-3 h-3 text-slate-400" /> {em}
+                            </span>
+                          ))
+                        )}
                       </div>
-                      
-                      <div className="space-y-2">
-                          <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                              <User className="w-4 h-4 text-indigo-500"/> {unit.ownerName}
-                          </h3>
-                          
-                          {unit.authorizedEmails && unit.authorizedEmails.length > 0 ? (
-                              <div className="flex flex-col gap-1">
-                                  {unit.authorizedEmails.map((email, idx) => (
-                                      <p key={idx} className="text-xs text-slate-500 flex items-center gap-2 bg-slate-50 p-1 rounded">
-                                          <Mail className="w-3 h-3 text-slate-400"/> {email}
-                                      </p>
-                                  ))}
-                              </div>
-                          ) : (
-                              <p className="text-xs text-slate-400 italic pl-1">Sin emails vinculados</p>
-                          )}
-
-                          <div className="pt-3 mt-3 border-t border-slate-50 flex justify-between items-center text-sm">
-                              <span className="text-slate-500">Prorrateo:</span>
-                              <span className="font-mono font-bold bg-indigo-50 text-indigo-700 px-2 rounded">
-                                  {unit.proratePercentage}%
-                              </span>
-                          </div>
-
-                          <div className="pt-2">
-                              <button 
-                                  onClick={() => setLedgerUnit(unit)}
-                                  className="w-full flex justify-center items-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 py-1.5 rounded-lg text-sm font-medium transition-colors"
-                              >
-                                  <FileText className="w-4 h-4" /> Estado de Cuenta
-                              </button>
-                          </div>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex justify-center items-center gap-1">
+                        <button onClick={() => handleEditClick(u)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar Unidad"><Edit2 className="w-4 h-4"/></button>
+                        <button onClick={() => handleDeleteClick(u.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Eliminar Unidad"><Trash2 className="w-4 h-4"/></button>
                       </div>
-                  </div>
-              ))
-          )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* MODAL CREAR / EDITAR UNIDAD */}
+      {/* MODAL: CARGA MANUAL / EDICIÓN */}
       {isModalOpen && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-                  <div className="bg-indigo-600 p-4 flex justify-between items-center text-white">
-                      <h3 className="font-bold flex items-center gap-2">
-                          {editingId ? <Edit2 className="w-5 h-5"/> : <Plus className="w-5 h-5"/>}
-                          {editingId ? 'Editar Unidad' : 'Nueva Unidad'}
-                      </h3>
-                      <button onClick={() => setIsModalOpen(false)} className="hover:bg-indigo-700 p-1 rounded transition-colors"><X className="w-5 h-5"/></button>
-                  </div>
-                  
-                  <form onSubmit={handleSave} className="p-6 space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-sm font-medium text-slate-700 mb-1">Identificador</label>
-                              <input required type="text" className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" placeholder="Ej: B1-L01, 1A..." value={formData.unitNumber} onChange={e => setFormData({...formData, unitNumber: e.target.value})} />
-                          </div>
-                          <div>
-                              <label className="block text-sm font-medium text-slate-700 mb-1">% Prorrateo</label>
-                              <input required type="text" inputMode="decimal" className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" placeholder="0.00" value={formData.proratePercentage} onChange={e => /^[\d.]*$/.test(e.target.value) && setFormData({...formData, proratePercentage: e.target.value})} />
-                          </div>
-                      </div>
-                      <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-1">Nombre Propietario</label>
-                          <input required type="text" className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" placeholder="Ej: Juan Pérez" value={formData.ownerName} onChange={e => setFormData({...formData, ownerName: e.target.value})} />
-                      </div>
-                      
-                      <div>
-                          <label className="block text-sm font-medium text-slate-700 mb-1">Emails Autorizados (separar por coma)</label>
-                          <input 
-                            type="text" 
-                            className="w-full p-2 border rounded-lg outline-none focus:border-indigo-500" 
-                            placeholder="dueño@mail.com" 
-                            value={formData.authorizedEmailsInput} 
-                            onChange={e => setFormData({...formData, authorizedEmailsInput: e.target.value})} 
-                          />
-                          <p className="text-xs text-slate-400 mt-1">Estos usuarios podrán ver esta unidad.</p>
-                      </div>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 border border-slate-100">
+            <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100">
+              <h3 className="font-black text-slate-800 text-lg">{editingUnit ? 'Modificar Unidad' : 'Registrar Nueva Unidad'}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
 
-                      {!editingId && (
-                          <div>
-                              <label className="block text-sm font-medium text-slate-700 mb-1">Saldo Inicial / Deuda Previa</label>
-                              <input type="text" inputMode="decimal" className="w-full p-2 border rounded-lg bg-slate-50 outline-none" placeholder="0.00" value={formData.initialBalance} onChange={e => /^[\d.]*$/.test(e.target.value) && setFormData({...formData, initialBalance: e.target.value})} />
-                          </div>
-                      )}
-                      <div className="pt-4 flex gap-3">
-                          <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded-lg">Cancelar</button>
-                          <button type="submit" disabled={isSubmitting} className="flex-1 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow">{isSubmitting ? 'Guardando...' : 'Guardar'}</button>
-                      </div>
-                  </form>
+            <form onSubmit={handleSubmitManual} className="space-y-4">
+              
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Sector / Complejo (Opcional)</label>
+                <input type="text" value={formData.block} onChange={e => setFormData({...formData, block: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="Ej: Norte, Sur, Torre A..."/>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Nro Unidad / Local *</label>
+                  <input type="text" required value={formData.unitNumber} onChange={e => setFormData({...formData, unitNumber: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="Local 1A"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Saldo Inicial ($)</label>
+                  <input type="number" step="0.01" value={formData.initialBalance} onChange={e => setFormData({...formData, initialBalance: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="0.00"/>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Nombre Propietario *</label>
+                <input type="text" required value={formData.ownerName} onChange={e => setFormData({...formData, ownerName: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="Carlos Gómez"/>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Porcentaje Prorrateo (%)</label>
+                <input type="number" step="0.0001" value={formData.proratePercentage} onChange={e => setFormData({...formData, proratePercentage: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="5.0000"/>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Emails para Acceso Inquilino/Vecino</label>
+                <input type="text" value={formData.authorizedEmailsStr} onChange={e => setFormData({...formData, authorizedEmailsStr: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="vecino@email.com, hijo@email.com"/>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl">Cancelar</button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 shadow-md flex justify-center items-center gap-2">
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar Unidad'}
+                </button>
+              </div>
+            </form>
           </div>
+        </div>
       )}
 
-      {/* MODAL ESTADO DE CUENTA CON BOTÓN DE ELIMINAR */}
-      {ledgerUnit && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
-                  <div className="p-5 border-b border-slate-100 flex justify-between items-start bg-slate-50">
-                      <div>
-                          <h3 className="font-bold text-xl text-slate-800">Estado de Cuenta</h3>
-                          <p className="text-sm text-slate-500">{ledgerUnit.unitNumber} - {ledgerUnit.ownerName}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                          <button 
-                              onClick={() => { if(consortium) generateUnitLedgerPDF(ledgerUnit, payments, consortium); }}
-                              className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-sm font-bold transition-colors"
-                          >
-                              <Download className="w-4 h-4" /> Exportar PDF
-                          </button>
-                          <button onClick={() => setLedgerUnit(null)} className="p-2 text-slate-400 hover:bg-slate-200 rounded-full transition-colors"><X className="w-6 h-6"/></button>
-                      </div>
-                  </div>
-                  
-                  <div className="p-5 overflow-y-auto flex-1">
-                      <table className="w-full text-sm text-left border-collapse">
-                          <thead className="bg-slate-100 text-slate-600 uppercase text-xs">
-                              <tr>
-                                  <th className="px-4 py-3 rounded-tl-lg">Fecha</th>
-                                  <th className="px-4 py-3">Concepto</th>
-                                  <th className="px-4 py-3 text-right">Cargo (+)</th>
-                                  <th className="px-4 py-3 text-right">Pago (-)</th>
-                                  <th className="px-4 py-3 text-center rounded-tr-lg">Acción</th>
-                              </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                              {getLedgerItems(ledgerUnit).length === 0 ? (
-                                  <tr><td colSpan={5} className="text-center py-8 text-slate-400">Sin movimientos registrados.</td></tr>
-                              ) : (
-                                  getLedgerItems(ledgerUnit).map((item, i) => (
-                                      <tr key={i} className="hover:bg-slate-50 group transition-colors">
-                                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{item.date}</td>
-                                          <td className="px-4 py-3 font-medium text-slate-700">{item.concept}</td>
-                                          <td className="px-4 py-3 text-right font-bold text-red-600">{item.charge > 0 ? formatCurrency(item.charge) : '-'}</td>
-                                          <td className="px-4 py-3 text-right font-bold text-emerald-600">{item.payment > 0 ? formatCurrency(item.payment) : '-'}</td>
-                                          <td className="px-4 py-3 text-center">
-                                              <button 
-                                                onClick={() => handleDeleteLedgerItem(item)} 
-                                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100"
-                                                title="Eliminar registro"
-                                              >
-                                                  <Trash2 className="w-4 h-4" />
-                                              </button>
-                                          </td>
-                                      </tr>
-                                  ))
-                              )}
-                          </tbody>
-                      </table>
-                  </div>
-
-                  <div className="p-5 border-t border-slate-100 bg-slate-50 text-right">
-                      <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Saldo Total Pendiente</p>
-                      <p className="text-2xl font-black text-slate-800">
-                          {formatCurrency(getLedgerItems(ledgerUnit).reduce((acc, curr) => acc + curr.charge - curr.payment, 0))}
-                      </p>
-                  </div>
-              </div>
-          </div>
-      )}
     </div>
   );
 };

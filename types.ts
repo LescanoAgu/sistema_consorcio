@@ -45,6 +45,7 @@ export interface DebtItem {
 
 export interface Unit {
   id: string;
+  block?: string; // NUEVO: Sector, Complejo o Torre (Ej: "Norte", "Sur")
   unitNumber: string;
   ownerName: string;
   authorizedEmails: string[]; 
