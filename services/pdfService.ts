@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { SettlementRecord, Unit, Consortium, Payment } from '../types';
+import { SettlementRecord, Unit, Consortium, Payment, ConsortiumSettings } from '../types';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -15,13 +15,14 @@ const formatCurrency = (amount: number) => {
   }).format(amount || 0);
 };
 
-const formatDate = (dateString: string) => {
-  if (!dateString) return '-';
-  try {
-    return format(new Date(dateString), 'dd/MM/yyyy', { locale: es });
-  } catch (e) {
-    return dateString || '-';
-  }
+export const formatDate = (isoString: string) => {
+    if (!isoString) return '';
+    let dateStr = isoString;
+    if (dateStr.length === 10) {
+        dateStr += 'T12:00:00Z';
+    }
+    const d = new Date(dateStr);
+    return format(d, 'dd/MM/yyyy', { locale: es });
 };
 
 // PALETA DE COLORES CORPORATIVA
@@ -123,7 +124,7 @@ function addPageNumbers(doc: jsPDF) {
 
 // --- GENERADOR CUPÓN INDIVIDUAL ITEMIZADO ---
 
-const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium) => {
+const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
 
@@ -305,6 +306,30 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // @ts-ignore
     finalY = doc.lastAutoTable.finalY + 12;
 
+    const interestRate = settings.monthlyInterestRate || 0;
+    const interestAmount = (finalTotalToPay * interestRate) / 100;
+    const secondDueTotal = finalTotalToPay + interestAmount;
+
+    if (finalY > 230) {
+        doc.addPage();
+        finalY = 20;
+    }
+
+    doc.setFontSize(11); 
+    doc.setFont("helvetica", "bold"); 
+    doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+    doc.text(`TOTAL 1° VENCIMIENTO: ${formatCurrency(finalTotalToPay)}`, 20, finalY);
+    finalY += 8;
+    
+    if (interestRate > 0) {
+        doc.setFontSize(10);
+        doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
+        doc.text(`TOTAL 2° VENCIMIENTO (con recargo del ${interestRate}%): ${formatCurrency(secondDueTotal)}`, 20, finalY);
+        finalY += 12;
+    } else {
+        finalY += 8;
+    }
+
     // Caja de Transferencia Bancaria Informativa
     doc.setDrawColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
     doc.setFillColor(THEME.stripe[0], THEME.stripe[1], THEME.stripe[2]);
@@ -383,19 +408,26 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         });
     }
 
+    if (finalY > 260) {
+        doc.addPage();
+        finalY = 20;
+    }
+    
+    drawFooter(doc, settlement, pageWidth, finalY);
+
     return doc;
 };
 
 // --- EXPORTS PRINCIPALES ---
 
-export const generateIndividualCouponPDF = (settlement: SettlementRecord, unit: Unit, consortium: Consortium) => {
-    const doc = createCouponDoc(settlement, unit, consortium);
+export const generateIndividualCouponPDF = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings) => {
+    const doc = createCouponDoc(settlement, unit, consortium, settings);
     const safeUnit = (unit.unitNumber || '00').replace(/[^a-z0-9]/gi, '_');
     doc.save(`CUPON_DE_PAGO_${safeUnit}.pdf`);
 };
 
-export const generateCouponBase64 = (settlement: SettlementRecord, unit: Unit, consortium: Consortium): string => {
-    const doc = createCouponDoc(settlement, unit, consortium);
+export const generateCouponBase64 = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings): string => {
+    const doc = createCouponDoc(settlement, unit, consortium, settings);
     return doc.output('datauristring').split(',')[1]; 
 };
 

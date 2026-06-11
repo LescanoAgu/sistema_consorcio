@@ -170,7 +170,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
           authorizedEmails: rawUnit.authorizedEmails || [], debts: rawUnit.debts || []
       };
       
-      generateIndividualCouponPDF(dummyRecord, safeUnit, consortiumData);
+      generateIndividualCouponPDF(dummyRecord, safeUnit, consortiumData, settings);
       setIsProcessing(false);
   };
 
@@ -203,7 +203,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
                       proratePercentage: Number(rawUnit?.proratePercentage || 0), initialBalance: rawUnit?.initialBalance || 0, 
                       authorizedEmails: rawUnit?.authorizedEmails || [], debts: rawUnit?.debts || []
                   };
-                  generateIndividualCouponPDF(finalRecordForPDF, safeUnit, consortiumData);
+                  generateIndividualCouponPDF(finalRecordForPDF, safeUnit, consortiumData, settings);
               }, delay);
               delay += 500;
           });

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { SettlementRecord, Unit, ConsortiumSettings, Consortium } from '../types';
-import { ChevronDown, ChevronRight, Calendar, Download, User, FolderArchive } from 'lucide-react';
+import { ChevronDown, ChevronRight, Calendar, Download, User, FolderArchive, FileText } from 'lucide-react';
 import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
 interface HistoryViewProps {
@@ -56,7 +56,31 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortium, units, s
       e.stopPropagation();
       const unit = units.find(u => u.id === unitId);
       if (unit) {
-          generateIndividualCouponPDF(record, unit, consortium);
+          generateIndividualCouponPDF(record, unit, consortium, settings);
+      }
+  };
+
+  const handleDownloadAllCoupons = (e: React.MouseEvent, record: SettlementRecord) => {
+      e.stopPropagation();
+      if (!confirm(`¿Descargar liquidación general y ${record.unitDetails?.length || 0} cupones individuales?`)) return;
+      
+      // Descargar general primero
+      generateSettlementPDF(record, consortium, units);
+      
+      // Descargar individuales escalonadamente
+      if (record.unitDetails) {
+          let delay = 500;
+          record.unitDetails.forEach(detail => {
+              if (detail.totalToPay > 0) {
+                  setTimeout(() => {
+                      const unit = units.find(u => u.id === detail.unitId);
+                      if (unit) {
+                          generateIndividualCouponPDF(record, unit, consortium, settings);
+                      }
+                  }, delay);
+                  delay += 500;
+              }
+          });
       }
   };
 
@@ -125,11 +149,18 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortium, units, s
                                         <p className="font-black text-slate-700">${record.totalExpenses.toLocaleString('es-AR', {minimumFractionDigits: 2})}</p>
                                     </div>
                                     <button 
+                                        onClick={(e) => handleDownloadAllCoupons(e, record)}
+                                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm"
+                                        title="Descargar Paquete Completo"
+                                    >
+                                        <Download className="w-4 h-4" /> Paquete
+                                    </button>
+                                    <button 
                                         onClick={(e) => handleDownloadGeneral(e, record)}
                                         className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 border border-indigo-200 rounded-lg text-sm font-bold hover:bg-indigo-50 transition-colors shadow-sm"
                                         title="Descargar Expensa General"
                                     >
-                                        <Download className="w-4 h-4" /> General
+                                        <FileText className="w-4 h-4" /> General
                                     </button>
                                 </div>
                             </div>
