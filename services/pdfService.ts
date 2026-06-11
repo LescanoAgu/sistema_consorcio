@@ -489,21 +489,23 @@ export const generateSettlementPDF = (settlement: SettlementRecord, consortium: 
   doc.setFontSize(10); 
   doc.setFont("helvetica", "normal");
   
-  doc.text("Saldo Anterior Fondo/Caja", col1X, currentY); 
+  doc.text("Fondo de Reserva Actual", col1X, currentY); 
   doc.text(formatCurrency(settlement.reserveBalanceStart), col2X, currentY, { align: 'right' }); 
   currentY += lh;
   
-  doc.text("(+) Cobranzas Recibidas", col1X, currentY); 
-  doc.text(formatCurrency(settlement.totalCollected), col2X, currentY, { align: 'right' }); 
-  currentY += lh;
-  
   if (settlement.reserveExpense > 0) { 
-      doc.text("(-) Pagos cubiertos por Reserva", col1X, currentY); 
+      doc.text("(-) Débitos en Liquidación Actual", col1X, currentY); 
       doc.text(`- ${formatCurrency(settlement.reserveExpense)}`, col2X, currentY, { align: 'right' }); 
       currentY += lh; 
+      
+      doc.setFont("helvetica", "bold");
+      doc.text("Saldo Neto del Fondo", col1X, currentY);
+      doc.text(formatCurrency(settlement.reserveBalanceStart - settlement.reserveExpense), col2X, currentY, { align: 'right' });
+      currentY += lh;
+      doc.setFont("helvetica", "normal");
   }
   
-  doc.text("(+) Aporte de este mes a Reserva", col1X, currentY); 
+  doc.text("(+) Estimación a cobrar (Mes Corriente)", col1X, currentY); 
   doc.text(formatCurrency(settlement.reserveContribution), col2X, currentY, { align: 'right' }); 
   currentY += lh;
   
