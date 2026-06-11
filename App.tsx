@@ -160,25 +160,8 @@ function App() {
         await saveSettlement(consortium.id, record, expenses.map(e => e.id));
         const newHistory = await getHistory(consortium.id);
         
-        if (record.reserveContribution > 0) {
-            const newTx = await addReserveTransaction(consortium.id, {
-                date: new Date().toISOString(),
-                amount: record.reserveContribution,
-                description: `Aporte Fondo Reserva (Liq. ${record.month})`,
-                type: 'SYSTEM'
-            });
-            setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
-        }
-        
-        if (record.reserveExpense > 0) {
-             const newTx2 = await addReserveTransaction(consortium.id, {
-                date: new Date().toISOString(),
-                amount: -record.reserveExpense,
-                description: `Gastos cubiertos por Reserva (Liq. ${record.month})`,
-                type: 'SYSTEM'
-            });
-            setReserveTransactions(prev => [newTx2 as ReserveTransaction, ...prev]);
-        }
+        // AHORA EL FONDO DE RESERVA TRABAJA POR FLUJO DE CAJA (PAGOS REALES)
+        // Ya no insertamos ingresos o egresos "teóricos" al cerrar la liquidación.
 
         setHistory(newHistory); setExpenses([]); 
         setSettings({...settings, reserveFundBalance: record.reserveBalanceAtClose});
@@ -210,12 +193,45 @@ function App() {
       if(!consortium) return;
       const created = await createPayment(consortium.id, paymentData);
       setPayments([created as Payment, ...payments]);
+      
+      if (created.status === 'APPROVED') {
+          const reserveAmount = created.amount * (settings.monthlyReserveContributionPercentage / 100);
+          if (reserveAmount > 0) {
+              const newTx = await addReserveTransaction(consortium.id, {
+                  date: created.date,
+                  amount: reserveAmount,
+                  description: `Aporte de Cobro (${created.id.slice(-4)})`,
+                  type: 'SYSTEM'
+              });
+              setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
+              const newBalance = settings.reserveFundBalance + reserveAmount;
+              await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
+          }
+      }
   };
   
   const handlePaymentStatusChange = async (id: string, newStatus: 'APPROVED' | 'REJECTED') => {
       if(!consortium) return;
       await updatePayment(consortium.id, id, { status: newStatus });
       setPayments(payments.map(p => p.id === id ? { ...p, status: newStatus } : p));
+      
+      if (newStatus === 'APPROVED') {
+          const payment = payments.find(p => p.id === id);
+          if (payment) {
+              const reserveAmount = payment.amount * (settings.monthlyReserveContributionPercentage / 100);
+              if (reserveAmount > 0) {
+                  const newTx = await addReserveTransaction(consortium.id, {
+                      date: new Date().toISOString(),
+                      amount: reserveAmount,
+                      description: `Aporte de Cobro (${payment.id.slice(-4)})`,
+                      type: 'SYSTEM'
+                  });
+                  setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
+                  const newBalance = settings.reserveFundBalance + reserveAmount;
+                  await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
+              }
+          }
+      }
   };
 
   const handleDeletePayment = async (id: string) => {

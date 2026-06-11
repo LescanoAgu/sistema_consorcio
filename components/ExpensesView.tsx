@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Expense, ExpenseDistributionType, ExpenseTemplate, Unit } from '../types';
 import { Plus, Trash2, Tag, Paperclip, CheckCircle, Loader2, FileText, Download, Bookmark, X, Save, Upload, FileSpreadsheet, Edit2, Users } from 'lucide-react';
-import { addExpense, deleteExpense, updateExpense, uploadExpenseReceipt, getExpenseTemplates, addExpenseTemplate, deleteExpenseTemplate } from '../services/firestoreService';
+import { addExpense, deleteExpense, updateExpense, uploadExpenseReceipt, getExpenseTemplates, addExpenseTemplate, deleteExpenseTemplate, addReserveTransaction } from '../services/firestoreService';
+import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 
 const formatCurrency = (amount: number) => {
@@ -22,6 +23,7 @@ const EXPENSE_CATEGORIES = [
 ];
 
 const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, reserveBalance, consortiumId, units }) => {
+  const queryClient = useQueryClient();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -114,6 +116,17 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
             }
             const saved = await addExpense(consortiumId, expenseData);
             setExpenses(prev => [...prev, saved]);
+            
+            if (saved.distributionType === ExpenseDistributionType.FROM_RESERVE) {
+                await addReserveTransaction(consortiumId, {
+                    date: saved.date,
+                    amount: -saved.amount,
+                    description: `Pago de Gasto: ${saved.description}`,
+                    type: 'SYSTEM'
+                });
+                queryClient.invalidateQueries({ queryKey: ['reserve'] });
+                queryClient.invalidateQueries({ queryKey: ['settings'] });
+            }
         }
         resetForm();
     } catch (e) { alert("Error al guardar."); }

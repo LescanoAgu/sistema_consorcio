@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { ReserveTransaction, Consortium } from '../types';
-import { Plus, Download, Upload, Trash2, FileSpreadsheet, Vault, TrendingUp, TrendingDown } from 'lucide-react';
+import { ReserveTransaction, Consortium, ConsortiumSettings } from '../types';
+import { Plus, Download, Upload, Trash2, FileSpreadsheet, Vault, TrendingUp, TrendingDown, RefreshCcw } from 'lucide-react';
 import { generateReserveLedgerPDF } from '../services/pdfService';
+import { rebuildReserveFund } from '../services/firestoreService';
+import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 
 const formatCurrency = (amount: number) => {
@@ -13,9 +15,11 @@ interface ReserveViewProps {
   consortium: Consortium;
   onAddTransaction: (t: Omit<ReserveTransaction, 'id'>) => Promise<void>;
   onDeleteTransaction: (id: string) => Promise<void>;
+  settings: ConsortiumSettings;
 }
 
-const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onAddTransaction, onDeleteTransaction }) => {
+const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onAddTransaction, onDeleteTransaction, settings }) => {
+  const queryClient = useQueryClient();
   const [showModal, setShowModal] = useState(false);
   const [newDesc, setNewDesc] = useState('');
   const [newAmount, setNewAmount] = useState('');
@@ -55,6 +59,22 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
           setNewDesc(''); setNewAmount('');
       } catch (error) {
           alert("Error al registrar el movimiento.");
+      } finally {
+          setIsSubmitting(false);
+      }
+  };
+
+  const handleRebuild = async () => {
+      if (!confirm("⚠️ ATENCIÓN: Esta acción borrará los registros automáticos y recalculará todo el Libro Mayor de Reserva basándose en el 100% de los Pagos Aprobados y Gastos cargados históricamente.\n\n¿Estás seguro de que deseas continuar?")) return;
+      
+      setIsSubmitting(true);
+      try {
+          await rebuildReserveFund(consortium.id, settings.monthlyReserveContributionPercentage);
+          queryClient.invalidateQueries({ queryKey: ['reserve'] });
+          queryClient.invalidateQueries({ queryKey: ['settings'] });
+          alert("¡Historial reconstruido con éxito desde el día 1!");
+      } catch (e) {
+          alert("Error al reconstruir el historial.");
       } finally {
           setIsSubmitting(false);
       }
@@ -126,6 +146,9 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
                       <FileSpreadsheet className="w-4 h-4"/> Importar Histórico
                       <input type="file" className="hidden" accept=".xlsx, .xls" onChange={handleImportExcel} />
                   </label>
+                  <button onClick={handleRebuild} disabled={isSubmitting} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-bold hover:bg-indigo-100 transition-colors shadow-sm disabled:opacity-50">
+                      <RefreshCcw className={`w-4 h-4 ${isSubmitting ? 'animate-spin' : ''}`} /> Reconstruir Historial
+                  </button>
               </div>
               <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-bold hover:bg-amber-600 transition-colors shadow-sm shadow-amber-200">
                   <Plus className="w-4 h-4"/> Ajuste Manual
