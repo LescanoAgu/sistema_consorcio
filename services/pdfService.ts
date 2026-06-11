@@ -177,30 +177,33 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
 
     // --- PROCESAMIENTO ITEMIZADO DE GASTOS DEL PERÍODO ---
     (settlement.snapshotExpenses || []).forEach(exp => {
-        if (exp.distributionType === 'FROM_RESERVE') return;
-        
         let unitAmount = 0;
         let distributionLabel = '';
 
-        // Distribución específica de gastos por unidad afectable
-        if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
-            if (!exp.affectedUnitIds.includes(unit.id)) return; 
-            
-            if (exp.distributionType === 'EQUAL_PARTS') {
-                unitAmount = exp.amount / exp.affectedUnitIds.length;
-                distributionLabel = `Esp. (Igual x ${exp.affectedUnitIds.length} UF)`;
-            } else {
-                unitAmount = exp.amount * (Number(unit.proratePercentage) / 100);
-                distributionLabel = `Esp. (Prorrateo ${formattedPercentage}%)`;
-            }
+        if (exp.distributionType === 'FROM_RESERVE') {
+            unitAmount = 0;
+            distributionLabel = 'Abonado con Fondo Reserva';
         } else {
-            // Distribución general a todo el consorcio
-            if (exp.distributionType === 'EQUAL_PARTS') {
-                unitAmount = exp.amount / (allUnits.length || 1);
-                distributionLabel = 'Partes Iguales';
+            // Distribución específica de gastos por unidad afectable
+            if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
+                if (!exp.affectedUnitIds.includes(unit.id)) return; 
+                
+                if (exp.distributionType === 'EQUAL_PARTS') {
+                    unitAmount = exp.amount / exp.affectedUnitIds.length;
+                    distributionLabel = `Esp. (Igual x ${exp.affectedUnitIds.length} UF)`;
+                } else {
+                    unitAmount = exp.amount * (Number(unit.proratePercentage) / 100);
+                    distributionLabel = `Esp. (Prorrateo ${formattedPercentage}%)`;
+                }
             } else {
-                unitAmount = exp.amount * (Number(unit.proratePercentage) / 100);
-                distributionLabel = `Prorrateo ${formattedPercentage}%`;
+                // Distribución general a todo el consorcio
+                if (exp.distributionType === 'EQUAL_PARTS') {
+                    unitAmount = exp.amount / (allUnits.length || 1);
+                    distributionLabel = 'Partes Iguales';
+                } else {
+                    unitAmount = exp.amount * (Number(unit.proratePercentage) / 100);
+                    distributionLabel = `Prorrateo ${formattedPercentage}%`;
+                }
             }
         }
 
@@ -405,10 +408,13 @@ export const generateSettlementPDF = (settlement: SettlementRecord, consortium: 
   let finalY = 45;
 
   const expenses = settlement.snapshotExpenses || [];
-  const ordinaryExpenses = expenses.filter(e => e.category === 'Ordinary').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const extraordinaryExpenses = expenses.filter(e => e.category === 'Extraordinary').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const ordinaryExpenses = expenses.filter(e => e.category === 'Ordinary' && e.distributionType !== 'FROM_RESERVE').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const extraordinaryExpenses = expenses.filter(e => e.category === 'Extraordinary' && e.distributionType !== 'FROM_RESERVE').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const reserveExpenses = expenses.filter(e => e.distributionType === 'FROM_RESERVE').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  
   const totalOrd = ordinaryExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalExtra = extraordinaryExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalReserveExp = reserveExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const drawExpenseTable = (title: string, dataRows: any[], total: number) => {
       doc.setFontSize(12); 
@@ -457,6 +463,11 @@ export const generateSettlementPDF = (settlement: SettlementRecord, consortium: 
   if (extraordinaryExpenses.length > 0) { 
       if (finalY > 230) { doc.addPage(); finalY = 20; } 
       drawExpenseTable("GASTOS EXTRAORDINARIOS", extraordinaryExpenses, totalExtra); 
+  }
+
+  if (reserveExpenses.length > 0) { 
+      if (finalY > 230) { doc.addPage(); finalY = 20; } 
+      drawExpenseTable("GASTOS CUBIERTOS CON FONDO DE RESERVA", reserveExpenses, totalReserveExp); 
   }
   
   if (finalY > 200) { doc.addPage(); finalY = 20; }
