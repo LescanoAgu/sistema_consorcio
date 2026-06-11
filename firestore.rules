@@ -31,6 +31,13 @@ service cloud.firestore {
       allow write: if false; 
     }
 
+    // Solicitudes de Ingreso (Join Requests) globales
+    match /join_requests/{requestId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null && (request.auth.token.email == resource.data.userEmail || isAdmin(resource.data.consortiumId));
+      allow update, delete: if request.auth != null && isAdmin(resource.data.consortiumId);
+    }
+
     // 2. Perfiles de usuario (Accesos rápidos)
     match /user_access/{email} {
       allow read: if request.auth != null && request.auth.token.email == email;
@@ -72,6 +79,61 @@ service cloud.firestore {
         allow create: if request.auth != null;
         allow read: if isAdmin(consortiumId) || (resource.data != null && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
         allow update, delete: if isAdmin(consortiumId);
+      }
+      
+      // D. Historial (History)
+      match /history/{historyId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId);
+      }
+
+      // E. Ajustes (Settings)
+      match /settings/{settingId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId);
+      }
+
+      // F. Anuncios (Announcements)
+      match /announcements/{announcementId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId);
+      }
+
+      // G. Mantenimiento (Maintenance)
+      match /maintenance/{reqId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId) || (resource.data != null && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
+         allow create: if isAuthorizedUser(consortiumId);
+      }
+
+      // H. Amenities y Bookings
+      match /amenities/{amenityId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId);
+      }
+      match /bookings/{bookingId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow create: if isAuthorizedUser(consortiumId) || isAdmin(consortiumId);
+         allow delete: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+      }
+
+      // I. Documentos (Documents)
+      match /documents/{documentId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId);
+      }
+
+      // J. Transacciones de Reserva (Reserve Transactions)
+      match /reserve_transactions/{txId} {
+         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow write: if isAdmin(consortiumId);
+      }
+
+      // K. Plantillas de Gastos (Expense Templates)
+      match /expense_templates/{templateId} {
+         allow read: if isAdmin(consortiumId);
+         allow write: if isAdmin(consortiumId);
       }
     }
   }

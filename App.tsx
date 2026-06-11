@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Menu } from 'lucide-react'; 
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -78,33 +79,51 @@ function App() {
       }
   }, [consortiumList]);
 
-  useEffect(() => {
-    if (consortium && consortium.id && user) {
-        setLoading(true);
-        const isConsortiumAdmin = (consortium.adminIds || []).includes(user.uid);
+  const isConsortiumAdmin = useMemo(() => consortium && user ? (consortium.adminIds || []).includes(user.uid) : false, [consortium, user]);
 
-        Promise.all([
-            getUnits(consortium.id, user.email, isConsortiumAdmin), 
-            getExpenses(consortium.id), 
-            getHistory(consortium.id), 
-            getSettings(consortium.id),
-            getPayments(consortium.id),
-            getAnnouncements(consortium.id),
-            getMaintenanceRequests(consortium.id),
-            getAmenities(consortium.id), 
-            getBookings(consortium.id),
-            getDocuments(consortium.id),
-            getReserveTransactions(consortium.id)
-        ])
-        .then(([u, e, h, s, p, a, m, am, b, docs, rt]) => { 
-            setUnits(u); setExpenses(e); setHistory(h); setSettings(s); 
-            setPayments(p); setAnnouncements(a); 
-            setMaintenanceRequests(m); setAmenities(am); setBookings(b);
-            setDocuments(docs); setReserveTransactions(rt); setLoading(false); 
-        })
-        .catch(err => { console.error(err); setLoading(false); });
-    }
-  }, [consortium, user]); 
+  const { data: fetchedUnits } = useQuery({
+      queryKey: ['units', consortium?.id, user?.email],
+      queryFn: () => getUnits(consortium!.id, user!.email, isConsortiumAdmin),
+      enabled: !!consortium && !!user
+  });
+
+  const myUnitIds = useMemo(() => fetchedUnits ? fetchedUnits.filter(u => u.authorizedEmails?.includes(user!.email)).map(u => u.id) : [], [fetchedUnits, user]);
+
+  const { data: fetchedExpenses } = useQuery({ queryKey: ['expenses', consortium?.id], queryFn: () => getExpenses(consortium!.id), enabled: !!consortium });
+  const { data: fetchedHistory } = useQuery({ queryKey: ['history', consortium?.id], queryFn: () => getHistory(consortium!.id), enabled: !!consortium });
+  const { data: fetchedSettings } = useQuery({ queryKey: ['settings', consortium?.id], queryFn: () => getSettings(consortium!.id), enabled: !!consortium });
+  
+  const { data: fetchedPayments } = useQuery({ 
+      queryKey: ['payments', consortium?.id, isConsortiumAdmin, myUnitIds], 
+      queryFn: () => getPayments(consortium!.id, isConsortiumAdmin, myUnitIds), 
+      enabled: !!consortium && !!user && (isConsortiumAdmin || myUnitIds.length > 0)
+  });
+
+  const { data: fetchedAnnouncements } = useQuery({ queryKey: ['announcements', consortium?.id], queryFn: () => getAnnouncements(consortium!.id), enabled: !!consortium && ['dashboard', 'announcements', 'user_portal'].includes(view) });
+  const { data: fetchedMaintenance } = useQuery({ queryKey: ['maintenance', consortium?.id], queryFn: () => getMaintenanceRequests(consortium!.id), enabled: !!consortium && ['dashboard', 'maintenance', 'user_portal'].includes(view) });
+  const { data: fetchedAmenities } = useQuery({ queryKey: ['amenities', consortium?.id], queryFn: () => getAmenities(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view) });
+  const { data: fetchedBookings } = useQuery({ queryKey: ['bookings', consortium?.id], queryFn: () => getBookings(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view) });
+  const { data: fetchedDocuments } = useQuery({ queryKey: ['documents', consortium?.id], queryFn: () => getDocuments(consortium!.id), enabled: !!consortium && ['documents', 'user_portal'].includes(view) });
+  const { data: fetchedReserve } = useQuery({ queryKey: ['reserve', consortium?.id], queryFn: () => getReserveTransactions(consortium!.id), enabled: !!consortium && ['accounting', 'dashboard'].includes(view) });
+
+  useEffect(() => {
+      if (fetchedUnits) setUnits(fetchedUnits);
+      if (fetchedExpenses) setExpenses(fetchedExpenses);
+      if (fetchedHistory) setHistory(fetchedHistory);
+      if (fetchedSettings) setSettings(fetchedSettings);
+      if (fetchedPayments) setPayments(fetchedPayments);
+      if (fetchedAnnouncements) setAnnouncements(fetchedAnnouncements);
+      if (fetchedMaintenance) setMaintenanceRequests(fetchedMaintenance);
+      if (fetchedAmenities) setAmenities(fetchedAmenities);
+      if (fetchedBookings) setBookings(fetchedBookings);
+      if (fetchedDocuments) setDocuments(fetchedDocuments);
+      if (fetchedReserve) setReserveTransactions(fetchedReserve);
+      setLoading(false);
+  }, [fetchedUnits, fetchedExpenses, fetchedHistory, fetchedSettings, fetchedPayments, fetchedAnnouncements, fetchedMaintenance, fetchedAmenities, fetchedBookings, fetchedDocuments, fetchedReserve]);
+
+  useEffect(() => {
+      if(consortium && user) setLoading(true);
+  }, [consortium, user]);
 
   // Middleware de Seguridad reactivo en el Cliente para prevenir suplantación de vistas
   useEffect(() => {

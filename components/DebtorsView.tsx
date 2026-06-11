@@ -160,19 +160,18 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     if (!selectedUnit) return;
     setIsSaving(true);
     try {
-      // AQUÍ OCURRE LA MAGIA (Capitalización de intereses)
-      // El Total pasa a ser el nuevo Monto Base. El % se limpia a 0.
+      // Se guardan los intereses aplicados para que queden reflejados en el PDF
       const cleanDebts = editingDebts.map(d => ({
         id: d.id,
         period: d.period || '',
-        baseAmount: Number(d.total) || 0,
-        interestRate: 0,
-        interestAmount: 0,
+        baseAmount: Number(d.baseAmount) || 0,
+        interestRate: Number(d.interestRate) || 0,
+        interestAmount: Number(d.interestAmount) || 0,
         total: Number(d.total) || 0
       }));
 
       await onUpdateUnit(selectedUnit.id, { debts: cleanDebts });
-      alert("¡Guardado exitoso!\n\nLos recargos se han sumado al Monto Base (Capitalizado). El mes que viene podrás aplicar un nuevo interés sobre este total actualizado.");
+      alert("¡Guardado exitoso!\n\nLos intereses se han guardado y quedarán reflejados en el detalle y en el PDF.");
 
       setSelectedUnit({ ...selectedUnit, debts: cleanDebts });
       setEditingDebts(cleanDebts);

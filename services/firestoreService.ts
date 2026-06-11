@@ -196,21 +196,28 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
     const q = query(historyRef, where('month', '==', record.month), limit(1));
     const snapshot = await getDocs(q);
 
+    const batch = writeBatch(db);
+
     if (!snapshot.empty) {
         const existingDoc = snapshot.docs[0];
-        await updateDoc(doc(db, `consortiums/${consortiumId}/history`, existingDoc.id), record as any);
+        batch.update(doc(db, `consortiums/${consortiumId}/history`, existingDoc.id), record as any);
     } else {
-        await addDoc(historyRef, record);
+        const newHistoryRef = doc(historyRef);
+        batch.set(newHistoryRef, record);
     }
 
     for (const id of expenseIdsToRemove) {
-        try { await deleteDoc(doc(db, `consortiums/${consortiumId}/expenses`, id)); } catch (e) {}
+        batch.delete(doc(db, `consortiums/${consortiumId}/expenses`, id));
     }
-    await saveSettings(consortiumId, { reserveFundBalance: record.reserveBalanceAtClose } as any); 
+    
+    const settingsRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
+    batch.set(settingsRef, { reserveFundBalance: record.reserveBalanceAtClose }, { merge: true });
+
+    await batch.commit();
 };
 
 export const getHistory = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/history`), orderBy('dateClosed', 'desc'));
+    const q = query(collection(db, `consortiums/${consortiumId}/history`), orderBy('dateClosed', 'desc'), limit(50));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SettlementRecord));
 };
@@ -229,8 +236,16 @@ export const updatePayment = async (consortiumId: string, paymentId: string, upd
     const docRef = doc(db, `consortiums/${consortiumId}/payments`, paymentId);
     await updateDoc(docRef, updates);
 };
-export const getPayments = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'));
+export const getPayments = async (consortiumId: string, isAdmin: boolean = true, myUnitIds: string[] = []) => {
+    let q;
+    if (isAdmin) {
+        q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'), limit(150));
+    } else {
+        if (myUnitIds.length === 0) return [];
+        // Firestore limita el uso de 'in' a arrays de máximo 30 elementos.
+        const chunk = myUnitIds.slice(0, 30);
+        q = query(collection(db, `consortiums/${consortiumId}/payments`), where('unitId', 'in', chunk), orderBy('date', 'desc'), limit(50));
+    }
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
 };
