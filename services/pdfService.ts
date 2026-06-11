@@ -171,6 +171,8 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
 
     const allUnits = settlement.unitDetails || [];
     let calculatedExpensesSum = 0;
+    let sumOrdinary = 0;
+    let sumExtraordinary = 0;
     const bodyRows: any[][] = [];
 
     // --- PROCESAMIENTO ITEMIZADO DE GASTOS DEL PERÍODO ---
@@ -203,8 +205,14 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         }
 
         calculatedExpensesSum += unitAmount;
+        if (exp.category === 'Ordinary') {
+            sumOrdinary += unitAmount;
+        } else {
+            sumExtraordinary += unitAmount;
+        }
+        
         bodyRows.push([
-            `${exp.description} (${exp.category === 'Ordinary' ? 'Ordinario' : 'Extraord.'})`,
+            `${exp.description} (${exp.category === 'Ordinary' ? 'Ord.' : 'Ext.'})`,
             formatCurrency(exp.amount),
             distributionLabel,
             formatCurrency(unitAmount)
@@ -241,8 +249,17 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     }
 
     // Filas finales de la tabla de liquidación
+    bodyRows.push([{ content: 'TOTAL EXPENSAS ORDINARIAS (A cargo del inquilino)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumOrdinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
+    
+    if (sumExtraordinary > 0) {
+        bodyRows.push([{ content: 'TOTAL EXPENSAS EXTRAORDINARIAS (A cargo del propietario)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumExtraordinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
+    }
+    
+    if (reserveContributionForUnit > 0) {
+        bodyRows.push([{ content: 'FONDO DE RESERVA (A cargo del propietario)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(reserveContributionForUnit), styles: { fontStyle: 'bold', halign: 'right' } }]);
+    }
+
     if (totalHistoricalDebt > 0) {
-        bodyRows.push([{ content: 'SUBTOTAL MES ACTUAL', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(exactAmountToPayMonth), styles: { fontStyle: 'bold', halign: 'right' } }]);
         bodyRows.push([{ content: 'DEUDA HISTÓRICA / SALDO PENDIENTE (Ver detalle en Anexo)', colSpan: 3, styles: { fontStyle: 'italic', halign: 'right', textColor: [220, 38, 38] } }, { content: formatCurrency(totalHistoricalDebt), styles: { fontStyle: 'bold', halign: 'right', textColor: [220, 38, 38] } }]);
     }
 
