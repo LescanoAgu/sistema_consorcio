@@ -249,14 +249,14 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     }
 
     // Filas finales de la tabla de liquidación
-    bodyRows.push([{ content: 'TOTAL EXPENSAS ORDINARIAS (A cargo del inquilino)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumOrdinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
+    bodyRows.push([{ content: 'TOTAL EXPENSAS ORDINARIAS', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumOrdinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
     
     if (sumExtraordinary > 0) {
-        bodyRows.push([{ content: 'TOTAL EXPENSAS EXTRAORDINARIAS (A cargo del propietario)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumExtraordinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
+        bodyRows.push([{ content: 'TOTAL EXPENSAS EXTRAORDINARIAS', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumExtraordinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
     }
     
     if (reserveContributionForUnit > 0) {
-        bodyRows.push([{ content: 'FONDO DE RESERVA (A cargo del propietario)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(reserveContributionForUnit), styles: { fontStyle: 'bold', halign: 'right' } }]);
+        bodyRows.push([{ content: 'APORTE FONDO DE RESERVA', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(reserveContributionForUnit), styles: { fontStyle: 'bold', halign: 'right' } }]);
     }
 
     if (totalHistoricalDebt > 0) {
