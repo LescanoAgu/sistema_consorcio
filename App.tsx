@@ -84,27 +84,29 @@ function App() {
   const { data: fetchedUnits } = useQuery({
       queryKey: ['units', consortium?.id, user?.email],
       queryFn: () => getUnits(consortium!.id, user!.email, isConsortiumAdmin),
-      enabled: !!consortium && !!user
+      enabled: !!consortium && !!user,
+      staleTime: 1000 * 60 * 5
   });
 
   const myUnitIds = useMemo(() => fetchedUnits ? fetchedUnits.filter(u => u.authorizedEmails?.includes(user!.email)).map(u => u.id) : [], [fetchedUnits, user]);
 
-  const { data: fetchedExpenses } = useQuery({ queryKey: ['expenses', consortium?.id], queryFn: () => getExpenses(consortium!.id), enabled: !!consortium });
-  const { data: fetchedHistory } = useQuery({ queryKey: ['history', consortium?.id], queryFn: () => getHistory(consortium!.id), enabled: !!consortium });
-  const { data: fetchedSettings } = useQuery({ queryKey: ['settings', consortium?.id], queryFn: () => getSettings(consortium!.id), enabled: !!consortium });
+  const { data: fetchedExpenses } = useQuery({ queryKey: ['expenses', consortium?.id], queryFn: () => getExpenses(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
+  const { data: fetchedHistory } = useQuery({ queryKey: ['history', consortium?.id], queryFn: () => getHistory(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
+  const { data: fetchedSettings } = useQuery({ queryKey: ['settings', consortium?.id], queryFn: () => getSettings(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
   
   const { data: fetchedPayments } = useQuery({ 
       queryKey: ['payments', consortium?.id, isConsortiumAdmin, myUnitIds], 
       queryFn: () => getPayments(consortium!.id, isConsortiumAdmin, myUnitIds), 
-      enabled: !!consortium && !!user && (isConsortiumAdmin || myUnitIds.length > 0)
+      enabled: !!consortium && !!user && (isConsortiumAdmin || myUnitIds.length > 0),
+      staleTime: 1000 * 60 * 5
   });
 
-  const { data: fetchedAnnouncements } = useQuery({ queryKey: ['announcements', consortium?.id], queryFn: () => getAnnouncements(consortium!.id), enabled: !!consortium && ['dashboard', 'announcements', 'user_portal'].includes(view) });
-  const { data: fetchedMaintenance } = useQuery({ queryKey: ['maintenance', consortium?.id], queryFn: () => getMaintenanceRequests(consortium!.id), enabled: !!consortium && ['dashboard', 'maintenance', 'user_portal'].includes(view) });
-  const { data: fetchedAmenities } = useQuery({ queryKey: ['amenities', consortium?.id], queryFn: () => getAmenities(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view) });
-  const { data: fetchedBookings } = useQuery({ queryKey: ['bookings', consortium?.id], queryFn: () => getBookings(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view) });
-  const { data: fetchedDocuments } = useQuery({ queryKey: ['documents', consortium?.id], queryFn: () => getDocuments(consortium!.id), enabled: !!consortium && ['documents', 'user_portal'].includes(view) });
-  const { data: fetchedReserve } = useQuery({ queryKey: ['reserve', consortium?.id], queryFn: () => getReserveTransactions(consortium!.id), enabled: !!consortium && ['accounting', 'dashboard'].includes(view) });
+  const { data: fetchedAnnouncements } = useQuery({ queryKey: ['announcements', consortium?.id], queryFn: () => getAnnouncements(consortium!.id), enabled: !!consortium && ['dashboard', 'announcements', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
+  const { data: fetchedMaintenance } = useQuery({ queryKey: ['maintenance', consortium?.id], queryFn: () => getMaintenanceRequests(consortium!.id), enabled: !!consortium && ['dashboard', 'maintenance', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
+  const { data: fetchedAmenities } = useQuery({ queryKey: ['amenities', consortium?.id], queryFn: () => getAmenities(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
+  const { data: fetchedBookings } = useQuery({ queryKey: ['bookings', consortium?.id], queryFn: () => getBookings(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
+  const { data: fetchedDocuments } = useQuery({ queryKey: ['documents', consortium?.id], queryFn: () => getDocuments(consortium!.id), enabled: !!consortium && ['documents', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
+  const { data: fetchedReserve } = useQuery({ queryKey: ['reserve', consortium?.id], queryFn: () => getReserveTransactions(consortium!.id), enabled: !!consortium && ['accounting', 'dashboard'].includes(view), staleTime: 1000 * 60 * 5 });
 
   useEffect(() => {
       if (fetchedUnits) setUnits(fetchedUnits);
