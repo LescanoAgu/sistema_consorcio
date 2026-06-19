@@ -236,8 +236,25 @@ function App() {
 
   const handleDeletePayment = async (id: string) => {
       if(!consortium) return;
+      const paymentToDelete = payments.find(p => p.id === id);
+      
       await deletePayment(consortium.id, id);
       setPayments(payments.filter(p => p.id !== id));
+
+      if (paymentToDelete && paymentToDelete.status === 'APPROVED') {
+          const reserveAmount = paymentToDelete.amount * (settings.monthlyReserveContributionPercentage / 100);
+          if (reserveAmount > 0) {
+              const newTx = await addReserveTransaction(consortium.id, {
+                  date: new Date().toISOString(),
+                  amount: -reserveAmount, // Movimiento negativo
+                  description: `Reversión de Cobro (${paymentToDelete.id.slice(-4)})`,
+                  type: 'SYSTEM'
+              });
+              setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
+              const newBalance = settings.reserveFundBalance - reserveAmount;
+              await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
+          }
+      }
   };
   
   const handleUpdateUnit = async (unitId: string, updates: Partial<Unit>) => {
@@ -401,6 +418,14 @@ function App() {
                 history={history} payments={payments} consortium={consortium}
                 onUpdateUnit={handleUpdateUnit} onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange}
                 onDeletePayment={handleDeletePayment} 
+            />
+          )}
+
+          {!loading && view === 'collections' && user.role === 'ADMIN' && (
+            <CollectionsView 
+                payments={payments} units={units} history={history} 
+                onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange} 
+                onUpdateUnit={handleUpdateUnit} onDeletePayment={handleDeletePayment} 
             />
           )}
           

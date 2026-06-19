@@ -13,10 +13,12 @@ interface CollectionsViewProps {
   onAddPayment: (p: Omit<Payment, 'id'>) => Promise<void>;
   onUpdateStatus: (id: string, s: 'APPROVED' | 'REJECTED') => Promise<void>;
   onUpdateUnit?: (unitId: string, updates: Partial<Unit>) => Promise<void>; 
+  onDeletePayment?: (id: string) => Promise<void>;
 }
 
-const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, history, onAddPayment, onUpdateStatus, onUpdateUnit }) => {
+const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, history, onAddPayment, onUpdateStatus, onUpdateUnit, onDeletePayment }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'cobrar' | 'historial'>('cobrar');
   const [showPayModal, setShowPayModal] = useState<Unit | null>(null);
   
   const [payAmount, setPayAmount] = useState(0);
@@ -102,9 +104,27 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
   };
 
   return (
+  return (
     <div className="space-y-6 animate-fade-in">
-      
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+
+      <div className="flex border-b border-slate-200 mb-6">
+        <button 
+          onClick={() => setActiveTab('cobrar')}
+          className={`px-4 py-3 font-bold text-sm transition-colors ${activeTab === 'cobrar' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Pendientes de Cobro
+        </button>
+        <button 
+          onClick={() => setActiveTab('historial')}
+          className={`px-4 py-3 font-bold text-sm transition-colors ${activeTab === 'historial' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Historial de Ingresos
+        </button>
+      </div>
+
+      {activeTab === 'cobrar' && (
+      <>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
           <div className="relative flex-1 w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
               <input 
@@ -155,9 +175,62 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
                   </div>
               )
           })}
-      </div>
+        </div>
+      </>
+      )}
 
-      {showPayModal && (
+      {activeTab === 'historial' && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <table className="w-full text-left border-collapse">
+                <thead>
+                    <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
+                        <th className="p-4 font-bold">Fecha</th>
+                        <th className="p-4 font-bold">Unidad</th>
+                        <th className="p-4 font-bold text-right">Monto</th>
+                        <th className="p-4 font-bold">Método</th>
+                        <th className="p-4 font-bold">Notas</th>
+                        <th className="p-4 font-bold text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {payments.filter(p => p.status === 'APPROVED').sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(p => {
+                        const unit = units.find(u => u.id === p.unitId);
+                        return (
+                            <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-4 text-sm font-medium text-slate-700">{new Date(p.date).toLocaleDateString('es-AR')}</td>
+                                <td className="p-4">
+                                    <p className="font-bold text-slate-800">{unit?.unitNumber}</p>
+                                    <p className="text-xs text-slate-500">{unit?.ownerName}</p>
+                                </td>
+                                <td className="p-4 font-black text-indigo-600 text-right">{formatCurrency(p.amount)}</td>
+                                <td className="p-4 text-sm text-slate-600">{p.method}</td>
+                                <td className="p-4 text-xs text-slate-500 max-w-[200px] truncate" title={p.notes}>{p.notes || '-'}</td>
+                                <td className="p-4 text-center">
+                                    <button 
+                                        onClick={() => {
+                                            if(confirm('ATENCIÓN: Se anulará este cobro.\n\n- Se descontará de los ingresos.\n- Si este pago destinó fondos a la Reserva, se debitarán automáticamente.\n- Si cubría deuda histórica (Morosidad), NO volverá automáticamente; deberás cargarla manual en la vista Morosidad.\n\n¿Estás seguro?')) {
+                                                onDeletePayment?.(p.id);
+                                            }
+                                        }}
+                                        className="px-3 py-1.5 bg-red-50 text-red-600 font-bold text-xs rounded hover:bg-red-100 transition-colors border border-red-100"
+                                    >
+                                        Revertir
+                                    </button>
+                                </td>
+                            </tr>
+                        )
+                    })}
+                    {payments.filter(p => p.status === 'APPROVED').length === 0 && (
+                        <tr>
+                            <td colSpan={6} className="p-8 text-center text-slate-500 font-medium">No hay cobros registrados todavía.</td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+        </div>
+      )}
+
+      {showPayModal && activeTab === 'cobrar' && (
           <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in duration-200">
                   <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
