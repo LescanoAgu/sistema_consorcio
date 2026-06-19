@@ -84,7 +84,7 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
           });
 
           if (selectedDebtIds.length > 0 && onUpdateUnit) {
-              const remainingDebts = (showPayModal.debts || []).filter(d => !selectedDebtIds.includes(d.id));
+              const remainingDebts = (showPayModal.debts || []).filter(d => !selectedDebtIds.includes(d.id || d.period));
               let updates: Partial<Unit> = { debts: remainingDebts };
               
               if (selectedDebtIds.includes('initial-balance')) {
@@ -191,14 +191,16 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
                                   </div>
                               )}
 
-                              {(showPayModal.debts || []).map(debt => (
+                              {(showPayModal.debts || []).map(debt => {
+                                  const safeId = debt.id || debt.period;
+                                  return (
                                   <div 
-                                    key={debt.id}
-                                    onClick={() => toggleDebtSelection(debt.id, debt.total)}
-                                    className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex justify-between items-center ${selectedDebtIds.includes(debt.id) ? 'border-indigo-500 bg-indigo-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}
+                                    key={safeId}
+                                    onClick={() => toggleDebtSelection(safeId, debt.total)}
+                                    className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex justify-between items-center ${selectedDebtIds.includes(safeId) ? 'border-indigo-500 bg-indigo-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}
                                   >
                                       <div className="flex items-center gap-3">
-                                          {selectedDebtIds.includes(debt.id) ? <CheckCircle className="text-indigo-600 w-5 h-5"/> : <Square className="text-slate-300 w-5 h-5"/>}
+                                          {selectedDebtIds.includes(safeId) ? <CheckCircle className="text-indigo-600 w-5 h-5"/> : <Square className="text-slate-300 w-5 h-5"/>}
                                           <div>
                                               <p className="text-xs font-bold text-slate-800">{debt.period}</p>
                                               <p className="text-[10px] text-slate-500">Morosidad cargada</p>
@@ -206,7 +208,7 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
                                       </div>
                                       <span className="font-bold text-sm">{formatCurrency(debt.total)}</span>
                                   </div>
-                              ))}
+                              )})}
 
                               {getUnitDebtInfo(showPayModal).current > 0 && (
                                   <div 

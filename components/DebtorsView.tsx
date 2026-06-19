@@ -92,9 +92,9 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     setEditingDebts([...editingDebts, newDebt]);
   };
 
-  const removeDebtRow = (id: string) => {
-    setEditingDebts(editingDebts.filter(d => d.id !== id));
-    setSelectedDebtIds(selectedDebtIds.filter(selectedId => selectedId !== id));
+  const removeDebtRow = (idOrPeriod: string) => {
+    setEditingDebts(editingDebts.filter(d => (d.id || d.period) !== idOrPeriod));
+    setSelectedDebtIds(selectedDebtIds.filter(selectedId => selectedId !== idOrPeriod));
   };
 
   const clearAllDebts = () => {
@@ -104,9 +104,10 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     }
   };
 
-  const updateDebtField = (id: string, field: keyof DebtItem, value: string) => {
-    const updated = editingDebts.map(debt => {
-      if (debt.id === id) {
+  const updateDebtField = (idOrPeriod: string, field: keyof DebtItem, value: string) => {
+    const updated = editingDebts.map((debt, index) => {
+      const safeId = debt.id || debt.period || String(index);
+      if (safeId === idOrPeriod) {
         const newDebt = { ...debt };
         if (field === 'period') {
           newDebt.period = value;
@@ -125,11 +126,11 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     setEditingDebts(updated);
   };
 
-  const toggleSelection = (id: string) => {
-    if (selectedDebtIds.includes(id)) {
-      setSelectedDebtIds(selectedDebtIds.filter(itemId => itemId !== id));
+  const toggleSelection = (safeId: string) => {
+    if (selectedDebtIds.includes(safeId)) {
+      setSelectedDebtIds(selectedDebtIds.filter(itemId => itemId !== safeId));
     } else {
-      setSelectedDebtIds([...selectedDebtIds, id]);
+      setSelectedDebtIds([...selectedDebtIds, safeId]);
     }
   };
 
@@ -137,15 +138,16 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     if (selectedDebtIds.length === editingDebts.length) {
       setSelectedDebtIds([]);
     } else {
-      setSelectedDebtIds(editingDebts.map(d => d.id));
+      setSelectedDebtIds(editingDebts.map((d, i) => d.id || d.period || String(i)));
     }
   };
 
   const applyBulkInterest = () => {
     if (bulkInterestRate === '' || selectedDebtIds.length === 0) return;
     const rate = Number(bulkInterestRate);
-    const updated = editingDebts.map(debt => {
-      if (selectedDebtIds.includes(debt.id)) {
+    const updated = editingDebts.map((debt, i) => {
+      const safeId = debt.id || debt.period || String(i);
+      if (selectedDebtIds.includes(safeId)) {
         const newInterestAmount = debt.baseAmount * (rate / 100);
         return { ...debt, interestRate: rate, interestAmount: newInterestAmount, total: debt.baseAmount + newInterestAmount };
       }
@@ -370,65 +372,68 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                   </div>
                 )}
 
-                {editingDebts.map((debt) => (
-                  <div key={debt.id} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg group border transition-colors ${selectedDebtIds.includes(debt.id) ? 'bg-indigo-50/50 border-indigo-200' : 'bg-slate-50 border-slate-100'}`}>
-                    <div className="col-span-1 flex justify-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedDebtIds.includes(debt.id)}
-                        onChange={() => toggleSelection(debt.id)}
-                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                      />
-                    </div>
-                    <div className="col-span-3">
-                      <input
-                        type="text"
-                        placeholder="Ej: Marzo 2026"
-                        className="w-full bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
-                        value={debt.period}
-                        onChange={(e) => updateDebtField(debt.id, 'period', e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <div className="relative">
-                        <span className="absolute left-2 top-2 text-slate-400 text-sm">$</span>
+                {editingDebts.map((debt, index) => {
+                  const safeId = debt.id || debt.period || String(index);
+                  return (
+                    <div key={safeId} className={`grid grid-cols-12 gap-2 items-center p-2 rounded-lg group border transition-colors ${selectedDebtIds.includes(safeId) ? 'bg-indigo-50/50 border-indigo-200' : 'bg-slate-50 border-slate-100'}`}>
+                      <div className="col-span-1 flex justify-center">
                         <input
-                          type="number"
-                          className="w-full pl-6 bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
-                          value={debt.baseAmount === 0 ? '' : debt.baseAmount}
-                          onChange={(e) => updateDebtField(debt.id, 'baseAmount', e.target.value)}
+                          type="checkbox"
+                          checked={selectedDebtIds.includes(safeId)}
+                          onChange={() => toggleSelection(safeId)}
+                          className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
                         />
                       </div>
-                    </div>
-                    <div className="col-span-2">
-                      <div className="relative">
+                      <div className="col-span-3">
                         <input
-                          type="number"
-                          step="0.1"
-                          className="w-full pr-6 bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
-                          value={debt.interestRate === 0 ? '' : debt.interestRate}
-                          onChange={(e) => updateDebtField(debt.id, 'interestRate', e.target.value)}
+                          type="text"
+                          placeholder="Ej: Marzo 2026"
+                          className="w-full bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
+                          value={debt.period}
+                          onChange={(e) => updateDebtField(safeId, 'period', e.target.value)}
                         />
-                        <span className="absolute right-2 top-2 text-slate-400 text-sm">%</span>
+                      </div>
+                      <div className="col-span-2">
+                        <div className="relative">
+                          <span className="absolute left-2 top-2 text-slate-400 text-sm">$</span>
+                          <input
+                            type="number"
+                            className="w-full pl-6 bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
+                            value={debt.baseAmount === 0 ? '' : debt.baseAmount}
+                            onChange={(e) => updateDebtField(safeId, 'baseAmount', e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="col-span-2">
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.1"
+                            className="w-full pr-6 bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
+                            value={debt.interestRate === 0 ? '' : debt.interestRate}
+                            onChange={(e) => updateDebtField(safeId, 'interestRate', e.target.value)}
+                          />
+                          <span className="absolute right-2 top-2 text-slate-400 text-sm">%</span>
+                        </div>
+                      </div>
+                      <div className="col-span-2 text-sm font-medium text-slate-500 pl-2">
+                        {formatCurrency(debt.interestAmount)}
+                      </div>
+                      <div className="col-span-2 flex items-center justify-end gap-2">
+                        <span className="text-sm font-bold text-slate-800">
+                          {formatCurrency(debt.total)}
+                        </span>
+                        <button
+                          onClick={() => removeDebtRow(safeId)}
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                          title="Eliminar fila"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    <div className="col-span-2 text-sm font-medium text-slate-500 pl-2">
-                      {formatCurrency(debt.interestAmount)}
-                    </div>
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      <span className="text-sm font-bold text-slate-800">
-                        {formatCurrency(debt.total)}
-                      </span>
-                      <button
-                        onClick={() => removeDebtRow(debt.id)}
-                        className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                        title="Eliminar fila"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 <div className="flex gap-2 mt-4">
                   <button
