@@ -41,7 +41,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ userEmail, userRole, onLogout
           }
       } catch (error: any) {
           console.error(error);
-          setMsg('Error: ' + (error.message === 'CREDENTIAL_TOO_OLD_LOGIN_AGAIN' ? 'Debes volver a iniciar sesión para cambiar la contraseña.' : 'No se pudo actualizar.'));
+          setMsg('Error: ' + ((error.code === 'auth/requires-recent-login' || error.message?.includes('auth/requires-recent-login')) ? 'Debes volver a iniciar sesión para cambiar la contraseña.' : 'No se pudo actualizar.'));
       } finally {
           setIsSaving(false);
       }

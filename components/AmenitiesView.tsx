@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useMemo } from 'react';
 import { Amenity, Booking, Unit, UserRole } from '../types';
 import { Calendar, Plus, Trash2, Clock, CheckCircle, Users, X, Info } from 'lucide-react';
@@ -19,12 +20,12 @@ const TIME_SLOTS = ['Mañana (10-14hs)', 'Tarde (14-18hs)', 'Noche (19-23hs)'];
 const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, units, userRole, userEmail, onAddAmenity, onDeleteAmenity, onAddBooking, onDeleteBooking }) => {
   const [activeTab, setActiveTab] = useState<'CALENDAR' | 'ADMIN'>('CALENDAR');
   const [selectedAmenityId, setSelectedAmenityId] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getLocalIsoDate());
   
   // Admin form state
   const [newAmenity, setNewAmenity] = useState({ name: '', description: '', capacity: 10 });
 
-  const myUnit = useMemo(() => units.find(u => u.linkedEmail === userEmail), [units, userEmail]);
+  const myUnit = useMemo(() => units.find(u => u.authorizedEmails?.includes(userEmail || '')), [units, userEmail]);
 
   // Filtrar reservas por fecha y espacio seleccionado
   const bookingsForDate = useMemo(() => {
@@ -42,7 +43,8 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
       if (!selectedAmenityId) return alert("Selecciona un espacio primero.");
       if (!myUnit && userRole !== 'ADMIN') return alert("No tienes unidad asignada.");
       
-      const unitToBook = myUnit || units[0]; // Admin fallback
+      const unitToBook = myUnit || (units.length > 0 ? units[0] : null);
+      if (!unitToBook) return alert("No hay unidades en el consorcio para asignar esta reserva.");
 
       if (confirm(`¿Reservar ${slot} para el ${selectedDate}?`)) {
           try {
@@ -120,7 +122,7 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
                       <input 
                         type="date" 
                         value={selectedDate}
-                        min={new Date().toISOString().split('T')[0]}
+                        min={getLocalIsoDate()}
                         onChange={e => setSelectedDate(e.target.value)}
                         className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                       />
@@ -131,7 +133,7 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
               <div className="lg:col-span-2">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-full">
                       <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                          <Clock className="w-5 h-5 text-indigo-600"/> Turnos Disponibles ({new Date(selectedDate).toLocaleDateString()})
+                          <Clock className="w-5 h-5 text-indigo-600"/> Turnos Disponibles ({formatLocalDate(selectedDate)})
                       </h3>
                       
                       {!selectedAmenityId ? (

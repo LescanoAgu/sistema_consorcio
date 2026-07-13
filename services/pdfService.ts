@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { SettlementRecord, Unit, Consortium, Payment, ConsortiumSettings } from '../types';
@@ -124,14 +125,19 @@ function addPageNumbers(doc: jsPDF) {
 
 // --- GENERADOR CUPÓN INDIVIDUAL ITEMIZADO ---
 
-const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings) => {
+const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings, allUnitsData: Unit[]) => {
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.width;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    let finalY = 20;
+
+    // Helper para normalizar el porcentaje global de todo el consorcio
+    const totalGlobalProrate = allUnitsData.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
+    const globalProrateRatio = Number(unit.proratePercentage || 0) / totalGlobalProrate;
 
     // Encabezado institucional
     drawHeader(doc, consortium, "CUPÓN DE PAGO INDIVIDUAL", settlement);
 
-    let finalY = 50;
+    finalY = 50;
 
     // Ficha informativa de la Unidad Funcional (Soporta Sector Comercial)
     doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
@@ -170,7 +176,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
 
     finalY += 45;
 
-    const allUnits = settlement.unitDetails || [];
+    finalY += 45;
     let calculatedExpensesSum = 0;
     let sumOrdinary = 0;
     let sumExtraordinary = 0;
@@ -193,17 +199,19 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
                     unitAmount = exp.amount / exp.affectedUnitIds.length;
                     distributionLabel = `Esp. (Igual x ${exp.affectedUnitIds.length} UF)`;
                 } else {
-                    unitAmount = exp.amount * (Number(unit.proratePercentage) / 100);
-                    distributionLabel = `Esp. (Prorrateo ${formattedPercentage}%)`;
+                    const affectedUnitsData = allUnitsData.filter(u => exp.affectedUnitIds!.includes(u.id));
+                    const totalAffectedProrate = affectedUnitsData.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
+                    unitAmount = exp.amount * (Number(unit.proratePercentage || 0) / totalAffectedProrate);
+                    distributionLabel = `Esp. (Prorrateo Normalizado)`;
                 }
             } else {
                 // Distribución general a todo el consorcio
                 if (exp.distributionType === 'EQUAL_PARTS') {
-                    unitAmount = exp.amount / (allUnits.length || 1);
+                    unitAmount = exp.amount / (allUnitsData.length || 1);
                     distributionLabel = 'Partes Iguales';
                 } else {
-                    unitAmount = exp.amount * (Number(unit.proratePercentage) / 100);
-                    distributionLabel = `Prorrateo ${formattedPercentage}%`;
+                    unitAmount = exp.amount * globalProrateRatio;
+                    distributionLabel = `Prorrateo Normalizado`;
                 }
             }
         }
@@ -225,7 +233,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
 
     const detail = (settlement.unitDetails || []).find(d => d.unitId === unit.id);
     const exactAmountToPayMonth = detail ? detail.totalToPay : 0;
-    const reserveContributionForUnit = (settlement.reserveContribution || 0) * (Number(unit.proratePercentage) / 100);
+    const reserveContributionForUnit = (settlement.reserveContribution || 0) * globalProrateRatio;
 
     // Agregar el Fondo de Reserva si aplica en este mes
     if (reserveContributionForUnit > 0) {
@@ -306,7 +314,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // @ts-ignore
     finalY = doc.lastAutoTable.finalY + 12;
 
-    const interestRate = settings.monthlyInterestRate || 0;
+    const interestRate = settings.interestRate || 0;
     const interestAmount = (finalTotalToPay * interestRate) / 100;
     const secondDueTotal = finalTotalToPay + interestAmount;
 
@@ -412,22 +420,20 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         doc.addPage();
         finalY = 20;
     }
-    
-    drawFooter(doc, settlement, pageWidth, finalY);
 
     return doc;
 };
 
 // --- EXPORTS PRINCIPALES ---
 
-export const generateIndividualCouponPDF = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings) => {
-    const doc = createCouponDoc(settlement, unit, consortium, settings);
+export const generateIndividualCouponPDF = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings, allUnitsData: Unit[]) => {
+    const doc = createCouponDoc(settlement, unit, consortium, settings, allUnitsData);
     const safeUnit = (unit.unitNumber || '00').replace(/[^a-z0-9]/gi, '_');
     doc.save(`CUPON_DE_PAGO_${safeUnit}.pdf`);
 };
 
-export const generateCouponBase64 = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings): string => {
-    const doc = createCouponDoc(settlement, unit, consortium, settings);
+export const generateCouponBase64 = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings, allUnitsData: Unit[]): string => {
+    const doc = createCouponDoc(settlement, unit, consortium, settings, allUnitsData);
     return doc.output('datauristring').split(',')[1]; 
 };
 
@@ -501,6 +507,64 @@ export const generateSettlementPDF = (settlement: SettlementRecord, consortium: 
       if (finalY > 230) { doc.addPage(); finalY = 20; } 
       drawExpenseTable("GASTOS CUBIERTOS CON FONDO DE RESERVA", reserveExpenses, totalReserveExp); 
   }
+
+  // TOTAL DE GASTOS DEL PERIODO
+  if (finalY > 250) { doc.addPage(); finalY = 20; }
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+  doc.text(`TOTAL GASTOS DEL PERÍODO (Ord. + Ext.): ${formatCurrency(totalOrd + totalExtra)}`, pageWidth - 14, finalY, { align: 'right' });
+  finalY += 15;
+
+  // RESUMEN DE COBROS
+  const payments = settlement.snapshotPayments || [];
+  if (payments.length > 0) {
+      if (finalY > 220) { doc.addPage(); finalY = 20; }
+      
+      const paymentsByMonth: Record<string, number> = {};
+      payments.forEach(p => {
+          const m = p.date.substring(0, 7); // YYYY-MM
+          paymentsByMonth[m] = (paymentsByMonth[m] || 0) + p.amount;
+      });
+
+      doc.setFontSize(12); 
+      doc.setFont("helvetica", "bold"); 
+      doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+      doc.text("INGRESOS / COBROS DEL PERÍODO", 14, finalY); 
+      finalY += 3;
+
+      const paymentRows = Object.keys(paymentsByMonth).sort().map(monthKey => {
+          const [year, month] = monthKey.split('-');
+          const monthName = new Date(parseInt(year), parseInt(month) - 1, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+          return [
+              `Cobros mes de ${monthName}`,
+              formatCurrency(paymentsByMonth[monthKey])
+          ];
+      });
+
+      autoTable(doc, {
+        startY: finalY, 
+        head: [['CONCEPTO', 'TOTAL RECAUDADO']], 
+        body: paymentRows, 
+        theme: 'plain',
+        headStyles: { fillColor: [16, 185, 129], textColor: [255,255,255], fontStyle: 'bold' }, // Emerald green for income
+        bodyStyles: { fontSize: 10, textColor: THEME.text, cellPadding: 3 },
+        columnStyles: { 
+            0: { cellWidth: 'auto', fontStyle: 'bold' }, 
+            1: { cellWidth: 50, halign: 'right', fontStyle: 'bold' } 
+        },
+        alternateRowStyles: { fillColor: [240, 253, 244] } // Light emerald stripe
+      });
+
+      // @ts-ignore
+      finalY = doc.lastAutoTable.finalY + 5;
+      
+      doc.setFont("helvetica", "bold"); 
+      doc.setFontSize(11); 
+      doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
+      doc.text(`Total Recaudado: ${formatCurrency(settlement.totalCollected || 0)}`, pageWidth - 14, finalY, { align: 'right' });
+      finalY += 15;
+  }
   
   if (finalY > 200) { doc.addPage(); finalY = 20; }
 
@@ -562,7 +626,7 @@ export const generateReserveLedgerPDF = (ledgerData: any[], consortium: Consorti
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
     
-    drawHeader(doc, consortium, "MAYOR: FONDO DE RESERVA", { month: new Date().toLocaleDateString() } as any);
+    drawHeader(doc, consortium, "MAYOR: FONDO DE RESERVA", { month: formatLocalDate() } as any);
 
     let finalY = 45;
     const currentBalance = ledgerData.length > 0 ? ledgerData[0].runningBalance : 0;
@@ -610,7 +674,7 @@ export const generateDebtDetailPDF = (unit: Unit, consortium: Consortium) => {
     const doc = new jsPDF(); 
     const pageWidth = doc.internal.pageSize.width;
     
-    drawHeader(doc, consortium, "ESTADO DE DEUDA", { month: new Date().toLocaleDateString() } as any);
+    drawHeader(doc, consortium, "ESTADO DE DEUDA", { month: formatLocalDate() } as any);
 
     let finalY = 45;
     
@@ -687,7 +751,7 @@ export const generateUnitLedgerPDF = (unit: Unit, payments: Payment[], consortiu
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.width;
     
-    drawHeader(doc, consortium, "ESTADO DE CUENTA", { month: new Date().toLocaleDateString() } as any);
+    drawHeader(doc, consortium, "ESTADO DE CUENTA", { month: formatLocalDate() } as any);
 
     let finalY = 45;
     
@@ -720,7 +784,7 @@ export const generateUnitLedgerPDF = (unit: Unit, payments: Payment[], consortiu
     }
     
     payments.filter(p => p.unitId === unit.id && p.status === 'APPROVED').forEach(p => {
-        items.push({ date: new Date(p.date).toLocaleDateString(), concept: `Pago Realizado (${p.method})`, charge: 0, payment: p.amount });
+        items.push({ date: formatLocalDate(p.date), concept: `Pago Realizado (${p.method})`, charge: 0, payment: p.amount });
     });
 
     const tableBody: any[][] = items.map(t => [ 

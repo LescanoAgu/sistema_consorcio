@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useMemo } from 'react';
 import { SettlementRecord, Unit, ConsortiumSettings, Consortium } from '../types';
 import { ChevronDown, ChevronRight, Calendar, Download, User, FolderArchive, FileText } from 'lucide-react';
@@ -56,7 +57,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortium, units, s
       e.stopPropagation();
       const unit = units.find(u => u.id === unitId);
       if (unit) {
-          generateIndividualCouponPDF(record, unit, consortium, settings);
+          generateIndividualCouponPDF(record, unit, consortium, settings, units);
       }
   };
 
@@ -75,7 +76,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortium, units, s
                   setTimeout(() => {
                       const unit = units.find(u => u.id === detail.unitId);
                       if (unit) {
-                          generateIndividualCouponPDF(record, unit, consortium, settings);
+                          generateIndividualCouponPDF(record, unit, consortium, settings, units);
                       }
                   }, delay);
                   delay += 500;
@@ -140,7 +141,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, consortium, units, s
                                     </div>
                                     <div>
                                         <h4 className="font-bold text-slate-800 text-lg uppercase tracking-wide">{record.month}</h4>
-                                        <p className="text-xs text-slate-500 font-medium">Cierre oficial: {new Date(record.dateClosed).toLocaleDateString()}</p>
+                                        <p className="text-xs text-slate-500 font-medium">Cierre oficial: {formatLocalDate(record.dateClosed)}</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-6">

@@ -33,7 +33,7 @@ service cloud.firestore {
 
     // Solicitudes de Ingreso (Join Requests) globales
     match /join_requests/{requestId} {
-      allow create: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.userEmail == request.auth.token.email;
       allow read: if request.auth != null && (request.auth.token.email == resource.data.userEmail || isAdmin(resource.data.consortiumId));
       allow update, delete: if request.auth != null && isAdmin(resource.data.consortiumId);
     }
@@ -82,7 +82,7 @@ service cloud.firestore {
       
       // C. Pagos
       match /payments/{paymentId} {
-        allow create: if request.auth != null;
+        allow create: if request.auth != null && (isAdmin(consortiumId) || request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(request.resource.data.unitId)).data.authorizedEmails);
         allow read: if isAdmin(consortiumId) || (resource.data != null && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
         allow update, delete: if isAdmin(consortiumId);
       }
@@ -119,9 +119,8 @@ service cloud.firestore {
       }
       match /bookings/{bookingId} {
          allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
-         allow write: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
-         allow create: if isAuthorizedUser(consortiumId) || isAdmin(consortiumId);
-         allow delete: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+         allow create: if isAdmin(consortiumId) || (isAuthorizedUser(consortiumId) && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(request.resource.data.unitId)).data.authorizedEmails);
+         allow update, delete: if isAdmin(consortiumId) || (isAuthorizedUser(consortiumId) && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
       }
 
       // I. Documentos (Documents)

@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useMemo } from 'react';
 import { ReserveTransaction, Consortium, ConsortiumSettings } from '../types';
 import { Plus, Download, Upload, Trash2, FileSpreadsheet, Vault, TrendingUp, TrendingDown } from 'lucide-react';
@@ -22,7 +23,7 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
   const [showModal, setShowModal] = useState(false);
   const [newDesc, setNewDesc] = useState('');
   const [newAmount, setNewAmount] = useState('');
-  const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newDate, setNewDate] = useState(getLocalIsoDate());
   const [type, setType] = useState<'IN' | 'OUT'>('IN');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -80,7 +81,7 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
                   const desc = row['Concepto'] || row['Descripcion'];
                   const ingreso = parseFloat(row['Ingreso'] || 0);
                   const egreso = parseFloat(row['Egreso'] || 0);
-                  const date = row['Fecha'] ? new Date(row['Fecha']).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+                  const date = row['Fecha'] ? getLocalIsoDate(new Date(row['Fecha'])) : getLocalIsoDate();
 
                   if (desc && (ingreso > 0 || egreso > 0)) {
                       await onAddTransaction({
@@ -153,7 +154,7 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
                       )}
                       {ledgerData.map(t => (
                           <tr key={t.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-6 py-3 text-slate-500 font-medium w-32">{new Date(t.date).toLocaleDateString()}</td>
+                              <td className="px-6 py-3 text-slate-500 font-medium w-32">{formatLocalDate(t.date)}</td>
                               <td className="px-6 py-3 font-bold text-slate-700 flex items-center gap-2">
                                   {t.type === 'SYSTEM' && <span className="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded uppercase">Sistema</span>}
                                   {t.description}

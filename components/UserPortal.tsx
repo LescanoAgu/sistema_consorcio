@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useMemo, useState, useEffect } from 'react';
 import { Unit, Expense, SettlementRecord, Payment, ConsortiumSettings, Announcement, Booking, MaintenanceRequest, ConsortiumDocument, Consortium } from '../types';
 import { CheckCircle, AlertCircle, Download, Building, Building2, Upload, X, Megaphone, Calendar, FileText, Loader2 } from 'lucide-react';
@@ -79,7 +80,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
   const recentDocs = useMemo(() => documents.slice(0, 3), [documents]);
 
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalIsoDate());
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
@@ -208,7 +209,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
                                       <div className="bg-white border border-slate-200 shadow-sm text-slate-400 p-3 rounded-xl"><Building className="w-5 h-5"/></div>
                                       <div>
                                           <p className="font-bold text-slate-800">{rec.month}</p>
-                                          <p className="text-xs text-slate-500 font-medium">Cierre: {new Date(rec.dateClosed).toLocaleDateString()}</p>
+                                          <p className="text-xs text-slate-500 font-medium">Cierre: {formatLocalDate(rec.dateClosed)}</p>
                                       </div>
                                   </div>
                                   
@@ -227,7 +228,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
                                       </button>
                                       
                                       <button 
-                                        onClick={() => generateIndividualCouponPDF(rec, currentUnit, consortium)}
+                                        onClick={() => generateIndividualCouponPDF(rec, currentUnit, consortium, settings, units)}
                                         className="bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-600 hover:text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
                                         title="Descargar Mi Cupón Detallado"
                                       >
@@ -247,7 +248,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
                   <div className="p-4">
                       {unitBookings.length > 0 ? unitBookings.slice(0,3).map(b => (
                           <div key={b.id} className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 mb-3 last:mb-0">
-                              <p className="text-emerald-800 font-bold text-sm mb-1">{new Date(b.date).toLocaleDateString()}</p>
+                              <p className="text-emerald-800 font-bold text-sm mb-1">{formatLocalDate(b.date)}</p>
                               <div className="inline-block bg-white text-emerald-600 font-bold text-xs px-2 py-1 rounded shadow-sm">{b.timeSlot}</div>
                           </div>
                       )) : <p className="text-slate-400 text-sm text-center py-4">No tienes reservas activas.</p>}

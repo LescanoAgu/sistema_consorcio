@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Unit, Expense, ExpenseDistributionType, SettlementRecord, ConsortiumSettings, ViewState, Consortium } from '../types';
+import { Unit, Expense, ExpenseDistributionType, SettlementRecord, ConsortiumSettings, ViewState, Consortium, Payment } from '../types';
 import { Archive, FileText, Calculator, Calendar, User, Download, CheckSquare } from 'lucide-react';
 import { generateSettlementPDF, generateIndividualCouponPDF } from '../services/pdfService';
 
@@ -32,13 +32,18 @@ interface SettlementViewProps {
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
   consortiumId: string;
   consortiumName: string;
+  payments: Payment[];
+  history: SettlementRecord[];
   updateReserveBalance: (newBalance: number) => void;
   onUpdateBankSettings: (settings: Partial<ConsortiumSettings>) => void;
-  onCloseMonth: (record: SettlementRecord) => void;
+  onCloseMonth: (record: SettlementRecord) => Promise<void>;
   onChangeView: (view: ViewState) => void;
 }
 
-const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settings, setExpenses, consortiumId, consortiumName, updateReserveBalance, onUpdateBankSettings, onCloseMonth, onChangeView }) => {
+const SettlementView: React.FC<SettlementViewProps> = ({ 
+  units, expenses, settings, setExpenses, consortiumId, consortiumName, 
+  payments, history, updateReserveBalance, onUpdateBankSettings, onCloseMonth, onChangeView 
+}) => {
   const [couponMessage, setCouponMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [testUnitId, setTestUnitId] = useState<string>(''); // Para elegir la UF de prueba
@@ -132,11 +137,16 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
           image: logoBase64, bankName: settings.bankName, bankCBU: settings.bankCBU, bankAlias: settings.bankAlias, bankHolder: settings.bankHolder, adminIds: []
       };
 
+      const lastSettlement = history && history.length > 0 ? history[0] : null;
+      const settlementDate = lastSettlement ? new Date(lastSettlement.dateClosed).getTime() : 0;
+      const recentPayments = payments.filter(p => p.status === 'APPROVED' && new Date(p.date).getTime() >= settlementDate);
+      const totalCollected = recentPayments.reduce((sum, p) => sum + p.amount, 0);
+
       const dummyRecord: SettlementRecord = {
           id: 'preview', month: 'BORRADOR / VISTA PREVIA', dateClosed: new Date().toISOString(),
-          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected: 0, reserveBalanceStart: settings.reserveFundBalance,
+          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: settings.reserveFundBalance,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
-          firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, couponMessage,
+          firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
           unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
       };
 
@@ -170,7 +180,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
           authorizedEmails: rawUnit.authorizedEmails || [], debts: rawUnit.debts || []
       };
       
-      generateIndividualCouponPDF(dummyRecord, safeUnit, consortiumData, settings);
+      generateIndividualCouponPDF(dummyRecord, safeUnit, consortiumData, settings, units);
       setIsProcessing(false);
   };
 
@@ -180,18 +190,23 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
       
       const { consortiumData } = await preparePDFData();
 
+      const lastSettlement = history && history.length > 0 ? history[0] : null;
+      const settlementDate = lastSettlement ? new Date(lastSettlement.dateClosed).getTime() : 0;
+      const recentPayments = payments.filter(p => p.status === 'APPROVED' && new Date(p.date).getTime() >= settlementDate);
+      const totalCollected = recentPayments.reduce((sum, p) => sum + p.amount, 0);
+
       const record: SettlementRecord = {
           id: '', month: new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' }), dateClosed: new Date().toISOString(),
-          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected: 0, reserveBalanceStart: settings.reserveFundBalance,
+          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: settings.reserveFundBalance,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
-          firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, couponMessage,
+          firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
           unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
       };
 
       const finalRecordForPDF = { ...record };
 
       try {
-          onCloseMonth(record);
+          await onCloseMonth(record);
           const unitsToPrint = unitDebts.filter(u => u.total > 0);
           
           let delay = 0;
@@ -203,7 +218,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({ units, expenses, settin
                       proratePercentage: Number(rawUnit?.proratePercentage || 0), initialBalance: rawUnit?.initialBalance || 0, 
                       authorizedEmails: rawUnit?.authorizedEmails || [], debts: rawUnit?.debts || []
                   };
-                  generateIndividualCouponPDF(finalRecordForPDF, safeUnit, consortiumData, settings);
+                  generateIndividualCouponPDF(finalRecordForPDF, safeUnit, consortiumData, settings, units);
               }, delay);
               delay += 500;
           });

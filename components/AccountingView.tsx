@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Unit, Expense, SettlementRecord, ConsortiumSettings, Consortium, ReserveTransaction } from '../types';
+import { Unit, Expense, SettlementRecord, ConsortiumSettings, Consortium, ReserveTransaction, Payment } from '../types';
 import ExpensesView from './ExpensesView';
 import SettlementView from './SettlementView';
 import HistoryView from './HistoryView';
@@ -11,6 +11,7 @@ interface AccountingViewProps {
   expenses: Expense[];
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>;
   history: SettlementRecord[];
+  payments: Payment[];
   settings: ConsortiumSettings;
   consortiumId: string;
   consortiumName: string;
@@ -59,7 +60,10 @@ const AccountingView: React.FC<AccountingViewProps> = (props) => {
 
       <div className="animate-fade-in">
           {activeTab === 'GASTOS' && <ExpensesView expenses={props.expenses} setExpenses={props.setExpenses} reserveBalance={props.settings.reserveFundBalance} consortiumId={props.consortiumId} units={props.units} />}
-          {activeTab === 'LIQUIDACION' && <SettlementView units={props.units} expenses={props.expenses} settings={props.settings} setExpenses={props.setExpenses} consortiumId={props.consortiumId} consortiumName={props.consortiumName} updateReserveBalance={props.updateReserveBalance} onUpdateBankSettings={props.onUpdateBankSettings} onCloseMonth={props.onCloseMonth} onChangeView={handleChangeView as any} />}
+          {activeTab === 'LIQUIDACION' && <SettlementView 
+                  units={props.units} expenses={props.expenses} setExpenses={props.setExpenses} 
+                  settings={props.settings} payments={props.payments} history={props.history}
+                  consortiumId={props.consortiumId} consortiumName={props.consortiumName} updateReserveBalance={props.updateReserveBalance} onUpdateBankSettings={props.onUpdateBankSettings} onCloseMonth={props.onCloseMonth} onChangeView={handleChangeView as any} />}
           {activeTab === 'HISTORIAL' && <HistoryView history={props.history} consortium={props.consortium} units={props.units} settings={props.settings} />}
           {activeTab === 'RESERVA' && <ReserveView transactions={props.reserveTransactions} consortium={props.consortium} onAddTransaction={props.onAddReserveTransaction} onDeleteTransaction={props.onDeleteReserveTransaction} settings={props.settings} />}
       </div>

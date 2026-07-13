@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useEffect } from 'react';
 import { Unit, SettlementRecord, Payment, Consortium, JoinRequest } from '../types';
 import CollectionsView from './CollectionsView';
@@ -117,7 +118,7 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
                                           </div>
                                       )}
                                       
-                                      <p className="text-xs text-slate-400 mt-4 font-medium">Solicitó unirse el {new Date(req.date).toLocaleDateString()}</p>
+                                      <p className="text-xs text-slate-400 mt-4 font-medium">Solicitó unirse el {formatLocalDate(req.date)}</p>
                                   </div>
                                   <div className="flex gap-2">
                                       <button onClick={() => setApprovingReq(req)} className="flex-1 flex items-center justify-center gap-1 px-4 py-2.5 bg-emerald-50 text-emerald-700 font-bold rounded-lg hover:bg-emerald-100 transition-colors border border-emerald-200">

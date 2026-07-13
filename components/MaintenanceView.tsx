@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useMemo } from 'react';
 import { MaintenanceRequest, Unit, UserRole } from '../types';
 import { Wrench, Plus, CheckCircle, Clock, AlertCircle, MessageSquare, ChevronRight, X } from 'lucide-react';
@@ -21,14 +22,14 @@ const MaintenanceView: React.FC<MaintenanceViewProps> = ({ requests, units, user
   // Filtrar reclamos: Admin ve todos, Usuario ve solo los suyos
   const filteredRequests = useMemo(() => {
       if (userRole === 'ADMIN' || userRole === 'DEV') return requests;
-      const myUnit = units.find(u => u.linkedEmail === userEmail);
+      const myUnit = units.find(u => u.authorizedEmails?.includes(userEmail || ''));
       if (!myUnit) return [];
       return requests.filter(r => r.unitId === myUnit.id);
   }, [requests, userRole, userEmail, units]);
 
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
-      const myUnit = units.find(u => u.linkedEmail === userEmail) || units[0]; // Fallback for admin testing
+      const myUnit = units.find(u => u.authorizedEmails?.includes(userEmail || ''));
       if (!myUnit) return alert("No tienes unidad asignada para crear reclamos.");
 
       await onAdd({
@@ -119,7 +120,7 @@ const MaintenanceView: React.FC<MaintenanceViewProps> = ({ requests, units, user
                               <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
                                       {getStatusBadge(req.status)}
-                                      <span className="text-xs text-slate-400">{new Date(req.date).toLocaleDateString()}</span>
+                                      <span className="text-xs text-slate-400">{formatLocalDate(req.date)}</span>
                                       {userRole === 'ADMIN' && (
                                           <span className="text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">
                                               UF {unit?.unitNumber}

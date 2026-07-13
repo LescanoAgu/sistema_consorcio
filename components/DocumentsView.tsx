@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState } from 'react';
 import { ConsortiumDocument, UserRole } from '../types';
 import { FileText, Download, Plus, Trash2, X, Upload, Loader2, FolderOpen } from 'lucide-react';
@@ -82,7 +83,7 @@ const DocumentsView: React.FC<DocumentsViewProps> = ({ documents, userRole, onAd
                           )}
                       </div>
                       <div className="flex justify-between items-end mt-2">
-                          <span className="text-xs text-slate-400">{new Date(doc.date).toLocaleDateString()}</span>
+                          <span className="text-xs text-slate-400">{formatLocalDate(doc.date)}</span>
                           <a 
                             href={doc.url} 
                             target="_blank" 

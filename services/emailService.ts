@@ -13,24 +13,29 @@ export const initEmailService = () => {
 
 // --- ENVIAR AVISO GENERAL ---
 export const sendAnnouncementEmail = async (units: Unit[], title: string, content: string) => {
-    // Filtramos unidades que tengan email configurado
-    const recipients = units.filter(u => u.linkedEmail && u.linkedEmail.includes('@'));
+    // Filtramos unidades que tengan emails configurados y aplanamos la lista de envíos
+    const emailPromises: Promise<any>[] = [];
     
-    console.log(`Enviando avisos a ${recipients.length} propietarios...`);
-
-    const promises = recipients.map(unit => {
-        const templateParams = {
-            to_email: unit.linkedEmail,
-            owner_name: unit.ownerName,
-            title: title,
-            content: content
-        };
-
-        return emailjs.send(SERVICE_ID, TEMPLATE_ID_ANNOUNCEMENT, templateParams);
+    units.forEach(unit => {
+        if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
+            unit.authorizedEmails.forEach(email => {
+                if (email && email.includes('@')) {
+                    const templateParams = {
+                        to_email: email,
+                        owner_name: unit.ownerName,
+                        title: title,
+                        content: content
+                    };
+                    emailPromises.push(emailjs.send(SERVICE_ID, TEMPLATE_ID_ANNOUNCEMENT, templateParams));
+                }
+            });
+        }
     });
 
+    console.log(`Enviando ${emailPromises.length} avisos...`);
+
     try {
-        await Promise.all(promises);
+        await Promise.all(emailPromises);
         console.log("Todos los avisos enviados.");
         return true;
     } catch (error) {
@@ -42,26 +47,31 @@ export const sendAnnouncementEmail = async (units: Unit[], title: string, conten
 // --- ENVIAR AVISO DE EXPENSAS (INDIVIDUALIZADO) ---
 export const sendSettlementEmail = async (units: Unit[], month: string, dueDate: string, unitDetails: {unitId: string, totalToPay: number}[]) => {
     
-    const promises = units
-        .filter(u => u.linkedEmail) // Solo los que tienen mail
-        .map(unit => {
+    const emailPromises: Promise<any>[] = [];
+    
+    units.forEach(unit => {
+        if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
             // Buscamos cuánto paga ESTA unidad específica
             const detail = unitDetails.find(d => d.unitId === unit.id);
             const amount = detail ? detail.totalToPay.toFixed(2) : '0.00';
 
-            const templateParams = {
-                to_email: unit.linkedEmail,
-                owner_name: unit.ownerName,
-                month: month,
-                amount: amount,
-                due_date: dueDate
-            };
-
-            return emailjs.send(SERVICE_ID, TEMPLATE_ID_SETTLEMENT, templateParams);
-        });
+            unit.authorizedEmails.forEach(email => {
+                if (email && email.includes('@')) {
+                    const templateParams = {
+                        to_email: email,
+                        owner_name: unit.ownerName,
+                        month: month,
+                        amount: amount,
+                        due_date: dueDate
+                    };
+                    emailPromises.push(emailjs.send(SERVICE_ID, TEMPLATE_ID_SETTLEMENT, templateParams));
+                }
+            });
+        }
+    });
 
     try {
-        await Promise.all(promises);
+        await Promise.all(emailPromises);
         return true;
     } catch (error) {
         console.error("Error enviando liquidaciones:", error);

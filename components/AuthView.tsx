@@ -42,6 +42,11 @@ const AuthView: React.FC<AuthViewProps> = ({
   const [joinModal, setJoinModal] = useState<{isOpen: boolean, consortiumId: string, consortiumName: string} | null>(null);
   const [joinForm, setJoinForm] = useState({ firstName: '', lastName: '', message: '' });
 
+  const closeJoinModal = () => {
+      setJoinModal(null);
+      setJoinForm({ firstName: '', lastName: '', message: '' });
+  };
+
   // Cargar lista global de consorcios y solicitudes del usuario cuando se autentica
   useEffect(() => {
     if (isAuthenticated && userEmail) {
@@ -117,7 +122,7 @@ const AuthView: React.FC<AuthViewProps> = ({
 
     if (joinRequests.some(r => r.consortiumId === joinModal.consortiumId && r.status === 'PENDING')) {
       alert("Ya posees una solicitud de acceso pendiente para este consorcio.");
-      setJoinModal(null);
+      closeJoinModal();
       return;
     }
 
@@ -373,7 +378,7 @@ const AuthView: React.FC<AuthViewProps> = ({
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden p-6 border border-slate-100">
             <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100">
               <h3 className="font-black text-slate-800 text-lg">Solicitar Acceso</h3>
-              <button onClick={() => setJoinModal(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors">
+              <button onClick={closeJoinModal} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -398,7 +403,7 @@ const AuthView: React.FC<AuthViewProps> = ({
               </div>
 
               <div className="flex gap-3 pt-4 mt-2 border-t border-slate-100">
-                <button type="button" onClick={() => setJoinModal(null)} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors" disabled={loading}>
+                <button type="button" onClick={closeJoinModal} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors" disabled={loading}>
                   Cancelar
                 </button>
                 <button type="submit" disabled={!joinForm.firstName.trim() || !joinForm.lastName.trim() || loading} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-colors flex items-center justify-center gap-2">

@@ -15,6 +15,7 @@ import MaintenanceView from './components/MaintenanceView';
 import AmenitiesView from './components/AmenitiesView'; 
 import ProfileView from './components/ProfileView';
 import DocumentsView from './components/DocumentsView'; 
+import CollectionsView from './components/CollectionsView';
 import { Unit, Expense, Payment, ViewState, UserRole, Consortium, SettlementRecord, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ReserveTransaction } from './types';
 import { auth } from './src/config/firebase'; 
 import { 
@@ -159,7 +160,7 @@ function App() {
   const handleCloseMonth = async (record: SettlementRecord) => {
     if (!consortium) return;
     try {
-        await saveSettlement(consortium.id, record, expenses.map(e => e.id));
+        await saveSettlement(consortium.id, record, expenses.map(e => e.id), units);
         const newHistory = await getHistory(consortium.id);
         
         // AHORA EL FONDO DE RESERVA TRABAJA POR FLUJO DE CAJA (PAGOS REALES)
@@ -244,6 +245,7 @@ function App() {
       setPayments(payments.filter(p => p.id !== id));
 
       if (paymentToDelete && paymentToDelete.status === 'APPROVED') {
+          // Revertir fondo de reserva
           const reserveAmount = paymentToDelete.amount * (settings.monthlyReserveContributionPercentage / 100);
           if (reserveAmount > 0) {
               const newTx = await addReserveTransaction(consortium.id, {
@@ -255,6 +257,37 @@ function App() {
               setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
               const newBalance = settings.reserveFundBalance - reserveAmount;
               await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
+          }
+
+          // Revertir deudas de la unidad
+          if (paymentToDelete.allocations && paymentToDelete.allocations.length > 0) {
+              const unit = units.find(u => u.id === paymentToDelete.unitId);
+              if (unit) {
+                  let updatedDebts = [...(unit.debts || [])];
+                  let initialBalance = unit.initialBalance || 0;
+
+                  paymentToDelete.allocations.forEach(alloc => {
+                      if (alloc.period === 'initial-balance') {
+                          initialBalance += alloc.amount;
+                      } else {
+                          const existingDebt = updatedDebts.find(d => d.period === alloc.period);
+                          if (existingDebt) {
+                              existingDebt.total += alloc.amount;
+                          } else {
+                              // Recrear la deuda si fue saldada por completo
+                              updatedDebts.push({
+                                  id: `debt_${alloc.period}_${Date.now()}_rev`,
+                                  period: alloc.period,
+                                  baseAmount: alloc.amount,
+                                  interestRate: 0,
+                                  interestAmount: 0,
+                                  total: alloc.amount
+                              });
+                          }
+                      }
+                  });
+                  await handleUpdateUnit(unit.id, { debts: updatedDebts, initialBalance });
+              }
           }
       }
   };
@@ -402,7 +435,7 @@ function App() {
           {!loading && view === 'accounting' && user.role === 'ADMIN' && (
             <AccountingView 
                 units={units} expenses={expenses} setExpenses={setExpenses} 
-                history={history} settings={settings} 
+                history={history} settings={settings} payments={payments} 
                 consortiumId={consortium.id} consortiumName={consortium.name} 
                 consortium={consortium}
                 reserveTransactions={reserveTransactions}

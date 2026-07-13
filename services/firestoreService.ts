@@ -8,9 +8,14 @@ import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSetting
 export const clearCollection = async (consortiumId: string, collectionName: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/${collectionName}`));
     const snapshot = await getDocs(q);
-    const batch = writeBatch(db);
-    snapshot.docs.forEach((doc) => { batch.delete(doc.ref); });
-    await batch.commit();
+    
+    // Chunk deletions into groups of 400 to avoid Firestore limits
+    for (let i = 0; i < snapshot.docs.length; i += 400) {
+        const chunk = snapshot.docs.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach((doc) => { batch.delete(doc.ref); });
+        await batch.commit();
+    }
 };
 
 export const createConsortium = async (data: Omit<Consortium, 'id'>, userId: string) => {
@@ -208,7 +213,7 @@ export const deleteBooking = async (consortiumId: string, id: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/bookings`, id));
 };
 
-export const saveSettlement = async (consortiumId: string, record: SettlementRecord, expenseIdsToRemove: string[]) => {
+export const saveSettlement = async (consortiumId: string, record: SettlementRecord, expenseIdsToRemove: string[], units: Unit[]) => {
     const historyRef = collection(db, `consortiums/${consortiumId}/history`);
     const q = query(historyRef, where('month', '==', record.month), limit(1));
     const snapshot = await getDocs(q);
@@ -226,6 +231,27 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
     
     const settingsRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
     mainBatch.set(settingsRef, { reserveFundBalance: record.reserveBalanceAtClose }, { merge: true });
+
+    // Actualizar deudas de las unidades
+    if (record.unitDetails && units.length > 0) {
+        record.unitDetails.forEach(detail => {
+            if (detail.totalToPay > 0) {
+                const unit = units.find(u => u.id === detail.unitId);
+                if (unit) {
+                    const newDebtItem = {
+                        id: `debt_${record.month}_${Date.now()}`,
+                        period: record.month,
+                        baseAmount: detail.totalToPay,
+                        interestRate: 0,
+                        interestAmount: 0,
+                        total: detail.totalToPay
+                    };
+                    const updatedDebts = [...(unit.debts || []), newDebtItem];
+                    mainBatch.update(doc(db, `consortiums/${consortiumId}/units`, unit.id), { debts: updatedDebts });
+                }
+            }
+        });
+    }
 
     await mainBatch.commit();
 

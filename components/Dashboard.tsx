@@ -30,6 +30,11 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
   const [deleteOptions, setDeleteOptions] = useState({ expenses: false, payments: false, history: false });
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const closeDeleteModal = () => {
+      setShowDeleteModal(false);
+      setDeleteOptions({ expenses: false, payments: false, history: false });
+  };
+
   // --- CÁLCULOS GENERALES ---
   const totalExpenses = expenses.reduce((acc, curr) => 
     curr.distributionType !== ExpenseDistributionType.FROM_RESERVE ? acc + curr.amount : acc
@@ -57,31 +62,20 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
       let pending = 0;
 
       const lastSettlement = history && history.length > 0 ? history[0] : null;
-      const settlementDate = lastSettlement ? new Date(lastSettlement.dateClosed).getTime() : 0;
 
       units.forEach(u => {
           hist += (u.initialBalance || 0);
-          hist += (u.debts || []).reduce((acc, d) => acc + d.total, 0);
-
-          if (lastSettlement && lastSettlement.unitDetails) {
-              const detail = lastSettlement.unitDetails.find(d => d.unitId === u.id);
-              if (detail) {
-                  const isAlreadyInDebts = (u.debts || []).some(d => d.period === lastSettlement.month);
-                  if (!isAlreadyInDebts) {
-                      const paidSince = payments
-                          .filter(p => p.unitId === u.id && p.status === 'APPROVED' && new Date(p.date).getTime() >= settlementDate)
-                          .reduce((sum, p) => sum + p.amount, 0);
-                      const owed = detail.totalToPay - paidSince;
-                      if (owed > 1) {
-                          pending += owed;
-                      }
-                  }
+          (u.debts || []).forEach(d => {
+              if (lastSettlement && d.period === lastSettlement.month) {
+                  pending += d.total;
+              } else {
+                  hist += d.total;
               }
-          }
+          });
       });
 
       return { totalHistoricalDebt: hist, totalPendingMonth: pending };
-  }, [units, history, payments]);
+  }, [units, history]);
 
   const collectionData = [
       { name: 'Recaudado', Valor: totalCollected },
@@ -137,7 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
           if (deleteOptions.history) await clearCollection(consortiumId, 'history');
           
           alert("Datos eliminados correctamente.");
-          setShowDeleteModal(false);
+          closeDeleteModal();
           onDataReset();
       } catch (error) {
           alert("Error al eliminar datos.");
@@ -241,7 +235,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
                           <CartesianGrid strokeDasharray="3 3" vertical={false} />
                           <XAxis dataKey="name" />
                           <YAxis />
-                          <Tooltip formatter={(value: number) => formatCurrency(value)} cursor={{fill: 'transparent'}} />
+                          <Tooltip formatter={(value: any) => formatCurrency(value)} cursor={{fill: 'transparent'}} />
                           <Bar dataKey="Valor" radius={[4, 4, 0, 0]} barSize={60}>
                               {collectionData.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={index === 0 ? '#10b981' : index === 1 ? '#f59e0b' : '#ef4444'} />
@@ -261,7 +255,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
                               <Pie data={expensesByCategory} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
                                   {expensesByCategory.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}
                               </Pie>
-                              <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                              <Tooltip formatter={(value: any) => formatCurrency(value)} />
                           </PieChart>
                       </ResponsiveContainer>
                   </div>
@@ -277,7 +271,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
               <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">
                   <div className="bg-red-600 p-4 flex justify-between items-center text-white">
                       <h3 className="font-bold flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> ZONA DE PELIGRO</h3>
-                      <button onClick={() => setShowDeleteModal(false)}><X className="w-5 h-5 hover:opacity-80"/></button>
+                      <button onClick={closeDeleteModal}><X className="w-5 h-5 hover:opacity-80"/></button>
                   </div>
                   <div className="p-6">
                       <p className="text-slate-600 mb-4 text-sm">Selecciona qué datos deseas eliminar permanentemente.</p>
@@ -296,7 +290,7 @@ const Dashboard: React.FC<DashboardProps> = ({ units, expenses, payments, histor
                           </div>
                       </div>
                       <div className="flex gap-3">
-                          <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-lg">Cancelar</button>
+                          <button onClick={closeDeleteModal} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-lg">Cancelar</button>
                           <button onClick={handleDelete} disabled={isDeleting} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 shadow disabled:opacity-50">{isDeleting ? 'Borrando...' : 'ELIMINAR'}</button>
                       </div>
                   </div>

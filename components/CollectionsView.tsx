@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState } from 'react';
 import { Payment, Unit, SettlementRecord } from '../types';
 import { Search, CheckCircle, Square, DollarSign, X, Calendar } from 'lucide-react';
@@ -22,32 +23,14 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
   const [showPayModal, setShowPayModal] = useState<Unit | null>(null);
   
   const [payAmount, setPayAmount] = useState(0);
-  const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
+  const [payDate, setPayDate] = useState(getLocalIsoDate());
   const [payMethod, setPayMethod] = useState<'Transferencia' | 'Efectivo' | 'Cheque'>('Transferencia');
   const [payNotes, setPayNotes] = useState('');
   const [selectedDebtIds, setSelectedDebtIds] = useState<string[]>([]);
 
   const getUnitDebtInfo = (unit: Unit) => {
-      const historical = (unit.debts || []).reduce((acc, d) => acc + d.total, 0) + (unit.initialBalance || 0);
-      let current = 0;
-      let pendingPeriod = '';
-      
-      if (history.length > 0) {
-          const lastSettlement = history[0]; 
-          const unitDetail = lastSettlement.unitDetails?.find(d => d.unitId === unit.id);
-          if (unitDetail) {
-              const isAlreadyInDebts = (unit.debts || []).some(d => d.period === lastSettlement.month);
-              if (!isAlreadyInDebts) {
-                  const settlementDate = new Date(lastSettlement.dateClosed).getTime();
-                  const paidSinceThen = payments
-                      .filter(p => p.unitId === unit.id && p.status === 'APPROVED' && new Date(p.date).getTime() >= settlementDate)
-                      .reduce((sum, p) => sum + p.amount, 0);
-                  const owed = unitDetail.totalToPay - paidSinceThen;
-                  if (owed > 1) { current = owed; pendingPeriod = lastSettlement.month; }
-              }
-          }
-      }
-      return { historical, current, total: historical + current, pendingPeriod };
+      const total = (unit.debts || []).reduce((acc, d) => acc + d.total, 0) + (unit.initialBalance || 0);
+      return { historical: total, current: 0, total, pendingPeriod: '' };
   };
 
   const filteredUnits = units.filter(u => 
@@ -76,24 +59,59 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
       if (!showPayModal || payAmount <= 0) return;
 
       try {
+          // Calcular cómo se distribuye el pago
+          let remainingToAllocate = payAmount;
+          let updatedDebts = JSON.parse(JSON.stringify(showPayModal.debts || []));
+          let allocations: { period: string; amount: number }[] = [];
+          let updatedInitialBalance = showPayModal.initialBalance || 0;
+
+          // Ordenar deudas: más antiguas primero (asumiendo que period es "YYYY-MM")
+          let debtsToProcess = updatedDebts.sort((a: any, b: any) => a.period.localeCompare(b.period));
+
+          // Si el usuario seleccionó deudas específicas, solo afectamos a esas
+          if (selectedDebtIds.length > 0) {
+              debtsToProcess = debtsToProcess.filter((d: any) => selectedDebtIds.includes(d.id || d.period));
+          }
+
+          // Distribuir el pago a initialBalance si fue seleccionado o si es distribución automática
+          if (updatedInitialBalance > 0 && (selectedDebtIds.length === 0 || selectedDebtIds.includes('initial-balance'))) {
+              const applyToInitial = Math.min(updatedInitialBalance, remainingToAllocate);
+              if (applyToInitial > 0) {
+                  allocations.push({ period: 'initial-balance', amount: applyToInitial });
+                  updatedInitialBalance -= applyToInitial;
+                  remainingToAllocate -= applyToInitial;
+              }
+          }
+
+          // Distribuir a las deudas
+          for (const debt of debtsToProcess) {
+              if (remainingToAllocate <= 0) break;
+              const amountToApply = Math.min(debt.total, remainingToAllocate);
+              if (amountToApply > 0) {
+                  allocations.push({ period: debt.period, amount: amountToApply });
+                  debt.total -= amountToApply;
+                  remainingToAllocate -= amountToApply;
+              }
+          }
+
+          // Filtrar deudas que ya fueron pagadas completamente
+          updatedDebts = updatedDebts.filter((d: any) => d.total > 0.01);
+
           await onAddPayment({
               unitId: showPayModal.id,
               amount: payAmount,
               date: payDate,
               method: payMethod,
               notes: payNotes + (selectedDebtIds.length > 0 ? ` (Cubre períodos seleccionados)` : ''),
-              status: 'APPROVED' 
+              status: 'APPROVED',
+              allocations
           });
 
-          if (selectedDebtIds.length > 0 && onUpdateUnit) {
-              const remainingDebts = (showPayModal.debts || []).filter(d => !selectedDebtIds.includes(d.id || d.period));
-              let updates: Partial<Unit> = { debts: remainingDebts };
-              
-              if (selectedDebtIds.includes('initial-balance')) {
-                  updates.initialBalance = 0;
-              }
-
-              await onUpdateUnit(showPayModal.id, updates);
+          if (onUpdateUnit) {
+              await onUpdateUnit(showPayModal.id, { 
+                  debts: updatedDebts,
+                  initialBalance: updatedInitialBalance
+              });
           }
 
           alert("Pago registrado y saldos actualizados.");
@@ -103,7 +121,6 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
       }
   };
 
-  return (
   return (
     <div className="space-y-6 animate-fade-in">
 
@@ -197,7 +214,7 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
                         const unit = units.find(u => u.id === p.unitId);
                         return (
                             <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="p-4 text-sm font-medium text-slate-700">{new Date(p.date).toLocaleDateString('es-AR')}</td>
+                                <td className="p-4 text-sm font-medium text-slate-700">{formatLocalDate(p.date)}</td>
                                 <td className="p-4">
                                     <p className="font-bold text-slate-800">{unit?.unitNumber}</p>
                                     <p className="text-xs text-slate-500">{unit?.ownerName}</p>
@@ -283,23 +300,7 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
                                   </div>
                               )})}
 
-                              {getUnitDebtInfo(showPayModal).current > 0 && (
-                                  <div 
-                                    onClick={() => toggleDebtSelection('current-month', getUnitDebtInfo(showPayModal).current)}
-                                    className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex justify-between items-center ${selectedDebtIds.includes('current-month') ? 'border-amber-500 bg-amber-50' : 'border-slate-100 bg-slate-50 hover:border-slate-200'}`}
-                                  >
-                                      <div className="flex items-center gap-3">
-                                          {selectedDebtIds.includes('current-month') ? <CheckCircle className="text-amber-600 w-5 h-5"/> : <Square className="text-slate-300 w-5 h-5"/>}
-                                          <div>
-                                              <p className="text-xs font-bold text-slate-800">{getUnitDebtInfo(showPayModal).pendingPeriod}</p>
-                                              <p className="text-[10px] text-slate-500">Mes en curso</p>
-                                          </div>
-                                      </div>
-                                      <span className="font-bold text-sm">{formatCurrency(getUnitDebtInfo(showPayModal).current)}</span>
-                                  </div>
-                              )}
-
-                              {selectedDebtIds.length === 0 && (showPayModal.initialBalance === 0 && (showPayModal.debts?.length || 0) === 0 && getUnitDebtInfo(showPayModal).current === 0) && (
+                              {selectedDebtIds.length === 0 && (showPayModal.initialBalance === 0 && (showPayModal.debts?.length || 0) === 0) && (
                                   <p className="text-center py-10 text-slate-400 text-sm italic">No registra deudas pendientes.</p>
                               )}
                           </div>

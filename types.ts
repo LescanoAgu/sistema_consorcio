@@ -76,6 +76,7 @@ export interface Payment {
   notes?: string;
   attachmentUrl?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  allocations?: { period: string; amount: number }[];
 }
 
 export interface Announcement {
@@ -125,6 +126,7 @@ export interface SettlementRecord {
   firstExpirationDate?: string;
   secondExpirationDate?: string;
   snapshotExpenses: Expense[];
+  snapshotPayments?: Payment[];
   couponMessage?: string;
   unitDetails: { unitId: string; totalToPay: number }[]; 
 }

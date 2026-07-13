@@ -1,3 +1,4 @@
+import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState } from 'react';
 import { Announcement, Unit } from '../types';
 import { Bell, Plus, Trash2, Megaphone, AlertTriangle, Calendar, Mail } from 'lucide-react';
@@ -112,7 +113,7 @@ const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({ announcements, un
                           <div className="flex justify-between items-start">
                               <div className="flex items-center gap-3 mb-2">
                                   {ann.priority === 'HIGH' && <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> URGENTE</span>}
-                                  <span className="text-xs text-slate-400 flex items-center gap-1"><Calendar className="w-3 h-3"/> {new Date(ann.date).toLocaleDateString()}</span>
+                                  <span className="text-xs text-slate-400 flex items-center gap-1"><Calendar className="w-3 h-3"/> {formatLocalDate(ann.date)}</span>
                               </div>
                               <button onClick={() => onDelete(ann.id)} className="text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4"/></button>
                           </div>
