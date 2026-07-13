@@ -167,7 +167,6 @@ function App() {
         // Ya no insertamos ingresos o egresos "teóricos" al cerrar la liquidación.
 
         setHistory(newHistory); setExpenses([]); 
-        setSettings({...settings, reserveFundBalance: record.reserveBalanceAtClose});
         
         if (view !== 'accounting') {
             setView('history');
@@ -207,8 +206,6 @@ function App() {
                   type: 'SYSTEM'
               });
               setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
-              const newBalance = settings.reserveFundBalance + reserveAmount;
-              await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
           }
       }
   };
@@ -230,8 +227,6 @@ function App() {
                       type: 'SYSTEM'
                   });
                   setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
-                  const newBalance = settings.reserveFundBalance + reserveAmount;
-                  await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
               }
           }
       }
@@ -255,8 +250,6 @@ function App() {
                   type: 'SYSTEM'
               });
               setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
-              const newBalance = settings.reserveFundBalance - reserveAmount;
-              await handleUpdateSettings({ ...settings, reserveFundBalance: newBalance });
           }
 
           // Revertir deudas de la unidad
@@ -400,6 +393,9 @@ function App() {
        );
   }
 
+  const computedReserveBalance = reserveTransactions.reduce((acc, t) => acc + t.amount, 0);
+  const effectiveSettings = { ...settings, reserveFundBalance: computedReserveBalance };
+
   return (
     <div className="flex h-screen bg-slate-100 flex-col md:flex-row">
       <div className="md:hidden bg-slate-900 text-white p-4 flex items-center justify-between shadow-md z-20">
@@ -417,32 +413,31 @@ function App() {
         <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {loading && <div className="text-center p-4">Cargando datos...</div>}
 
-          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={settings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}} />}
+          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={effectiveSettings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}} />}
           
           {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
           {!loading && view === 'documents' && <DocumentsView documents={documents} userRole={user.role} onAdd={handleAddDocument} onDelete={handleDeleteDocument} />}
           {!loading && view === 'maintenance' && <MaintenanceView requests={maintenanceRequests} units={units} userRole={user.role} userEmail={user.email} onAdd={handleAddMaintenance} onUpdate={handleUpdateMaintenance} onDelete={handleDeleteMaintenance} />}
           {!loading && view === 'amenities' && <AmenitiesView amenities={amenities} bookings={bookings} units={units} userRole={user.role} userEmail={user.email} onAddAmenity={handleAddAmenity} onDeleteAmenity={handleDeleteAmenity} onAddBooking={handleAddBooking} onDeleteBooking={handleDeleteBooking} />}
           
-          {!loading && view === 'expenses' && user.role === 'ADMIN' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={settings.reserveFundBalance} consortiumId={consortium.id} units={units} />}
+          {!loading && view === 'expenses' && user.role === 'ADMIN' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={effectiveSettings.reserveFundBalance} consortiumId={consortium.id} units={units} />}
           
-          {!loading && view === 'history' && <HistoryView history={history} consortium={consortium} units={units} settings={settings} />}
+          {!loading && view === 'history' && <HistoryView history={history} consortium={consortium} units={units} settings={effectiveSettings} />}
           
           {!loading && view === 'user_portal' && (
-            <UserPortal userEmail={user.email} consortium={consortium} units={units} expenses={expenses} history={history} payments={payments} settings={settings} announcements={announcements} myBookings={bookings} myTickets={maintenanceRequests} documents={documents} onReportPayment={handleReportPayment} />
+            <UserPortal userEmail={user.email} consortium={consortium} units={units} expenses={expenses} history={history} payments={payments} settings={effectiveSettings} announcements={announcements} myBookings={bookings} myTickets={maintenanceRequests} documents={documents} onReportPayment={handleReportPayment} />
           )}
           
           {!loading && view === 'accounting' && user.role === 'ADMIN' && (
             <AccountingView 
                 units={units} expenses={expenses} setExpenses={setExpenses} 
-                history={history} settings={settings} payments={payments} 
+                history={history} settings={effectiveSettings} payments={payments} 
                 consortiumId={consortium.id} consortiumName={consortium.name} 
                 consortium={consortium}
                 reserveTransactions={reserveTransactions}
                 onAddReserveTransaction={handleAddReserveTransaction}
                 onDeleteReserveTransaction={handleDeleteReserveTransaction}
-                updateReserveBalance={(val) => handleUpdateSettings({...settings, reserveFundBalance: val})} 
-                onUpdateBankSettings={(newBankData) => handleUpdateSettings({...settings, ...newBankData})} 
+                onUpdateBankSettings={(newBankData) => handleUpdateSettings({...effectiveSettings, ...newBankData})} 
                 onCloseMonth={handleCloseMonth} 
             />
           )}
@@ -464,7 +459,7 @@ function App() {
             />
           )}
           
-          {!loading && view === 'settings' && user.role === 'ADMIN' && <SettingsView currentSettings={settings} onSave={handleUpdateSettings} />}
+          {!loading && view === 'settings' && user.role === 'ADMIN' && <SettingsView currentSettings={effectiveSettings} onSave={handleUpdateSettings} />}
           {!loading && view === 'profile' && <ProfileView userEmail={user.email} userRole={user.role} onLogout={handleLogout} />}
         </div>
       </main>

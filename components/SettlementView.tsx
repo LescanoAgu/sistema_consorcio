@@ -34,7 +34,6 @@ interface SettlementViewProps {
   consortiumName: string;
   payments: Payment[];
   history: SettlementRecord[];
-  updateReserveBalance: (newBalance: number) => void;
   onUpdateBankSettings: (settings: Partial<ConsortiumSettings>) => void;
   onCloseMonth: (record: SettlementRecord) => Promise<void>;
   onChangeView: (view: ViewState) => void;
@@ -42,7 +41,7 @@ interface SettlementViewProps {
 
 const SettlementView: React.FC<SettlementViewProps> = ({ 
   units, expenses, settings, setExpenses, consortiumId, consortiumName, 
-  payments, history, updateReserveBalance, onUpdateBankSettings, onCloseMonth, onChangeView 
+  payments, history, onUpdateBankSettings, onCloseMonth, onChangeView 
 }) => {
   const [couponMessage, setCouponMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -55,7 +54,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
   const [secondDate, setSecondDate] = useState(nextMonthEnd.toISOString().split('T')[0]);
 
   // CÁLCULO INTELIGENTE UNIDAD POR UNIDAD
-  const { totalOrdinary, totalExtraordinary, totalReserveSpent, reserveContribution, newReserveBalance, unitDebts } = useMemo(() => {
+  const { totalOrdinary, totalExtraordinary, totalReserveSpent, reserveContribution, reserveBalanceStart, newReserveBalance, unitDebts } = useMemo(() => {
       let tOrd = 0;
       let tExt = 0;
       let tRes = 0;
@@ -111,7 +110,12 @@ const SettlementView: React.FC<SettlementViewProps> = ({
            debtsMap.set(u.id, debtsMap.get(u.id)! + reserveShare);
       });
 
-      const resBalance = settings.reserveFundBalance - tRes + resContribution;
+      // settings.reserveFundBalance is the true ledger balance (computed in App.tsx) 
+      // which ALREADY has tRes deducted from it. 
+      // So the balance BEFORE tRes was deducted is:
+      const resBalanceStart = settings.reserveFundBalance + tRes;
+      // The final estimated balance adds the contribution to the current ledger balance
+      const resBalanceAtClose = settings.reserveFundBalance + resContribution;
 
       // Armamos el Array final
       const finalUnitDebts = uniqueUnits.map(u => ({
@@ -123,7 +127,8 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           totalExtraordinary: tExt,
           totalReserveSpent: tRes,
           reserveContribution: resContribution,
-          newReserveBalance: resBalance,
+          reserveBalanceStart: resBalanceStart,
+          newReserveBalance: resBalanceAtClose,
           unitDebts: finalUnitDebts
       };
   }, [units, expenses, settings]);
@@ -144,7 +149,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
 
       const dummyRecord: SettlementRecord = {
           id: 'preview', month: 'BORRADOR / VISTA PREVIA', dateClosed: new Date().toISOString(),
-          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: settings.reserveFundBalance,
+          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: reserveBalanceStart,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
           firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
           unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
@@ -197,7 +202,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
 
       const record: SettlementRecord = {
           id: '', month: new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' }), dateClosed: new Date().toISOString(),
-          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: settings.reserveFundBalance,
+          totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: reserveBalanceStart,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
           firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
           unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))

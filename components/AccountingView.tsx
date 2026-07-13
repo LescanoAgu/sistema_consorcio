@@ -19,7 +19,6 @@ interface AccountingViewProps {
   reserveTransactions: ReserveTransaction[]; 
   onAddReserveTransaction: (t: Omit<ReserveTransaction, 'id'>) => Promise<void>; 
   onDeleteReserveTransaction: (id: string) => Promise<void>; 
-  updateReserveBalance: (val: number) => void;
   onUpdateBankSettings: (newBankData: any) => void;
   onCloseMonth: (record: SettlementRecord) => Promise<void>;
 }
@@ -63,7 +62,7 @@ const AccountingView: React.FC<AccountingViewProps> = (props) => {
           {activeTab === 'LIQUIDACION' && <SettlementView 
                   units={props.units} expenses={props.expenses} setExpenses={props.setExpenses} 
                   settings={props.settings} payments={props.payments} history={props.history}
-                  consortiumId={props.consortiumId} consortiumName={props.consortiumName} updateReserveBalance={props.updateReserveBalance} onUpdateBankSettings={props.onUpdateBankSettings} onCloseMonth={props.onCloseMonth} onChangeView={handleChangeView as any} />}
+                  consortiumId={props.consortiumId} consortiumName={props.consortiumName} onUpdateBankSettings={props.onUpdateBankSettings} onCloseMonth={props.onCloseMonth} onChangeView={handleChangeView as any} />}
           {activeTab === 'HISTORIAL' && <HistoryView history={props.history} consortium={props.consortium} units={props.units} settings={props.settings} />}
           {activeTab === 'RESERVA' && <ReserveView transactions={props.reserveTransactions} consortium={props.consortium} onAddTransaction={props.onAddReserveTransaction} onDeleteTransaction={props.onDeleteReserveTransaction} settings={props.settings} />}
       </div>
