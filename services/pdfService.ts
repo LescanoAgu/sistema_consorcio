@@ -352,7 +352,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     doc.setFont("helvetica", "normal"); 
     doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
     
-    const bankInfo = consortium as any;
+    const bankInfo = settings;
     doc.text(`Banco: ${bankInfo.bankName || 'A definir'}`, 20, finalY + 15);
     if(bankInfo.bankHolder) doc.text(`Titular: ${bankInfo.bankHolder}`, 100, finalY + 15); 
     doc.setFont("helvetica", "bold"); 
