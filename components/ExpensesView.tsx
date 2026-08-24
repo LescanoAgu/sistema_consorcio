@@ -113,6 +113,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                 if (expenseData.amount !== originalExpense.amount || expenseData.distributionType !== originalExpense.distributionType) {
                     return alert("No puedes modificar el monto o tipo de un gasto descontado de la reserva porque afectaría el balance histórico. Por favor, elimina el gasto y vuelve a crearlo.");
                 }
+            } else if (expenseData.distributionType === ExpenseDistributionType.FROM_RESERVE) {
+                return alert("No puedes cambiar un gasto ordinario a un gasto de reserva editándolo. Por favor, elimina este gasto y crea uno nuevo marcando la opción de reserva.");
             }
             await updateExpense(consortiumId, editingId, expenseData);
             setExpenses(prev => prev.map(e => e.id === editingId ? { ...expenseData, id: editingId } : e));
