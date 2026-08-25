@@ -406,7 +406,7 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                                     </td>
                                     <td className="px-6 py-4 text-right font-black text-slate-700">{formatCurrency(e.amount)}</td>
                                     <td className="px-6 py-4 text-right w-24">
-                                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex justify-end gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button onClick={() => handleOpenEdit(e)} className="p-1.5 hover:bg-indigo-100 text-indigo-600 rounded transition-colors"><Edit2 className="w-4 h-4"/></button>
                                             <button onClick={() => handleDelete(e.id)} className="p-1.5 hover:bg-red-100 text-red-600 rounded transition-colors"><Trash2 className="w-4 h-4"/></button>
                                         </div>

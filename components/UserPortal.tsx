@@ -213,7 +213,7 @@ const UserPortal: React.FC<UserPortalProps> = ({
                                       </div>
                                   </div>
                                   
-                                  <div className="flex items-center gap-4 justify-end">
+                                  <div className="flex flex-wrap items-center gap-2 sm:gap-4 justify-end w-full sm:w-auto mt-4 sm:mt-0">
                                       <div className="text-right mr-2 hidden sm:block">
                                           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Tu total liquidado</span>
                                           <span className="font-black text-slate-700 text-base">{formatCurrency(detail.totalToPay)}</span>

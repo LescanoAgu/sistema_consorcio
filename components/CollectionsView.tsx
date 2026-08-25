@@ -197,7 +197,7 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
       )}
 
       {activeTab === 'historial' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
             <table className="w-full text-left border-collapse">
                 <thead>
                     <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
