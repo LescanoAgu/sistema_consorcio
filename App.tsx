@@ -30,7 +30,7 @@ import {
 } from './services/firestoreService';
 
 function App() {
-  const [user, setUser] = useState<{email: string, role: UserRole, uid: string} | null>(null);
+  const [user, setUser] = useState<{email: string, uid: string} | null>(null);
   const [consortium, setConsortium] = useState<Consortium | null>(null);
   const [consortiumList, setConsortiumList] = useState<Consortium[]>([]);
   
@@ -58,7 +58,7 @@ function App() {
   useEffect(() => {
       const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
           if (firebaseUser && firebaseUser.email) {
-              setUser({ email: firebaseUser.email, role: 'ADMIN', uid: firebaseUser.uid });
+              setUser({ email: firebaseUser.email, uid: firebaseUser.uid });
               const adminList = await getAdminConsortiums(firebaseUser.uid);
               const userList = await getUserConsortiums(firebaseUser.email);
               const combinedMap = new Map();
@@ -81,6 +81,7 @@ function App() {
   }, [consortiumList]);
 
   const isConsortiumAdmin = useMemo(() => consortium && user ? (consortium.adminIds || []).includes(user.uid) : false, [consortium, user]);
+  const userRole: UserRole = isConsortiumAdmin ? 'ADMIN' : 'USER';
 
   const { data: fetchedUnits } = useQuery({
       queryKey: ['units', consortium?.id, user?.email],
@@ -128,20 +129,11 @@ function App() {
       if(consortium && user) setLoading(true);
   }, [consortium, user]);
 
-  // Middleware de Seguridad reactivo en el Cliente para prevenir suplantación de vistas
-  useEffect(() => {
-      if (user && consortium) {
-          const isConsortiumAdmin = (consortium.adminIds || []).includes(user.uid);
-          if (!isConsortiumAdmin && user.role !== 'USER') {
-              setUser(prev => prev ? ({ ...prev, role: 'USER' }) : null);
-              setView('user_portal');
-          }
-      }
-  }, [consortium, user?.uid]);
+  // (Removed faulty reactive role middleware)
 
   // Interceptor de navegación segura para prevenir que un USER acceda a paneles ADMIN tecleando o forzando el estado
   const handleSetViewSafe = (requestedView: ViewState) => {
-      if (user?.role === 'USER' && ['accounting', 'management', 'settings', 'expenses'].includes(requestedView)) {
+      if (userRole === 'USER' && ['accounting', 'management', 'settings', 'expenses', 'collections'].includes(requestedView)) {
           setView('user_portal');
       } else {
           setView(requestedView);
@@ -361,7 +353,7 @@ function App() {
 
   const menuBadges = useMemo(() => {
       const badges: { [key: string]: number } = {};
-      if (user?.role === 'ADMIN') {
+      if (userRole === 'ADMIN') {
           const pendingCount = payments.filter(p => p.status === 'PENDING').length;
           if (pendingCount > 0) badges['management'] = pendingCount;
           const pendingMaintenance = maintenanceRequests.filter(m => m.status === 'PENDING').length;
@@ -372,13 +364,13 @@ function App() {
       return badges;
   }, [payments, announcements, maintenanceRequests, user]);
 
-  if (!user || (!consortium && user.role !== 'ADMIN')) {
+  if (!user || (!consortium && userRole !== 'ADMIN')) {
     return (
       <AuthView 
         isAuthenticated={!!user} onLoginSuccess={handleLoginSuccess}
         onSelectConsortium={handleSelectConsortium} consortiums={consortiumList}
         onCreateConsortium={handleCreateConsortium} onLogout={handleLogout}
-        userRole={user?.role || 'ADMIN'} userEmail={user?.email || ''}
+        userRole={userRole} userEmail={user?.email || ''}
       />
     );
   }
@@ -388,7 +380,7 @@ function App() {
             isAuthenticated={!!user} onLoginSuccess={handleLoginSuccess}
             onSelectConsortium={handleSelectConsortium} consortiums={consortiumList}
             onCreateConsortium={handleCreateConsortium} onLogout={handleLogout}
-            userRole={user?.role || 'ADMIN'} userEmail={user?.email || ''}
+            userRole={userRole} userEmail={user?.email || ''}
         />
        );
   }
@@ -406,21 +398,21 @@ function App() {
       <Sidebar 
         currentView={view} onChangeView={handleSetViewSafe} consortiumName={consortium.name} 
         onSwitchConsortium={handleSwitchConsortium} onLogout={handleLogout} 
-        userRole={user.role} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} badges={menuBadges}
+        userRole={userRole} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} badges={menuBadges}
       />
       
       <main className="flex-1 overflow-y-auto p-4 md:p-8 md:ml-64 h-[calc(100vh-64px)] md:h-screen">
         <div className="max-w-7xl mx-auto pb-20 md:pb-0">
           {loading && <div className="text-center p-4">Cargando datos...</div>}
 
-          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={effectiveSettings} reserveHistory={[]} userRole={user.role} consortiumId={consortium.id} onDataReset={() => {}} />}
+          {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={effectiveSettings} reserveHistory={[]} userRole={userRole} consortiumId={consortium.id} onDataReset={() => {}} />}
           
           {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
-          {!loading && view === 'documents' && <DocumentsView documents={documents} userRole={user.role} onAdd={handleAddDocument} onDelete={handleDeleteDocument} />}
-          {!loading && view === 'maintenance' && <MaintenanceView requests={maintenanceRequests} units={units} userRole={user.role} userEmail={user.email} onAdd={handleAddMaintenance} onUpdate={handleUpdateMaintenance} onDelete={handleDeleteMaintenance} />}
-          {!loading && view === 'amenities' && <AmenitiesView amenities={amenities} bookings={bookings} units={units} userRole={user.role} userEmail={user.email} onAddAmenity={handleAddAmenity} onDeleteAmenity={handleDeleteAmenity} onAddBooking={handleAddBooking} onDeleteBooking={handleDeleteBooking} />}
+          {!loading && view === 'documents' && <DocumentsView documents={documents} userRole={userRole} onAdd={handleAddDocument} onDelete={handleDeleteDocument} />}
+          {!loading && view === 'maintenance' && <MaintenanceView requests={maintenanceRequests} units={units} userRole={userRole} userEmail={user.email} onAdd={handleAddMaintenance} onUpdate={handleUpdateMaintenance} onDelete={handleDeleteMaintenance} />}
+          {!loading && view === 'amenities' && <AmenitiesView amenities={amenities} bookings={bookings} units={units} userRole={userRole} userEmail={user.email} onAddAmenity={handleAddAmenity} onDeleteAmenity={handleDeleteAmenity} onAddBooking={handleAddBooking} onDeleteBooking={handleDeleteBooking} />}
           
-          {!loading && view === 'expenses' && user.role === 'ADMIN' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={effectiveSettings.reserveFundBalance} consortiumId={consortium.id} units={units} />}
+          {!loading && view === 'expenses' && userRole === 'ADMIN' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={effectiveSettings.reserveFundBalance} consortiumId={consortium.id} units={units} />}
           
           {!loading && view === 'history' && <HistoryView history={history} consortium={consortium} units={units} settings={effectiveSettings} />}
           
@@ -428,7 +420,7 @@ function App() {
             <UserPortal userEmail={user.email} consortium={consortium} units={units} expenses={expenses} history={history} payments={payments} settings={effectiveSettings} announcements={announcements} myBookings={bookings} myTickets={maintenanceRequests} documents={documents} onReportPayment={handleReportPayment} />
           )}
           
-          {!loading && view === 'accounting' && user.role === 'ADMIN' && (
+          {!loading && view === 'accounting' && userRole === 'ADMIN' && (
             <AccountingView 
                 units={units} expenses={expenses} setExpenses={setExpenses} 
                 history={history} settings={effectiveSettings} payments={payments} 
@@ -442,7 +434,7 @@ function App() {
             />
           )}
 
-          {!loading && view === 'management' && user.role === 'ADMIN' && (
+          {!loading && view === 'management' && userRole === 'ADMIN' && (
             <ManagementView 
                 units={units} setUnits={setUnits} consortiumId={consortium.id}
                 history={history} payments={payments} consortium={consortium}
@@ -451,7 +443,7 @@ function App() {
             />
           )}
 
-          {!loading && view === 'collections' && user.role === 'ADMIN' && (
+          {!loading && view === 'collections' && userRole === 'ADMIN' && (
             <CollectionsView 
                 payments={payments} units={units} history={history} 
                 onAddPayment={handleAdminAddPayment} onUpdateStatus={handlePaymentStatusChange} 
@@ -459,8 +451,8 @@ function App() {
             />
           )}
           
-          {!loading && view === 'settings' && user.role === 'ADMIN' && <SettingsView currentSettings={effectiveSettings} onSave={handleUpdateSettings} />}
-          {!loading && view === 'profile' && <ProfileView userEmail={user.email} userRole={user.role} onLogout={handleLogout} />}
+          {!loading && view === 'settings' && userRole === 'ADMIN' && <SettingsView currentSettings={effectiveSettings} onSave={handleUpdateSettings} />}
+          {!loading && view === 'profile' && <ProfileView userEmail={user.email} userRole={userRole} onLogout={handleLogout} />}
         </div>
       </main>
     </div>

@@ -18,23 +18,23 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
   
   const allItems = [
     // ADMIN & DEV Views
-    { id: 'dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['DEV', 'ADMIN'] },
+    { id: 'dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['ADMIN'] },
     
     // USER ONLY
     { id: 'user_portal', label: 'Mis Unidades', icon: Home, roles: ['USER'] },
     
     // COMPARTIDO
-    { id: 'announcements', label: 'Novedades', icon: Megaphone, roles: ['DEV', 'ADMIN', 'USER'] },
-    { id: 'amenities', label: 'Reservas', icon: CalendarCheck, roles: ['DEV', 'ADMIN', 'USER'] },
-    { id: 'maintenance', label: 'Mantenimiento', icon: Wrench, roles: ['DEV', 'ADMIN', 'USER'] },
+    { id: 'announcements', label: 'Novedades', icon: Megaphone, roles: ['ADMIN', 'USER'] },
+    { id: 'amenities', label: 'Reservas', icon: CalendarCheck, roles: ['ADMIN', 'USER'] },
+    { id: 'maintenance', label: 'Mantenimiento', icon: Wrench, roles: ['ADMIN', 'USER'] },
     
     // GESTIÓN UNIFICADA (ADMIN ONLY)
-    { id: 'management', label: 'Gestión Integral', icon: LayoutTemplate, roles: ['DEV', 'ADMIN'] },
-    { id: 'accounting', label: 'Contabilidad', icon: PieChart, roles: ['DEV', 'ADMIN'] },
+    { id: 'management', label: 'Gestión Integral', icon: LayoutTemplate, roles: ['ADMIN'] },
+    { id: 'accounting', label: 'Contabilidad', icon: PieChart, roles: ['ADMIN'] },
     
     // SETTINGS
-    { id: 'settings', label: 'Configuración', icon: Building2, roles: ['DEV', 'ADMIN'] },
-    { id: 'profile', label: 'Mi Perfil', icon: User, roles: ['DEV', 'ADMIN', 'USER'] }, 
+    { id: 'settings', label: 'Configuración', icon: Building2, roles: ['ADMIN'] },
+    { id: 'profile', label: 'Mi Perfil', icon: User, roles: ['ADMIN', 'USER'] }, 
   ];
 
   const filteredItems = allItems.filter(item => item.roles.includes(userRole));
@@ -54,7 +54,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
             <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent truncate max-w-[180px]">
               {consortiumName || 'Mi Consorcio'}
             </h1>
-            <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{userRole === 'DEV' ? 'Modo Desarrollador' : userRole}</p>
+            <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{userRole}</p>
           </div>
           <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white">
             <X className="w-6 h-6" />

@@ -4,7 +4,7 @@ export enum ExpenseDistributionType {
   FROM_RESERVE = 'FROM_RESERVE'
 }
 
-export type UserRole = 'DEV' | 'ADMIN' | 'USER';
+export type UserRole = 'ADMIN' | 'USER';
 export type MaintenanceStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE';
 
 export interface ConsortiumDocument {

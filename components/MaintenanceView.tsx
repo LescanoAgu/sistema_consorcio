@@ -21,7 +21,7 @@ const MaintenanceView: React.FC<MaintenanceViewProps> = ({ requests, units, user
 
   // Filtrar reclamos: Admin ve todos, Usuario ve solo los suyos
   const filteredRequests = useMemo(() => {
-      if (userRole === 'ADMIN' || userRole === 'DEV') return requests;
+      if (userRole === 'ADMIN') return requests;
       const myUnit = units.find(u => u.authorizedEmails?.includes(userEmail || ''));
       if (!myUnit) return [];
       return requests.filter(r => r.unitId === myUnit.id);
