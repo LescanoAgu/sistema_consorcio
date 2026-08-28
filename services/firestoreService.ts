@@ -229,8 +229,8 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
         mainBatch.set(newHistoryRef, record);
     }
     
-    const settingsRef = doc(db, `consortiums/${consortiumId}/settings`, 'general');
-    mainBatch.set(settingsRef, { reserveFundBalance: record.reserveBalanceAtClose }, { merge: true });
+    // (Ya no sobreescribimos reserveFundBalance en settings — el saldo real siempre
+    // se computa en App.tsx desde la suma de reserve_transactions, no desde settings)
 
     // Actualizar deudas de las unidades
     if (record.unitDetails && units.length > 0) {

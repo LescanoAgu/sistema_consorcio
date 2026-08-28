@@ -64,7 +64,7 @@ const AccountingView: React.FC<AccountingViewProps> = (props) => {
                   settings={props.settings} payments={props.payments} history={props.history}
                   consortiumId={props.consortiumId} consortiumName={props.consortiumName} onUpdateBankSettings={props.onUpdateBankSettings} onCloseMonth={props.onCloseMonth} onChangeView={handleChangeView as any} />}
           {activeTab === 'HISTORIAL' && <HistoryView history={props.history} consortium={props.consortium} units={props.units} settings={props.settings} />}
-          {activeTab === 'RESERVA' && <ReserveView transactions={props.reserveTransactions} consortium={props.consortium} onAddTransaction={props.onAddReserveTransaction} onDeleteTransaction={props.onDeleteReserveTransaction} settings={props.settings} />}
+          {activeTab === 'RESERVA' && <ReserveView transactions={props.reserveTransactions} consortium={props.consortium} onAddTransaction={props.onAddReserveTransaction} onDeleteTransaction={props.onDeleteReserveTransaction} settings={props.settings} payments={props.payments} />}
       </div>
     </div>
   );
