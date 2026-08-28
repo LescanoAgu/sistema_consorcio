@@ -96,7 +96,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ currentSettings, onSave }) 
                           <input type="number" step="0.1" name="monthlyReserveContributionPercentage" value={formData.monthlyReserveContributionPercentage} onChange={handleChange} className="w-full p-2 border rounded" />
                           <span className="absolute right-3 top-2 text-slate-400">%</span>
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-1">Del total de gastos (ord. + ext.) por unidad</p>
+                      <p className="text-[10px] text-slate-400 mt-1">Solo sobre gastos ordinarios</p>
                   </div>
                   
                   {/* --- NUEVO CAMPO: INTERÉS --- */}
