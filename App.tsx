@@ -189,12 +189,16 @@ function App() {
       setPayments([created as Payment, ...payments]);
       
       if (created.status === 'APPROVED') {
-          const reserveAmount = created.amount * (settings.monthlyReserveContributionPercentage / 100);
+          // El cupón ya incluye el aporte de reserva como cargo extra (Opción A).
+          // Por eso la porción de reserva dentro del cobro es: pago * rate / (100 + rate)
+          // Ejemplo: pago $1050 con rate=5% → reserva = $1050 * 5/105 = $50 ✓
+          const rate = settings.monthlyReserveContributionPercentage;
+          const reserveAmount = rate > 0 ? created.amount * (rate / (100 + rate)) : 0;
           if (reserveAmount > 0) {
               const newTx = await addReserveTransaction(consortium.id, {
                   date: created.date,
                   amount: reserveAmount,
-                  description: `Aporte de Cobro (${created.id.slice(-4)})`,
+                  description: `Aporte Reserva de Cobro (${created.id.slice(-4)})`,
                   type: 'SYSTEM'
               });
               setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
@@ -210,12 +214,13 @@ function App() {
       if (newStatus === 'APPROVED') {
           const payment = payments.find(p => p.id === id);
           if (payment) {
-              const reserveAmount = payment.amount * (settings.monthlyReserveContributionPercentage / 100);
+              const rate = settings.monthlyReserveContributionPercentage;
+              const reserveAmount = rate > 0 ? payment.amount * (rate / (100 + rate)) : 0;
               if (reserveAmount > 0) {
                   const newTx = await addReserveTransaction(consortium.id, {
                       date: new Date().toISOString(),
                       amount: reserveAmount,
-                      description: `Aporte de Cobro (${payment.id.slice(-4)})`,
+                      description: `Aporte Reserva de Cobro (${payment.id.slice(-4)})`,
                       type: 'SYSTEM'
                   });
                   setReserveTransactions(prev => [newTx as ReserveTransaction, ...prev]);
@@ -232,8 +237,9 @@ function App() {
       setPayments(payments.filter(p => p.id !== id));
 
       if (paymentToDelete && paymentToDelete.status === 'APPROVED') {
-          // Revertir fondo de reserva
-          const reserveAmount = paymentToDelete.amount * (settings.monthlyReserveContributionPercentage / 100);
+          // Revertir fondo de reserva con la misma fórmula correcta
+          const rate = settings.monthlyReserveContributionPercentage;
+          const reserveAmount = rate > 0 ? paymentToDelete.amount * (rate / (100 + rate)) : 0;
           if (reserveAmount > 0) {
               const newTx = await addReserveTransaction(consortium.id, {
                   date: new Date().toISOString(),

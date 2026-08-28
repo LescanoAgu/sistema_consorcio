@@ -100,8 +100,8 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           }
       });
 
-      // Cálculo Global de Reserva (El aporte es un % del Total Ordinario)
-      const resContribution = (tOrd * settings.monthlyReserveContributionPercentage) / 100;
+      // Cálculo Global de Reserva (El aporte es un % del Total de Gastos: Ordinarios + Extraordinarios)
+      const resContribution = ((tOrd + tExt) * settings.monthlyReserveContributionPercentage) / 100;
       
       // Distribuimos la reserva usando el porcentaje de prorrateo original
       const totalGlobalProrate = uniqueUnits.reduce((sum, u) => sum + u.proratePercentage, 0);
@@ -277,7 +277,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
                   <div className="space-y-3">
                       <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Ordinarios</span><span className="font-bold">{formatCurrency(totalOrdinary)}</span></div>
                       <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Extraordinarios</span><span className="font-bold">{formatCurrency(totalExtraordinary)}</span></div>
-                      <div className="flex justify-between text-sm pt-2 border-t border-slate-100"><span className="text-slate-600">+ Fondo Reserva (Aporte)</span><span className="font-bold text-emerald-600">{formatCurrency(reserveContribution)}</span></div>
+                      <div className="flex justify-between text-sm pt-2 border-t border-slate-100"><span className="text-slate-600">+ Fondo Reserva ({settings.monthlyReserveContributionPercentage}% del total)</span><span className="font-bold text-emerald-600">{formatCurrency(reserveContribution)}</span></div>
                       <div className="flex justify-between text-lg pt-2 border-t border-slate-200 font-bold"><span className="text-slate-800">Total Distribuido</span><span className="text-indigo-600">{formatCurrency(totalOrdinary + totalExtraordinary + reserveContribution)}</span></div>
                   </div>
               </div>

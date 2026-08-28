@@ -81,7 +81,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({ currentSettings, onSave }) 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fondo Reserva Actual ($)</label>
-                      <input type="number" step="0.01" name="reserveFundBalance" value={formData.reserveFundBalance} onChange={handleChange} className="w-full p-2 border rounded font-mono font-bold" />
+                      <input
+                          type="text"
+                          readOnly
+                          value={new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 }).format(formData.reserveFundBalance)}
+                          className="w-full p-2 border rounded font-mono font-bold bg-slate-50 text-slate-500 cursor-not-allowed"
+                          title="Este valor es calculado automáticamente desde el Libro Mayor de Reservas. Para modificarlo, registre movimientos en la sección Contabilidad → Reserva."
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">Calculado automáticamente del Libro Mayor</p>
                   </div>
                   <div>
                       <label className="block text-xs font-bold text-slate-500 uppercase mb-1">% Aporte Mensual Reserva</label>
@@ -89,6 +96,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ currentSettings, onSave }) 
                           <input type="number" step="0.1" name="monthlyReserveContributionPercentage" value={formData.monthlyReserveContributionPercentage} onChange={handleChange} className="w-full p-2 border rounded" />
                           <span className="absolute right-3 top-2 text-slate-400">%</span>
                       </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Del total de gastos (ord. + ext.) por unidad</p>
                   </div>
                   
                   {/* --- NUEVO CAMPO: INTERÉS --- */}
