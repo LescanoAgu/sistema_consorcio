@@ -123,7 +123,7 @@ function addPageNumbers(doc: jsPDF) {
     }
 }
 
-// --- GENERADOR CUPÓN INDIVIDUAL ITEMIZADO ---
+// --- GENERADOR CUPÓN INDIVIDUAL ITEMIZADO (REDISEÑADO A 1 PÁGINA) ---
 
 const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings, allUnitsData: Unit[]) => {
     const doc = new jsPDF();
@@ -133,118 +133,224 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // Helper para normalizar el porcentaje global de todo el consorcio
     const totalGlobalProrate = allUnitsData.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
     const globalProrateRatio = Number(unit.proratePercentage || 0) / totalGlobalProrate;
+    const formattedPercentage = Number(unit.proratePercentage || 0).toFixed(4);
 
-    // Encabezado institucional
-    drawHeader(doc, consortium, "CUPÓN DE PAGO INDIVIDUAL", settlement);
-
-    finalY = 50;
-
-    // Ficha informativa de la Unidad Funcional (Soporta Sector Comercial)
-    doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
-    doc.setFillColor(250, 250, 250);
-    doc.roundedRect(14, finalY, pageWidth - 28, 35, 3, 3, 'FD');
+    // Encabezado institucional (ocupa 0 a 34 mm)
+    const headerHeight = 34;
+    doc.setFillColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+    doc.rect(0, 0, pageWidth, headerHeight, 'F');
+    doc.setTextColor(255, 255, 255);
     
-    doc.setFontSize(20);
-    doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Unidad: ${unit.unitNumber || '-'}`, 20, finalY + 16);
-    
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
-    doc.text(`Propietario: ${unit.ownerName || 'A designar'}`, 20, finalY + 27);
-
-    // Muestra el complejo o sector si está cargado (Norte / Sur)
-    if (unit.block) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.setFillColor(224, 231, 255);
-        doc.setTextColor(67, 56, 202);
-        doc.text(`SECTOR: ${unit.block.toUpperCase()}`, 100, finalY + 16);
+    if (consortium.image) { 
+        try { doc.addImage(consortium.image, 'JPEG', 14, 6, 22, 22); } catch (e) { } 
+        doc.setFontSize(16); 
+        doc.setFont("helvetica", "bold"); 
+        doc.text((consortium.name || "CONSORCIO").toUpperCase(), 40, 14);
+        
+        doc.setFontSize(9); 
+        doc.setFont("helvetica", "normal"); 
+        doc.text(consortium.address || "", 40, 20);
+        
+        if (consortium.cuit) {
+            doc.text(`CUIT: ${consortium.cuit}`, 40, 25);
+        }
+    } else {
+        doc.setFontSize(16); 
+        doc.setFont("helvetica", "bold"); 
+        doc.text((consortium.name || "CONSORCIO").toUpperCase(), 14, 14);
+        
+        doc.setFontSize(9); 
+        doc.setFont("helvetica", "normal"); 
+        doc.text(consortium.address || "", 14, 20);
+        
+        if (consortium.cuit) {
+            doc.text(`CUIT: ${consortium.cuit}`, 14, 25);
+        }
     }
 
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
-    doc.text("PRORRATEO BASE", pageWidth - 20, finalY + 16, { align: 'right' });
+    // Título a la derecha
+    doc.setFontSize(11); 
+    doc.setFont("helvetica", "bold"); 
+    doc.text("CUPÓN DE PAGO INDIVIDUAL", pageWidth - 14, 15, { align: 'right' });
     
-    doc.setFontSize(16);
+    doc.setFontSize(10); 
+    doc.setFont("helvetica", "normal"); 
+    doc.text(`Período: ${(settlement.month || '-').toUpperCase()}`, pageWidth - 14, 23, { align: 'right' });
+
+    finalY = 38;
+
+    // Ficha informativa de la Unidad Funcional (compacta: 20 mm)
+    doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
+    doc.setFillColor(250, 250, 252);
+    doc.roundedRect(14, finalY, pageWidth - 28, 20, 2, 2, 'FD');
+    
+    // Unidad y Propietario
+    doc.setFontSize(13);
     doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
     doc.setFont("helvetica", "bold");
-    const formattedPercentage = Number(unit.proratePercentage || 0).toFixed(4);
-    doc.text(`${formattedPercentage}%`, pageWidth - 20, finalY + 26, { align: 'right' });
+    doc.text(`Unidad: ${unit.unitNumber || '-'}`, 20, finalY + 8);
+    
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
+    doc.text(`Propietario: ${unit.ownerName || 'A designar'}`, 20, finalY + 15);
 
-    finalY += 45;
+    // Sector / Complejo si existe
+    if (unit.block) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(67, 56, 202);
+        doc.text(`SECTOR: ${unit.block.toUpperCase()}`, 80, finalY + 8);
+    }
 
-    finalY += 45;
-    let calculatedExpensesSum = 0;
+    // Estado de ocupación / Fondo de Reserva
+    const participatesInReserve = unit.contributesToReserve !== false && unit.isOccupied !== false;
+    if (!participatesInReserve) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.setTextColor(180, 83, 9);
+        doc.text(`[DESOCUPADO / EXENTO FONDO DE RESERVA]`, 80, finalY + 15);
+    }
+
+    // Prorrateo Base a la derecha
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
+    doc.text("PRORRATEO BASE", pageWidth - 20, finalY + 7.5, { align: 'right' });
+    
+    doc.setFontSize(12);
+    doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${formattedPercentage}%`, pageWidth - 20, finalY + 16, { align: 'right' });
+
+    finalY = 62;
+
+    // --- PROCESAMIENTO Y SEPARACIÓN DE GASTOS (ORDINARIOS Y EXTRAORDINARIOS) ---
+    const allExpenses = settlement.snapshotExpenses || [];
+    
     let sumOrdinary = 0;
     let sumExtraordinary = 0;
-    const bodyRows: any[][] = [];
+    let calculatedExpensesSum = 0;
 
-    // --- PROCESAMIENTO ITEMIZADO DE GASTOS DEL PERÍODO ---
-    (settlement.snapshotExpenses || []).forEach(exp => {
+    const ordinaryRows: any[][] = [];
+    const extraordinaryRows: any[][] = [];
+
+    allExpenses.forEach(exp => {
         let unitAmount = 0;
         let distributionLabel = '';
 
         if (exp.distributionType === 'FROM_RESERVE') {
             unitAmount = 0;
-            distributionLabel = 'Abonado con Fondo Reserva';
+            distributionLabel = 'Fondo Reserva (Sin Cargo)';
         } else {
-            // Distribución específica de gastos por unidad afectable
             if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
-                if (!exp.affectedUnitIds.includes(unit.id)) return; 
+                if (!exp.affectedUnitIds.includes(unit.id)) return; // No afecta a esta unidad
                 
                 if (exp.distributionType === 'EQUAL_PARTS') {
                     unitAmount = exp.amount / exp.affectedUnitIds.length;
-                    distributionLabel = `Esp. (Igual x ${exp.affectedUnitIds.length} UF)`;
+                    distributionLabel = `Partes Iguales (${exp.affectedUnitIds.length} UF)`;
                 } else {
                     const affectedUnitsData = allUnitsData.filter(u => exp.affectedUnitIds!.includes(u.id));
                     const totalAffectedProrate = affectedUnitsData.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
                     unitAmount = exp.amount * (Number(unit.proratePercentage || 0) / totalAffectedProrate);
-                    distributionLabel = `Esp. (Prorrateo Normalizado)`;
+                    distributionLabel = `Prorrateo Normalizado`;
                 }
             } else {
-                // Distribución general a todo el consorcio
                 if (exp.distributionType === 'EQUAL_PARTS') {
                     unitAmount = exp.amount / (allUnitsData.length || 1);
                     distributionLabel = 'Partes Iguales';
                 } else {
                     unitAmount = exp.amount * globalProrateRatio;
-                    distributionLabel = `Prorrateo Normalizado`;
+                    distributionLabel = `Prorrateo ${formattedPercentage}%`;
                 }
             }
         }
 
         calculatedExpensesSum += unitAmount;
-        if (exp.category === 'Ordinary') {
-            sumOrdinary += unitAmount;
-        } else {
-            sumExtraordinary += unitAmount;
-        }
-        
-        bodyRows.push([
-            `${exp.description} (${exp.category === 'Ordinary' ? 'Ord.' : 'Ext.'})`,
+
+        const rowItem = [
+            exp.description,
             formatCurrency(exp.amount),
             distributionLabel,
             formatCurrency(unitAmount)
-        ]);
+        ];
+
+        if (exp.category === 'Ordinary') {
+            sumOrdinary += unitAmount;
+            ordinaryRows.push(rowItem);
+        } else {
+            sumExtraordinary += unitAmount;
+            extraordinaryRows.push(rowItem);
+        }
     });
 
-    const detail = (settlement.unitDetails || []).find(d => d.unitId === unit.id);
-    const exactAmountToPayMonth = detail ? detail.totalToPay : 0;
-    const reserveContributionForUnit = (settlement.reserveContribution || 0) * globalProrateRatio;
+    const bodyRows: any[][] = [];
 
-    // Agregar el Fondo de Reserva si aplica en este mes
-    if (reserveContributionForUnit > 0) {
+    // 1. SECCIÓN GASTOS ORDINARIOS
+    if (ordinaryRows.length > 0) {
         bodyRows.push([
-            'Aporte Mensual Obligatorio a Fondo de Reserva',
-            formatCurrency(settlement.reserveContribution),
+            { 
+                content: '1. GASTOS ORDINARIOS', 
+                colSpan: 4, 
+                styles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: THEME.primary, fontSize: 8 } 
+            }
+        ]);
+        ordinaryRows.forEach(r => bodyRows.push(r));
+        bodyRows.push([
+            { content: 'SUBTOTAL EXPENSAS ORDINARIAS', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: THEME.primary } },
+            { content: formatCurrency(sumOrdinary), styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: THEME.primary } }
+        ]);
+    }
+
+    // 2. SECCIÓN GASTOS EXTRAORDINARIOS
+    if (extraordinaryRows.length > 0) {
+        bodyRows.push([
+            { 
+                content: '2. GASTOS EXTRAORDINARIOS', 
+                colSpan: 4, 
+                styles: { fontStyle: 'bold', fillColor: [254, 243, 199], textColor: [180, 83, 9], fontSize: 8 } 
+            }
+        ]);
+        extraordinaryRows.forEach(r => bodyRows.push(r));
+        bodyRows.push([
+            { content: 'SUBTOTAL EXPENSAS EXTRAORDINARIAS', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [180, 83, 9] } },
+            { content: formatCurrency(sumExtraordinary), styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [180, 83, 9] } }
+        ]);
+    }
+
+    // 3. SECCIÓN FONDO DE RESERVA (Solo si la unidad participa / está alquilada)
+    let reserveContributionForUnit = 0;
+    const totalOrdinaryInSettlement = allExpenses
+        .filter(e => e.category === 'Ordinary' && e.distributionType !== 'FROM_RESERVE')
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    if (participatesInReserve && (settings.monthlyReserveContributionPercentage || 0) > 0 && totalOrdinaryInSettlement > 0) {
+        const totalReserveOrdBase = (totalOrdinaryInSettlement * settings.monthlyReserveContributionPercentage) / 100;
+        reserveContributionForUnit = totalReserveOrdBase * globalProrateRatio;
+
+        bodyRows.push([
+            { 
+                content: '3. FONDO DE RESERVA', 
+                colSpan: 4, 
+                styles: { fontStyle: 'bold', fillColor: [236, 253, 245], textColor: [4, 120, 87], fontSize: 8 } 
+            }
+        ]);
+        bodyRows.push([
+            `Aporte Mensual (${settings.monthlyReserveContributionPercentage}% sobre Ordinarias)`,
+            formatCurrency(totalReserveOrdBase),
             `Prorrateo ${formattedPercentage}%`,
             formatCurrency(reserveContributionForUnit)
         ]);
+        bodyRows.push([
+            { content: 'SUBTOTAL APORTE FONDO DE RESERVA', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [4, 120, 87] } },
+            { content: formatCurrency(reserveContributionForUnit), styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [4, 120, 87] } }
+        ]);
+
         calculatedExpensesSum += reserveContributionForUnit;
     }
+
+    const detail = (settlement.unitDetails || []).find(d => d.unitId === unit.id);
+    const exactAmountToPayMonth = detail ? detail.totalToPay : calculatedExpensesSum;
 
     // Pequeño ajuste técnico por redondeo de decimales si existiera
     const diff = exactAmountToPayMonth - calculatedExpensesSum;
@@ -260,125 +366,134 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         unit.debts.forEach(debt => totalHistoricalDebt += debt.total);
     }
 
-    // Filas finales de la tabla de liquidación
-    bodyRows.push([{ content: 'TOTAL EXPENSAS ORDINARIAS', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumOrdinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
-    
-    if (sumExtraordinary > 0) {
-        bodyRows.push([{ content: 'TOTAL EXPENSAS EXTRAORDINARIAS', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(sumExtraordinary), styles: { fontStyle: 'bold', halign: 'right' } }]);
-    }
-    
-    if (reserveContributionForUnit > 0) {
-        bodyRows.push([{ content: 'APORTE FONDO DE RESERVA', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right' } }, { content: formatCurrency(reserveContributionForUnit), styles: { fontStyle: 'bold', halign: 'right' } }]);
-    }
-
     if (totalHistoricalDebt > 0) {
-        bodyRows.push([{ content: 'DEUDA HISTÓRICA / SALDO PENDIENTE (Ver detalle en Anexo)', colSpan: 3, styles: { fontStyle: 'italic', halign: 'right', textColor: [220, 38, 38] } }, { content: formatCurrency(totalHistoricalDebt), styles: { fontStyle: 'bold', halign: 'right', textColor: [220, 38, 38] } }]);
+        bodyRows.push([
+            { content: 'DEUDA ANTERIOR / SALDO PENDIENTE (Ver detalle en Anexo Pág. 2)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', textColor: [220, 38, 38], fillColor: [254, 226, 226], fontSize: 8 } },
+            { content: formatCurrency(totalHistoricalDebt), styles: { fontStyle: 'bold', halign: 'right', textColor: [220, 38, 38], fillColor: [254, 226, 226], fontSize: 8 } }
+        ]);
     }
 
     const finalTotalToPay = exactAmountToPayMonth + totalHistoricalDebt;
-    bodyRows.push([{ content: 'TOTAL COMPLETO A PAGAR', colSpan: 3, styles: { fontStyle: 'bold', fontSize: 12 } }, { content: formatCurrency(finalTotalToPay), styles: { fontStyle: 'bold', fontSize: 12, halign: 'right' } }]);
+
+    // Fila FINAL de TOTAL
+    bodyRows.push([
+        { content: 'TOTAL COMPLETO A PAGAR', colSpan: 3, styles: { fontStyle: 'bold', fontSize: 9.5, textColor: [255, 255, 255], fillColor: THEME.primary } },
+        { content: formatCurrency(finalTotalToPay), styles: { fontStyle: 'bold', fontSize: 9.5, halign: 'right', textColor: [255, 255, 255], fillColor: THEME.primary } }
+    ]);
 
     autoTable(doc, {
         startY: finalY, 
         head: [['DESCRIPCIÓN DEL CONCEPTO', 'TOTAL GENERAL', 'MÉTODO / %', 'TU CUOTA']], 
         body: bodyRows, 
         theme: 'plain',
-        headStyles: { fillColor: THEME.secondary, textColor: [255,255,255], fontStyle: 'bold', fontSize: 9 },
-        bodyStyles: { fontSize: 9, textColor: THEME.text, cellPadding: 4 },
+        headStyles: { fillColor: THEME.secondary, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        bodyStyles: { fontSize: 7.5, textColor: THEME.text, cellPadding: 1.6 },
         columnStyles: { 
-            0: { cellWidth: 75 }, 
-            1: { cellWidth: 30, halign: 'right' },
-            2: { cellWidth: 45, halign: 'center' },
-            3: { cellWidth: 30, halign: 'right' }
+            0: { cellWidth: 80 }, 
+            1: { cellWidth: 30, halign: 'right' }, 
+            2: { cellWidth: 32, halign: 'center' }, 
+            3: { cellWidth: 40, halign: 'right', fontStyle: 'bold' } 
         },
-        alternateRowStyles: { fillColor: THEME.stripe },
-        didParseCell: (data) => {
-            const totalIndex = bodyRows.length - 1;
-            const debtIndex = totalHistoricalDebt > 0 ? totalIndex - 1 : -1;
-            const subtotalIndex = totalHistoricalDebt > 0 ? totalIndex - 2 : -1;
-
-            if (data.section === 'body') {
-                if (data.row.index === totalIndex) {
-                    data.cell.styles.fontStyle = 'bold'; 
-                    data.cell.styles.textColor = [255,255,255]; 
-                    data.cell.styles.fillColor = THEME.primary; 
-                } else if (data.row.index === debtIndex) {
-                    data.cell.styles.fillColor = [254, 226, 226]; // Fondo rosado de alerta para deuda
-                } else if (data.row.index === subtotalIndex) {
-                    data.cell.styles.fillColor = [248, 250, 252];
-                }
-            }
-        }
+        margin: { left: 14, right: 14 },
+        alternateRowStyles: { fillColor: THEME.stripe }
     });
 
     // @ts-ignore
-    finalY = doc.lastAutoTable.finalY + 12;
+    finalY = doc.lastAutoTable.finalY + 4;
 
     const interestRate = settings.interestRate || 0;
     const interestAmount = (finalTotalToPay * interestRate) / 100;
     const secondDueTotal = finalTotalToPay + interestAmount;
 
-    if (finalY > 230) {
-        doc.addPage();
-        finalY = 20;
-    }
+    const vto1 = settlement.firstExpirationDate ? formatDate(settlement.firstExpirationDate) : '-';
+    const vto2 = settlement.secondExpirationDate ? formatDate(settlement.secondExpirationDate) : '-';
 
-    doc.setFontSize(11); 
-    doc.setFont("helvetica", "bold"); 
+    // Cuadro de Vencimientos e Importes (12 mm)
+    doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(14, finalY, pageWidth - 28, 12, 1.5, 1.5, 'FD');
+
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "bold");
     doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
-    doc.text(`TOTAL 1° VENCIMIENTO: ${formatCurrency(finalTotalToPay)}`, 20, finalY);
-    finalY += 8;
-    
+    doc.text(`1° VTO (${vto1}):`, 20, finalY + 7.5);
+    doc.setFontSize(9.5);
+    doc.text(`${formatCurrency(finalTotalToPay)}`, 62, finalY + 7.5);
+
     if (interestRate > 0) {
-        doc.setFontSize(10);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
+        doc.text(`2° VTO (${vto2}) [+${interestRate}%]:`, 110, finalY + 7.5);
+        doc.setFontSize(9);
         doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
-        doc.text(`TOTAL 2° VENCIMIENTO (con recargo del ${interestRate}%): ${formatCurrency(secondDueTotal)}`, 20, finalY);
-        finalY += 12;
-    } else {
-        finalY += 8;
+        doc.text(`${formatCurrency(secondDueTotal)}`, pageWidth - 20, finalY + 7.5, { align: 'right' });
     }
 
-    // Caja de Transferencia Bancaria Informativa
-    doc.setDrawColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
-    doc.setFillColor(THEME.stripe[0], THEME.stripe[1], THEME.stripe[2]);
-    doc.roundedRect(14, finalY, pageWidth - 28, 28, 2, 2, 'FD');
+    finalY += 16;
 
-    doc.setFontSize(11); 
-    doc.setFont("helvetica", "bold"); 
-    doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
-    doc.text("DATOS PARA TRANSFERENCIA BANCARIA", 20, finalY + 8);
-    
-    doc.setFontSize(10); 
-    doc.setFont("helvetica", "normal"); 
-    doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
-    
-    const bankInfo = settings;
-    doc.text(`Banco: ${bankInfo.bankName || 'A definir'}`, 20, finalY + 15);
-    if(bankInfo.bankHolder) doc.text(`Titular: ${bankInfo.bankHolder}`, 100, finalY + 15); 
-    doc.setFont("helvetica", "bold"); 
-    doc.text(`CBU: ${bankInfo.bankCBU || '-'}`, 20, finalY + 22);
-    doc.text(`Alias: ${bankInfo.bankAlias || '-'}`, 100, finalY + 22);
-    
-    finalY += 35;
-    drawFooter(doc, settlement, pageWidth, finalY);
+    // Caja de Modalidad de Pago: Transferencia Bancaria vs Efectivo en Administración
+    const showBank = settings.showBankDetailsOnCoupon !== false && Boolean(settings.bankCBU || settings.bankAlias || settings.bankName);
 
-    // --- PÁGINA 2: ANEXO DE DEUDA HISTÓRICA ---
+    if (showBank) {
+        doc.setDrawColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+        doc.setFillColor(241, 245, 249);
+        doc.roundedRect(14, finalY, pageWidth - 28, 15, 1.5, 1.5, 'FD');
+
+        doc.setFontSize(8); 
+        doc.setFont("helvetica", "bold"); 
+        doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+        doc.text("DATOS PARA TRANSFERENCIA BANCARIA", 20, finalY + 4.5);
+        
+        doc.setFontSize(7.5); 
+        doc.setFont("helvetica", "normal"); 
+        doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
+        
+        const holderPart = settings.bankHolder ? `   |   Titular: ${settings.bankHolder}` : '';
+        const cuitPart = settings.bankCuit ? `   |   CUIT: ${settings.bankCuit}` : '';
+        doc.text(`Banco: ${settings.bankName || '-'}${holderPart}${cuitPart}`, 20, finalY + 9);
+        doc.setFont("helvetica", "bold"); 
+        doc.text(`CBU: ${settings.bankCBU || '-'}   |   Alias: ${(settings.bankAlias || '-').toUpperCase()}`, 20, finalY + 13);
+        
+        finalY += 18;
+    } else {
+        doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(14, finalY, pageWidth - 28, 10, 1.5, 1.5, 'FD');
+
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
+        doc.text("MODALIDAD DE PAGO: En efectivo en Administración del Consorcio", 20, finalY + 6.5);
+
+        finalY += 13;
+    }
+
+    // Pie de página con aviso si existe
+    if (settlement.couponMessage) {
+        doc.setFontSize(7.5); 
+        doc.setFont("helvetica", "italic"); 
+        doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
+        doc.text(`Aviso: ${settlement.couponMessage}`, 14, finalY + 2, { maxWidth: pageWidth - 28 });
+    }
+
+    // --- PÁGINA 2: ANEXO DE DEUDA HISTÓRICA (Solo si tiene deuda acumulada) ---
     if (totalHistoricalDebt > 0) {
         doc.addPage();
         drawHeader(doc, consortium, "ANEXO: DETALLE DE DEUDA", settlement);
         
-        let anexoY = 50;
-        doc.setFontSize(16);
+        let anexoY = 44;
+        doc.setFontSize(13);
         doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
         doc.setFont("helvetica", "bold");
         doc.text(`Unidad: ${unit.unitNumber || '-'}`, 14, anexoY);
         
-        doc.setFontSize(11);
+        doc.setFontSize(9.5);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
-        doc.text(`Propietario: ${unit.ownerName || 'A designar'}`, 14, anexoY + 7);
+        doc.text(`Propietario: ${unit.ownerName || 'A designar'}`, 14, anexoY + 6);
 
-        anexoY += 15;
+        anexoY += 12;
         const debtRows: any[][] = [];
         
         if (initialBalance > 0) {
@@ -397,8 +512,8 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
             head: [['PERÍODO / CONCEPTO', 'IMPORTE BASE', 'INTERÉS', 'SUBTOTAL']],
             body: debtRows,
             theme: 'plain',
-            headStyles: { fillColor: THEME.secondary, textColor: [255,255,255], fontStyle: 'bold' },
-            bodyStyles: { fontSize: 10, textColor: THEME.text, cellPadding: 4 },
+            headStyles: { fillColor: THEME.secondary, textColor: [255,255,255], fontStyle: 'bold', fontSize: 8.5 },
+            bodyStyles: { fontSize: 8, textColor: THEME.text, cellPadding: 2.5 },
             columnStyles: { 
                 0: { cellWidth: 70 }, 
                 1: { halign: 'right' }, 
@@ -410,21 +525,15 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
                 if (data.row.index === debtRows.length - 1 && data.section === 'body') {
                     data.cell.styles.fillColor = [254, 226, 226];
                     data.cell.styles.textColor = [220, 38, 38];
-                    data.cell.styles.fontSize = 11;
+                    data.cell.styles.fontSize = 9.5;
                 }
             }
         });
     }
 
-    if (finalY > 260) {
-        doc.addPage();
-        finalY = 20;
-    }
-
+    addPageNumbers(doc);
     return doc;
 };
-
-// --- EXPORTS PRINCIPALES ---
 
 export const generateIndividualCouponPDF = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings, allUnitsData: Unit[]) => {
     const doc = createCouponDoc(settlement, unit, consortium, settings, allUnitsData);

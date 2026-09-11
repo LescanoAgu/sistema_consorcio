@@ -113,14 +113,32 @@ const SettingsView: React.FC<SettingsViewProps> = ({ currentSettings, onSave }) 
               </div>
           </div>
 
-          {/* DATOS BANCARIOS */}
+          {/* DATOS BANCARIOS Y FORMA DE PAGO */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-              <h3 className="font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><CreditCard className="w-5 h-5"/> Datos Bancarios (Para el Cupón)</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div><label className="block text-xs font-bold text-slate-500 uppercase">Banco</label><input name="bankName" value={formData.bankName} onChange={handleChange} className="w-full p-2 border rounded" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 uppercase">Titular Cuenta</label><input name="bankHolder" value={formData.bankHolder} onChange={handleChange} className="w-full p-2 border rounded" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 uppercase">CBU / CVU</label><input name="bankCBU" value={formData.bankCBU} onChange={handleChange} className="w-full p-2 border rounded font-mono" /></div>
-                  <div><label className="block text-xs font-bold text-slate-500 uppercase">Alias</label><input name="bankAlias" value={formData.bankAlias} onChange={handleChange} className="w-full p-2 border rounded font-mono uppercase" /></div>
+              <h3 className="font-bold text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><CreditCard className="w-5 h-5"/> Datos Bancarios y Forma de Pago en Cupón</h3>
+              
+              {/* Switch para mostrar o no CBU en el cupón */}
+              <div className="mb-5 p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-4">
+                  <div>
+                      <span className="font-bold text-slate-800 text-sm block">Mostrar datos bancarios (CBU / Alias) en los cupones</span>
+                      <span className="text-xs text-slate-500">Desactiva esta opción si el consorcio cobra en efectivo en administración.</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                      <input 
+                          type="checkbox" 
+                          checked={formData.showBankDetailsOnCoupon !== false} 
+                          onChange={e => setFormData(prev => ({ ...prev, showBankDetailsOnCoupon: e.target.checked }))}
+                          className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+              </div>
+
+              <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 transition-opacity ${formData.showBankDetailsOnCoupon === false ? 'opacity-50' : 'opacity-100'}`}>
+                  <div><label className="block text-xs font-bold text-slate-500 uppercase">Banco</label><input name="bankName" value={formData.bankName} onChange={handleChange} className="w-full p-2 border rounded" placeholder="Ej: Banco Galicia / Macro" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 uppercase">Titular Cuenta</label><input name="bankHolder" value={formData.bankHolder} onChange={handleChange} className="w-full p-2 border rounded" placeholder="Ej: Consorcio Edificio Urquiza" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 uppercase">CBU / CVU</label><input name="bankCBU" value={formData.bankCBU} onChange={handleChange} className="w-full p-2 border rounded font-mono" placeholder="22 dígitos" /></div>
+                  <div><label className="block text-xs font-bold text-slate-500 uppercase">Alias</label><input name="bankAlias" value={formData.bankAlias} onChange={handleChange} className="w-full p-2 border rounded font-mono uppercase" placeholder="CONSORCIO.URQUIZA" /></div>
               </div>
           </div>
 

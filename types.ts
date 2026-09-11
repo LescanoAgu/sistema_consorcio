@@ -52,6 +52,8 @@ export interface Unit {
   proratePercentage: number; 
   initialBalance: number; 
   debts?: DebtItem[]; 
+  isOccupied?: boolean; // Indica si la unidad está ocupada / alquilada
+  contributesToReserve?: boolean; // Indica si aporta al Fondo de Reserva (default: true si está alquilada)
 }
 
 export interface Expense {
@@ -111,6 +113,7 @@ export interface ConsortiumSettings {
   cuit?: string; 
   adminName?: string;
   logoUrl?: string;
+  showBankDetailsOnCoupon?: boolean; // Opción para mostrar u ocultar CBU/Alias en el cupón
 }
 
 export interface SettlementRecord {

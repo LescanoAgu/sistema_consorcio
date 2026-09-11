@@ -3,7 +3,7 @@ import { Unit, Payment, SettlementRecord, Consortium } from '../types';
 import { 
   Plus, Edit2, Trash2, Search, Mail, X, Upload, FileSpreadsheet, 
   Loader2, Download, CheckCircle2, AlertTriangle, ArrowRight, 
-  Check, Layers
+  Check, Layers, Building2, Store, CheckSquare, Square
 } from 'lucide-react';
 import { addUnit, deleteUnit } from '../services/firestoreService';
 import * as XLSX from 'xlsx';
@@ -39,6 +39,8 @@ interface ParsedUnitChange {
   proratePercentage: number;
   initialBalance: number;
   authorizedEmails: string[];
+  isOccupied: boolean;
+  contributesToReserve: boolean;
   changes: FieldChange[];
   existingUnit?: Unit;
   errorReason?: string;
@@ -66,7 +68,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({
     ownerName: '',
     proratePercentage: '',
     initialBalance: '',
-    authorizedEmailsStr: ''
+    authorizedEmailsStr: '',
+    contributesToReserve: true // Por defecto alquilado / aporta al fondo
   });
 
   // --- EXPORTAR A EXCEL (PLANILLA CON DATOS REALES / MODIFICABLE) ---
@@ -80,6 +83,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
         "Propietario": u.ownerName || '',
         "Porcentaje Prorrateo": Number(u.proratePercentage || 0),
         "Saldo Inicial": Number(u.initialBalance || 0),
+        "Aporta Reserva": (u.contributesToReserve !== false && u.isOccupied !== false) ? "SÍ" : "NO",
         "Emails Autorizados": (u.authorizedEmails || []).join(', ')
       }));
     } else {
@@ -91,6 +95,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           "Propietario": "Juan Pérez",
           "Porcentaje Prorrateo": 5.0,
           "Saldo Inicial": 0,
+          "Aporta Reserva": "SÍ",
           "Emails Autorizados": "juan.perez@email.com"
         },
         {
@@ -99,6 +104,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           "Propietario": "Ana López",
           "Porcentaje Prorrateo": 4.5,
           "Saldo Inicial": -15000,
+          "Aporta Reserva": "NO",
           "Emails Autorizados": "ana.lopez@email.com"
         }
       ];
@@ -114,6 +120,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
       { wch: 28 }, // Propietario
       { wch: 22 }, // Porcentaje Prorrateo
       { wch: 16 }, // Saldo Inicial
+      { wch: 16 }, // Aporta Reserva
       { wch: 45 }  // Emails Autorizados
     ];
 
@@ -130,6 +137,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
         "Propietario": "Juan Pérez",
         "Porcentaje Prorrateo": 5.0000,
         "Saldo Inicial": 0,
+        "Aporta Reserva": "SÍ",
         "Emails Autorizados": "juan.perez@email.com"
       },
       {
@@ -138,6 +146,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
         "Propietario": "Ana López",
         "Porcentaje Prorrateo": 4.5000,
         "Saldo Inicial": -15000,
+        "Aporta Reserva": "NO",
         "Emails Autorizados": "ana.lopez@email.com, inquilino@email.com"
       }
     ];
@@ -145,7 +154,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Plantilla");
-    worksheet['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 16 }, { wch: 45 }];
+    worksheet['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 28 }, { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 45 }];
     XLSX.writeFile(workbook, "plantilla_unidades_vacia.xlsx");
   };
 
@@ -185,6 +194,14 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           const rawInitialBalance = row["Saldo Inicial"] ?? row["Saldo"] ?? 0;
           const initialBalance = parseFloat(String(rawInitialBalance).replace(',', '.')) || 0;
 
+          // Detección de Aporte a Reserva / Estado Ocupado
+          const rawReserve = String(
+            row["Aporta Reserva"] ?? row["Fondo Reserva"] ?? row["Reserva"] ?? row["Estado"] ?? row["Alquilado"] ?? "SI"
+          ).trim().toUpperCase();
+
+          const contributesToReserve = !(rawReserve === 'NO' || rawReserve === 'DESOCUPADO' || rawReserve === 'VACIO' || rawReserve === 'FALSE');
+          const isOccupied = contributesToReserve;
+
           const emailsStr = String(row["Emails Autorizados"] || row["Emails"] || row["Email"] || "").trim();
           const authorizedEmails = emailsStr
             ? emailsStr.split(/[,;]/).map(em => em.trim().toLowerCase()).filter(Boolean)
@@ -201,6 +218,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({
               proratePercentage,
               initialBalance,
               authorizedEmails,
+              isOccupied,
+              contributesToReserve,
               changes: [],
               errorReason: !unitNumber ? 'Falta el número de Unidad' : 'Falta el nombre del Propietario'
             });
@@ -223,6 +242,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({
               proratePercentage,
               initialBalance,
               authorizedEmails,
+              isOccupied,
+              contributesToReserve,
               changes: []
             });
           } else {
@@ -269,6 +290,16 @@ const UnitsView: React.FC<UnitsViewProps> = ({
               });
             }
 
+            const currentReserveFlag = existing.contributesToReserve !== false && existing.isOccupied !== false;
+            if (currentReserveFlag !== contributesToReserve) {
+              fieldChanges.push({
+                field: 'contributesToReserve',
+                label: 'Aporte a Fondo de Reserva',
+                before: currentReserveFlag ? 'SÍ (Alquilado)' : 'NO (Desocupado)',
+                after: contributesToReserve ? 'SÍ (Alquilado)' : 'NO (Desocupado)'
+              });
+            }
+
             const currentEmails = [...(existing.authorizedEmails || [])].map(e => e.trim().toLowerCase()).sort();
             const newEmails = [...authorizedEmails].sort();
             if (JSON.stringify(currentEmails) !== JSON.stringify(newEmails)) {
@@ -290,6 +321,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                 proratePercentage,
                 initialBalance,
                 authorizedEmails,
+                isOccupied,
+                contributesToReserve,
                 changes: fieldChanges,
                 existingUnit: existing
               });
@@ -303,6 +336,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                 proratePercentage,
                 initialBalance,
                 authorizedEmails,
+                isOccupied,
+                contributesToReserve,
                 changes: [],
                 existingUnit: existing
               });
@@ -372,7 +407,9 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           ownerName: item.ownerName,
           proratePercentage: item.proratePercentage,
           initialBalance: item.initialBalance,
-          authorizedEmails: item.authorizedEmails
+          authorizedEmails: item.authorizedEmails,
+          isOccupied: item.isOccupied,
+          contributesToReserve: item.contributesToReserve
         };
 
         await onUpdateUnit(item.existingUnit!.id, unitUpdates);
@@ -392,7 +429,9 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           ownerName: item.ownerName,
           proratePercentage: item.proratePercentage,
           initialBalance: item.initialBalance,
-          authorizedEmails: item.authorizedEmails
+          authorizedEmails: item.authorizedEmails,
+          isOccupied: item.isOccupied,
+          contributesToReserve: item.contributesToReserve
         };
 
         const created = await addUnit(consortiumId, newUnitData);
@@ -443,7 +482,9 @@ const UnitsView: React.FC<UnitsViewProps> = ({
         ownerName: formData.ownerName.trim(),
         proratePercentage: parseFloat(formData.proratePercentage) || 0,
         initialBalance: parseFloat(formData.initialBalance) || 0,
-        authorizedEmails
+        authorizedEmails,
+        isOccupied: formData.contributesToReserve,
+        contributesToReserve: formData.contributesToReserve
       };
 
       if (editingUnit) {
@@ -456,7 +497,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
       }
 
       setIsModalOpen(false);
-      setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '' });
+      setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '', contributesToReserve: true });
     } catch (err) {
       alert("Error al guardar la unidad.");
     } finally {
@@ -472,7 +513,8 @@ const UnitsView: React.FC<UnitsViewProps> = ({
       ownerName: u.ownerName,
       proratePercentage: String(u.proratePercentage || 0),
       initialBalance: String(u.initialBalance || 0),
-      authorizedEmailsStr: (u.authorizedEmails || []).join(', ')
+      authorizedEmailsStr: (u.authorizedEmails || []).join(', '),
+      contributesToReserve: u.contributesToReserve !== false && u.isOccupied !== false
     });
     setIsModalOpen(true);
   };
@@ -535,7 +577,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           <button 
             onClick={() => {
               setEditingUnit(null);
-              setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '' });
+              setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '', contributesToReserve: true });
               setIsModalOpen(true);
             }} 
             className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
@@ -555,6 +597,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                 <th className="px-6 py-4">Sector / Complejo</th>
                 <th className="px-6 py-4">UF / Unidad</th>
                 <th className="px-6 py-4">Propietario / Inquilino</th>
+                <th className="px-6 py-4 text-center">Fondo Reserva</th>
                 <th className="px-6 py-4 text-right">Prorrateo (%)</th>
                 <th className="px-6 py-4 text-right">Saldo Inicial</th>
                 <th className="px-6 py-4">Emails Vinculados</th>
@@ -564,43 +607,59 @@ const UnitsView: React.FC<UnitsViewProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredUnits.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-10 text-slate-400 font-medium">
+                  <td colSpan={8} className="text-center py-10 text-slate-400 font-medium">
                     No se encontraron unidades funcionales cargadas. Podés usar "Exportar a Excel" para descargar la planilla o "Importar Excel" para cargarlas.
                   </td>
                 </tr>
               ) : (
-                filteredUnits.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50/80 transition-colors group">
-                    <td className="px-6 py-4 font-bold text-indigo-600">
-                      {u.block ? <span className="bg-indigo-50 px-2.5 py-1 rounded-md text-[11px] border border-indigo-100 uppercase tracking-wide">{u.block}</span> : <span className="text-slate-300 text-xs">-</span>}
-                    </td>
-                    <td className="px-6 py-4 font-bold text-slate-800">{u.unitNumber}</td>
-                    <td className="px-6 py-4 text-slate-700 font-medium">{u.ownerName}</td>
-                    <td className="px-6 py-4 text-right font-mono text-slate-600 font-semibold">{(u.proratePercentage || 0).toFixed(4)}%</td>
-                    <td className={`px-6 py-4 text-right font-mono font-bold ${u.initialBalance && u.initialBalance < 0 ? 'text-rose-600' : 'text-slate-600'}`}>
-                        {formatCurrency(u.initialBalance || 0)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                        {(u.authorizedEmails || []).length === 0 ? (
-                          <span className="text-xs text-slate-400 italic">Ninguno asignado</span>
+                filteredUnits.map((u) => {
+                  const participatesInReserve = u.contributesToReserve !== false && u.isOccupied !== false;
+                  return (
+                    <tr key={u.id} className="hover:bg-slate-50/80 transition-colors group">
+                      <td className="px-6 py-4 font-bold text-indigo-600">
+                        {u.block ? <span className="bg-indigo-50 px-2.5 py-1 rounded-md text-[11px] border border-indigo-100 uppercase tracking-wide">{u.block}</span> : <span className="text-slate-300 text-xs">-</span>}
+                      </td>
+                      <td className="px-6 py-4 font-bold text-slate-800">{u.unitNumber}</td>
+                      <td className="px-6 py-4 text-slate-700 font-medium">{u.ownerName}</td>
+                      <td className="px-6 py-4 text-center">
+                        {participatesInReserve ? (
+                          <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-2.5 py-1 rounded-full shadow-xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            Alquilado (Aporta)
+                          </span>
                         ) : (
-                          u.authorizedEmails.map((em, idx) => (
-                            <span key={idx} className="text-[11px] bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-md flex items-center gap-1 border border-slate-200">
-                              <Mail className="w-3 h-3 text-slate-400" /> {em}
-                            </span>
-                          ))
+                          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold px-2.5 py-1 rounded-full shadow-xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                            Desocupado (Exento)
+                          </span>
                         )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <div className="flex justify-center items-center gap-1">
-                        <button onClick={() => handleEditClick(u)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar Unidad"><Edit2 className="w-4 h-4"/></button>
-                        <button onClick={() => handleDeleteClick(u.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Eliminar Unidad"><Trash2 className="w-4 h-4"/></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="px-6 py-4 text-right font-mono text-slate-600 font-semibold">{(u.proratePercentage || 0).toFixed(4)}%</td>
+                      <td className={`px-6 py-4 text-right font-mono font-bold ${u.initialBalance && u.initialBalance < 0 ? 'text-rose-600' : 'text-slate-600'}`}>
+                          {formatCurrency(u.initialBalance || 0)}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                          {(u.authorizedEmails || []).length === 0 ? (
+                            <span className="text-xs text-slate-400 italic">Ninguno asignado</span>
+                          ) : (
+                            u.authorizedEmails.map((em, idx) => (
+                              <span key={idx} className="text-[11px] bg-slate-100 text-slate-600 font-medium px-2 py-0.5 rounded-md flex items-center gap-1 border border-slate-200">
+                                <Mail className="w-3 h-3 text-slate-400" /> {em}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex justify-center items-center gap-1">
+                          <button onClick={() => handleEditClick(u)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Editar Unidad"><Edit2 className="w-4 h-4"/></button>
+                          <button onClick={() => handleDeleteClick(u.id)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Eliminar Unidad"><Trash2 className="w-4 h-4"/></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -754,6 +813,10 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                         <span className="text-slate-700 font-medium text-sm">
                           {item.ownerName}
                         </span>
+                        <span className="text-slate-400 text-xs">•</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${item.contributesToReserve ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                          {item.contributesToReserve ? 'Alquilado' : 'Desocupado (Exento)'}
+                        </span>
                       </div>
 
                       <div>
@@ -782,10 +845,16 @@ const UnitsView: React.FC<UnitsViewProps> = ({
 
                     {/* Detalle para NUEVAS */}
                     {item.type === 'NEW' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 pt-2 border-t border-emerald-100 text-xs text-slate-600">
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-2 pt-2 border-t border-emerald-100 text-xs text-slate-600">
                         <div>
                           <span className="text-slate-400 font-medium">Prorrateo:</span>{' '}
                           <strong className="text-slate-800">{item.proratePercentage.toFixed(4)}%</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 font-medium">Fondo Reserva:</span>{' '}
+                          <strong className={item.contributesToReserve ? 'text-emerald-700' : 'text-amber-700'}>
+                            {item.contributesToReserve ? 'Aporta' : 'Exento'}
+                          </strong>
                         </div>
                         <div>
                           <span className="text-slate-400 font-medium">Saldo Inicial:</span>{' '}
@@ -793,7 +862,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                         </div>
                         <div>
                           <span className="text-slate-400 font-medium">Emails:</span>{' '}
-                          <span className="text-slate-800">{item.authorizedEmails.length > 0 ? item.authorizedEmails.join(', ') : 'Ninguno'}</span>
+                          <span className="text-slate-800 truncate block">{item.authorizedEmails.length > 0 ? item.authorizedEmails.join(', ') : 'Ninguno'}</span>
                         </div>
                       </div>
                     )}
@@ -803,7 +872,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                       <div className="mt-2 pt-2 border-t border-amber-200/60 space-y-1.5 text-xs">
                         {item.changes.map((ch, chIdx) => (
                           <div key={chIdx} className="flex flex-wrap items-center gap-2 bg-white/80 p-2 rounded-lg border border-amber-100">
-                            <span className="font-bold text-slate-600 min-w-[120px]">{ch.label}:</span>
+                            <span className="font-bold text-slate-600 min-w-[140px]">{ch.label}:</span>
                             <span className="line-through text-rose-500 bg-rose-50 px-2 py-0.5 rounded font-mono">
                               {String(ch.before)}
                             </span>
@@ -909,6 +978,26 @@ const UnitsView: React.FC<UnitsViewProps> = ({
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Porcentaje Prorrateo (%)</label>
                 <input type="number" step="0.0001" value={formData.proratePercentage} onChange={e => setFormData({...formData, proratePercentage: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="5.0000"/>
+              </div>
+
+              {/* Toggle de Aporte a Fondo de Reserva / Ocupación */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={formData.contributesToReserve} 
+                    onChange={e => setFormData({...formData, contributesToReserve: e.target.checked})} 
+                    className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-800 block">
+                      Unidad Alquilada / Ocupada (Aporta a Fondo de Reserva)
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-0.5 block">
+                      Si se desmarca, la unidad figurará como desocupada y no pagará aporte de fondo de reserva.
+                    </span>
+                  </div>
+                </label>
               </div>
 
               <div>

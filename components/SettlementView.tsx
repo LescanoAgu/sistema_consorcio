@@ -100,15 +100,23 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           }
       });
 
-      // Cálculo Global de Reserva (El aporte es un % del Total de Gastos Ordinarios)
-      const resContribution = (tOrd * settings.monthlyReserveContributionPercentage) / 100;
-      
-      // Distribuimos la reserva usando el porcentaje de prorrateo original
-      const totalGlobalProrate = uniqueUnits.reduce((sum, u) => sum + u.proratePercentage, 0);
+      // Cálculo de Reserva: El aporte es un % del Total de Gastos Ordinarios
+      // SOLO las unidades que participan (alquiladas / no exentas) aportan al Fondo de Reserva
+      let totalActualReserveContribution = 0;
+      const totalGlobalProrate = uniqueUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
+
       uniqueUnits.forEach(u => {
-           const reserveShare = resContribution * (u.proratePercentage / totalGlobalProrate);
-           debtsMap.set(u.id, debtsMap.get(u.id)! + reserveShare);
+           const participates = u.contributesToReserve !== false && u.isOccupied !== false;
+           if (participates && (settings.monthlyReserveContributionPercentage || 0) > 0 && tOrd > 0) {
+               // El aporte para esta unidad es su porcentaje de prorrateo sobre el aporte total ordinario
+               const unitProrateRatio = (Number(u.proratePercentage) || 0) / totalGlobalProrate;
+               const reserveShare = (tOrd * settings.monthlyReserveContributionPercentage / 100) * unitProrateRatio;
+               debtsMap.set(u.id, debtsMap.get(u.id)! + reserveShare);
+               totalActualReserveContribution += reserveShare;
+           }
       });
+
+      const resContribution = totalActualReserveContribution;
 
       // settings.reserveFundBalance is the true ledger balance (computed in App.tsx) 
       // which ALREADY has tRes deducted from it. 
@@ -180,9 +188,16 @@ const SettlementView: React.FC<SettlementViewProps> = ({
       }
 
       const safeUnit: Unit = {
-          id: rawUnit.id, unitNumber: rawUnit.unitNumber || '?', ownerName: rawUnit.ownerName || '?',
-          proratePercentage: Number(rawUnit.proratePercentage || 0), initialBalance: rawUnit.initialBalance || 0, 
-          authorizedEmails: rawUnit.authorizedEmails || [], debts: rawUnit.debts || []
+          id: rawUnit.id, 
+          unitNumber: rawUnit.unitNumber || '?', 
+          ownerName: rawUnit.ownerName || '?',
+          block: rawUnit.block || '',
+          proratePercentage: Number(rawUnit.proratePercentage || 0), 
+          initialBalance: rawUnit.initialBalance || 0, 
+          authorizedEmails: rawUnit.authorizedEmails || [], 
+          debts: rawUnit.debts || [],
+          isOccupied: rawUnit.isOccupied,
+          contributesToReserve: rawUnit.contributesToReserve
       };
       
       generateIndividualCouponPDF(dummyRecord, safeUnit, consortiumData, settings, units);
@@ -219,9 +234,16 @@ const SettlementView: React.FC<SettlementViewProps> = ({
               setTimeout(() => {
                   const rawUnit = units.find(u => u.id === debtItem.unitId);
                   const safeUnit: Unit = {
-                      id: debtItem.unitId, unitNumber: debtItem.unitNumber || '?', ownerName: debtItem.owner || '?',
-                      proratePercentage: Number(rawUnit?.proratePercentage || 0), initialBalance: rawUnit?.initialBalance || 0, 
-                      authorizedEmails: rawUnit?.authorizedEmails || [], debts: rawUnit?.debts || []
+                      id: debtItem.unitId, 
+                      unitNumber: debtItem.unitNumber || '?', 
+                      ownerName: debtItem.owner || '?',
+                      block: rawUnit?.block || '',
+                      proratePercentage: Number(rawUnit?.proratePercentage || 0), 
+                      initialBalance: rawUnit?.initialBalance || 0, 
+                      authorizedEmails: rawUnit?.authorizedEmails || [], 
+                      debts: rawUnit?.debts || [],
+                      isOccupied: rawUnit?.isOccupied,
+                      contributesToReserve: rawUnit?.contributesToReserve
                   };
                   generateIndividualCouponPDF(finalRecordForPDF, safeUnit, consortiumData, settings, units);
               }, delay);

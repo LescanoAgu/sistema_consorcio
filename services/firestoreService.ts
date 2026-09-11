@@ -309,12 +309,17 @@ export const getSettings = async (consortiumId: string): Promise<ConsortiumSetti
     const snap = await getDoc(docRef);
     if (snap.exists()) {
         const data = snap.data();
-        return { ...data, interestRate: data.interestRate !== undefined ? data.interestRate : 5 } as ConsortiumSettings;
+        return { 
+            showBankDetailsOnCoupon: true,
+            ...data, 
+            interestRate: data.interestRate !== undefined ? data.interestRate : 5 
+        } as ConsortiumSettings;
     } else {
         return { 
             reserveFundBalance: 0, monthlyReserveContributionPercentage: 5, interestRate: 5,
             bankName: '', bankCBU: '', bankAlias: '', bankHolder: '', bankCuit: '',
-            address: '', cuit: '', adminName: ''
+            address: '', cuit: '', adminName: '',
+            showBankDetailsOnCoupon: true
         };
     }
 };
