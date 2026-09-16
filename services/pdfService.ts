@@ -125,6 +125,36 @@ function addPageNumbers(doc: jsPDF) {
 
 // --- GENERADOR CUPÓN INDIVIDUAL ITEMIZADO (REDISEÑADO A 1 PÁGINA) ---
 
+
+export const normalizePeriod = (str: string) => {
+    return (str || '')
+        .toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/\bde\b/g, '')
+        .replace(/\bdel\b/g, '')
+        .replace(/\bborrador\b/g, '')
+        .replace(/\bvista previa\b/g, '')
+        .replace(/[-/]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+export const isCurrentPeriodDebt = (debtPeriod: string, settlementMonth: string) => {
+    const p1 = normalizePeriod(debtPeriod);
+    const p2 = normalizePeriod(settlementMonth);
+    
+    // Si coinciden los períodos normalizados
+    if (p1 && p2 && p1 === p2) return true;
+
+    // Si el settlementMonth dice BORRADOR o está vacío, comparamos contra el mes actual del sistema
+    const currentSystemMonth = normalizePeriod(new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' }));
+    if ((!p2 || (settlementMonth || '').toUpperCase().includes('BORRADOR')) && p1 === currentSystemMonth) {
+        return true;
+    }
+
+    return false;
+};
+
 const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: Consortium, settings: ConsortiumSettings, allUnitsData: Unit[]) => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -358,13 +388,16 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         bodyRows.push(['Ajustes por redondeo técnico / Ítems particulares', '-', '-', formatCurrency(diff)]);
     }
 
-    // Cálculo e inyección de Deuda Histórica
+    // Filtrar para excluir cualquier deuda que corresponda al mismo período de la liquidación actual
+    const priorDebts = (unit.debts || []).filter(debt => !isCurrentPeriodDebt(debt.period, settlement.month));
+
+    // Cálculo e inyección de Deuda Histórica Real (SOLO deudas de períodos anteriores)
     let totalHistoricalDebt = 0;
     const initialBalance = unit.initialBalance || 0;
     if (initialBalance > 0) totalHistoricalDebt += initialBalance;
-    if (unit.debts) {
-        unit.debts.forEach(debt => totalHistoricalDebt += debt.total);
-    }
+    priorDebts.forEach(debt => {
+        totalHistoricalDebt += debt.total;
+    });
 
     if (totalHistoricalDebt > 0) {
         bodyRows.push([
@@ -499,12 +532,10 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         if (initialBalance > 0) {
             debtRows.push(['Saldo Inicial / Deuda Previa', formatCurrency(initialBalance), '-', formatCurrency(initialBalance)]);
         }
-        if (unit.debts) {
-            unit.debts.forEach(debt => {
-                const interestDetail = debt.interestAmount > 0 ? `${formatCurrency(debt.interestAmount)} (${debt.interestRate}%)` : '-';
-                debtRows.push([debt.period, formatCurrency(debt.baseAmount), interestDetail, formatCurrency(debt.total)]);
-            });
-        }
+        priorDebts.forEach(debt => {
+            const interestDetail = debt.interestAmount > 0 ? `${formatCurrency(debt.interestAmount)} (${debt.interestRate}%)` : '-';
+            debtRows.push([debt.period, formatCurrency(debt.baseAmount), interestDetail, formatCurrency(debt.total)]);
+        });
         debtRows.push(['TOTAL DEUDA ACUMULADA', '', '', formatCurrency(totalHistoricalDebt)]);
 
         autoTable(doc, {

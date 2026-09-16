@@ -156,7 +156,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
       const totalCollected = recentPayments.reduce((sum, p) => sum + p.amount, 0);
 
       const dummyRecord: SettlementRecord = {
-          id: 'preview', month: 'BORRADOR / VISTA PREVIA', dateClosed: new Date().toISOString(),
+          id: 'preview', month: new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' }), dateClosed: new Date().toISOString(),
           totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: reserveBalanceStart,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
           firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
