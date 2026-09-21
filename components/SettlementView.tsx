@@ -64,9 +64,13 @@ const SettlementView: React.FC<SettlementViewProps> = ({
       units.forEach(u => uniqueUnitsMap.set(u.id, u));
       const uniqueUnits = Array.from(uniqueUnitsMap.values()) as Unit[];
 
-      // Inicializamos el mapa de deudas
-      const debtsMap = new Map<string, number>();
-      uniqueUnits.forEach(u => debtsMap.set(u.id, 0));
+      // Inicializamos mapas de deudas separadas (ordinarias y extraordinarias)
+      const ordDebtsMap = new Map<string, number>();
+      const extDebtsMap = new Map<string, number>();
+      uniqueUnits.forEach(u => {
+          ordDebtsMap.set(u.id, 0);
+          extDebtsMap.set(u.id, 0);
+      });
 
       // Calculamos gasto por gasto
       expenses.forEach(exp => {
@@ -86,34 +90,39 @@ const SettlementView: React.FC<SettlementViewProps> = ({
 
           if (affectedUnits.length === 0) return;
 
+          const targetMap = exp.category === 'Ordinary' ? ordDebtsMap : extDebtsMap;
+
           // Distribuimos el monto
           if (exp.distributionType === ExpenseDistributionType.EQUAL_PARTS) {
               const share = exp.amount / affectedUnits.length;
-              affectedUnits.forEach(u => debtsMap.set(u.id, debtsMap.get(u.id)! + share));
+              affectedUnits.forEach(u => targetMap.set(u.id, targetMap.get(u.id)! + share));
           } else {
               // PRORATEO: Sumamos los coeficientes de los afectados para hacer la regla de 3
-              const totalProrate = affectedUnits.reduce((sum, u) => sum + u.proratePercentage, 0);
+              const totalProrate = affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
               affectedUnits.forEach(u => {
-                  const share = exp.amount * (u.proratePercentage / totalProrate);
-                  debtsMap.set(u.id, debtsMap.get(u.id)! + share);
+                  const share = exp.amount * ((Number(u.proratePercentage) || 0) / totalProrate);
+                  targetMap.set(u.id, targetMap.get(u.id)! + share);
               });
           }
       });
 
-      // Cálculo de Reserva: El aporte es un % del Total de Gastos Ordinarios
-      // SOLO las unidades que participan (alquiladas / no exentas) aportan al Fondo de Reserva
+      // Cálculo de Reserva: El aporte es el % directo para TODOS sobre su cuota de expensas ordinarias
       let totalActualReserveContribution = 0;
-      const totalGlobalProrate = uniqueUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
+      const debtsMap = new Map<string, number>();
 
       uniqueUnits.forEach(u => {
+           const unitOrd = ordDebtsMap.get(u.id) || 0;
+           const unitExt = extDebtsMap.get(u.id) || 0;
+
            const participates = u.contributesToReserve !== false && u.isOccupied !== false;
-           if (participates && (settings.monthlyReserveContributionPercentage || 0) > 0 && tOrd > 0) {
-               // El aporte para esta unidad es su porcentaje de prorrateo sobre el aporte total ordinario
-               const unitProrateRatio = (Number(u.proratePercentage) || 0) / totalGlobalProrate;
-               const reserveShare = (tOrd * settings.monthlyReserveContributionPercentage / 100) * unitProrateRatio;
-               debtsMap.set(u.id, debtsMap.get(u.id)! + reserveShare);
+           let reserveShare = 0;
+           if (participates && (settings.monthlyReserveContributionPercentage || 0) > 0 && unitOrd > 0) {
+               // Mismo % para todos aplicado directamente sobre las expensas ordinarias de la unidad
+               reserveShare = (unitOrd * settings.monthlyReserveContributionPercentage) / 100;
                totalActualReserveContribution += reserveShare;
            }
+
+           debtsMap.set(u.id, unitOrd + unitExt + reserveShare);
       });
 
       const resContribution = totalActualReserveContribution;

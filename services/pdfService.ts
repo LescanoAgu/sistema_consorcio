@@ -348,15 +348,12 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ]);
     }
 
-    // 3. SECCIÓN FONDO DE RESERVA (Solo si la unidad participa / está alquilada)
+    // 3. SECCIÓN FONDO DE RESERVA (Mismo % para todos sobre sus expensas ordinarias)
     let reserveContributionForUnit = 0;
-    const totalOrdinaryInSettlement = allExpenses
-        .filter(e => e.category === 'Ordinary' && e.distributionType !== 'FROM_RESERVE')
-        .reduce((sum, e) => sum + e.amount, 0);
 
-    if (participatesInReserve && (settings.monthlyReserveContributionPercentage || 0) > 0 && totalOrdinaryInSettlement > 0) {
-        const totalReserveOrdBase = (totalOrdinaryInSettlement * settings.monthlyReserveContributionPercentage) / 100;
-        reserveContributionForUnit = totalReserveOrdBase * globalProrateRatio;
+    if (participatesInReserve && (settings.monthlyReserveContributionPercentage || 0) > 0 && sumOrdinary > 0) {
+        // El porcentaje es el mismo para todos aplicado a las expensas ordinarias de la unidad
+        reserveContributionForUnit = (sumOrdinary * settings.monthlyReserveContributionPercentage) / 100;
 
         bodyRows.push([
             { 
@@ -367,8 +364,8 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ]);
         bodyRows.push([
             `Aporte Mensual (${settings.monthlyReserveContributionPercentage}% sobre Ordinarias)`,
-            formatCurrency(totalReserveOrdBase),
-            `Prorrateo ${formattedPercentage}%`,
+            formatCurrency(sumOrdinary),
+            `${settings.monthlyReserveContributionPercentage}% directo`,
             formatCurrency(reserveContributionForUnit)
         ]);
         bodyRows.push([
