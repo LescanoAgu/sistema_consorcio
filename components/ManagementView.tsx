@@ -89,7 +89,7 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
 
       <div className="animate-fade-in">
           {activeTab === 'COBROS' && <CollectionsView payments={props.payments} units={props.units} history={props.history} onAddPayment={props.onAddPayment} onUpdateStatus={props.onUpdateStatus} onUpdateUnit={props.onUpdateUnit} />}
-          {activeTab === 'DEUDAS' && <DebtorsView units={props.units} history={props.history} payments={props.payments} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} />}
+          {activeTab === 'DEUDAS' && <DebtorsView units={props.units} setUnits={props.setUnits} history={props.history} payments={props.payments} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} />}
           {activeTab === 'UNIDADES' && <UnitsView units={props.units} setUnits={props.setUnits} consortiumId={props.consortiumId} payments={props.payments} history={props.history} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} onDeletePayment={props.onDeletePayment} />}
           
           {activeTab === 'SOLICITUDES' && (

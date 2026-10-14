@@ -842,12 +842,41 @@ export const generateDebtDetailPDF = (unit: Unit, consortium: Consortium) => {
     (unit.debts || []).forEach(debt => {
         totalDebt += debt.total;
         tableBody.push([
-            debt.period, 
+            { content: debt.period, styles: { fontStyle: 'bold' } }, 
             formatCurrency(debt.baseAmount), 
             `${debt.interestRate}%`, 
             formatCurrency(debt.interestAmount), 
             formatCurrency(debt.total)
         ]);
+
+        // Si la deuda tiene historial evolutivo de intereses (Kárdex matricial), desglosar sub-filas
+        if (debt.interestLogs && debt.interestLogs.length > 0) {
+            debt.interestLogs.forEach((log, logIdx) => {
+                const dateLabel = log.dateApplied ? formatDate(log.dateApplied) : `Aplicación #${logIdx + 1}`;
+                tableBody.push([
+                    { 
+                        content: `    ↳ Reg. Evolutivo: ${dateLabel}`, 
+                        styles: { fontSize: 8.5, textColor: [100, 116, 139], fontStyle: 'italic' } 
+                    },
+                    { 
+                        content: '-', 
+                        styles: { fontSize: 8.5, textColor: [148, 163, 184], halign: 'right' } 
+                    },
+                    { 
+                        content: `+${log.rate}%`, 
+                        styles: { fontSize: 8.5, textColor: [79, 70, 229], halign: 'center', fontStyle: 'bold' } 
+                    },
+                    { 
+                        content: `+${formatCurrency(log.addedAmount)}`, 
+                        styles: { fontSize: 8.5, textColor: [180, 83, 9], halign: 'right' } 
+                    },
+                    { 
+                        content: `Acum: ${formatCurrency(log.currentTotal)}`, 
+                        styles: { fontSize: 8.5, textColor: [71, 85, 105], halign: 'right', fontStyle: 'italic' } 
+                    }
+                ]);
+            });
+        }
     });
 
     if (tableBody.length === 0) {
@@ -856,12 +885,13 @@ export const generateDebtDetailPDF = (unit: Unit, consortium: Consortium) => {
 
     autoTable(doc, {
         startY: finalY, 
-        head: [['PERÍODO', 'IMPORTE BASE', '% INT.', 'INTERÉS', 'SUBTOTAL']], 
+        head: [['PERÍODO / CONCEPTO', 'IMPORTE BASE', '% INT.', 'INTERÉS', 'SUBTOTAL']], 
         body: tableBody, 
         theme: 'plain',
         headStyles: { fillColor: THEME.secondary, textColor: [255, 255, 255], fontStyle: 'bold' },
         bodyStyles: { fontSize: 10, textColor: THEME.text, cellPadding: 4 },
         columnStyles: { 
+            0: { cellWidth: 55 },
             1: { halign: 'right' }, 
             2: { halign: 'center' }, 
             3: { halign: 'right' }, 

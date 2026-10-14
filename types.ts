@@ -42,6 +42,16 @@ export interface Booking {
 }
 
 /**
+ * Registro individual en el historial evolutivo de intereses (Kárdex matricial).
+ */
+export interface InterestLog {
+  dateApplied: string;
+  rate: number;
+  addedAmount: number;
+  currentTotal: number;
+}
+
+/**
  * Item individual de deuda por período mensual.
  * Permite mantener la deuda separada por mes (Ej: Enero $50k, Febrero $60k),
  * imputar pagos a la más antigua y calcular interés simple sobre el baseAmount de cada período.
@@ -54,7 +64,8 @@ export interface DebtItem {
   interestAmount: number; 
   total: number;
   paidAmount?: number;
-  createdAt?: string;        
+  createdAt?: string;
+  interestLogs?: InterestLog[];
 }
 
 export interface Unit {

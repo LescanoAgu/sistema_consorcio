@@ -252,7 +252,8 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
                         interestRate: existingIndex >= 0 ? currentDebts[existingIndex].interestRate : 0,
                         interestAmount: existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0,
                         total: detail.totalToPay + (existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0),
-                        createdAt: existingIndex >= 0 ? currentDebts[existingIndex].createdAt : new Date().toISOString()
+                        createdAt: existingIndex >= 0 ? currentDebts[existingIndex].createdAt : new Date().toISOString(),
+                        interestLogs: existingIndex >= 0 ? (currentDebts[existingIndex].interestLogs || []) : []
                     };
 
                     if (existingIndex >= 0) {
@@ -402,5 +403,22 @@ export const updateJoinRequest = async (id: string, status: 'APPROVED' | 'REJECT
     await updateDoc(doc(db, 'join_requests', id), { status });
 };
 
-// AUTOMATIZACIÓN DE FONDO DE RESERVA
-// Función `rebuildReserveFund` fue eliminada a petición del usuario.
+/**
+ * Importación masiva de deudas históricas con writeBatch de Firestore.
+ * Procesa en lotes de hasta 450 documentos para garantizar cumplimiento con los límites de Firestore.
+ */
+export const importDebtsBatch = async (
+    consortiumId: string,
+    unitDebtsUpdates: { unitId: string; debts: DebtItem[] }[]
+): Promise<void> => {
+    const CHUNK_SIZE = 450;
+    for (let i = 0; i < unitDebtsUpdates.length; i += CHUNK_SIZE) {
+        const chunk = unitDebtsUpdates.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(update => {
+            const unitRef = doc(db, `consortiums/${consortiumId}/units`, update.unitId);
+            batch.update(unitRef, { debts: update.debts });
+        });
+        await batch.commit();
+    }
+};
