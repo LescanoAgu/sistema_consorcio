@@ -65,8 +65,27 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
           let allocations: { period: string; amount: number }[] = [];
           let updatedInitialBalance = showPayModal.initialBalance || 0;
 
-          // Ordenar deudas: más antiguas primero (asumiendo que period es "YYYY-MM")
-          let debtsToProcess = updatedDebts.sort((a: any, b: any) => a.period.localeCompare(b.period));
+          // Helper para ordenar períodos cronológicamente (más antiguos primero)
+          const parsePeriodSortKey = (periodStr: string): number => {
+              if (!periodStr) return 0;
+              const clean = periodStr.toLowerCase().trim();
+              if (clean.includes('inicial') || clean.includes('previa')) return -1;
+              const monthMap: { [key: string]: number } = {
+                  enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+                  julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10,
+                  noviembre: 11, diciembre: 12
+              };
+              let m = 0;
+              for (const [name, num] of Object.entries(monthMap)) {
+                  if (clean.includes(name)) { m = num; break; }
+              }
+              const yMatch = clean.match(/\b(20\d\d)\b/);
+              const y = yMatch ? parseInt(yMatch[1], 10) : 2000;
+              return y * 100 + m;
+          };
+
+          // Ordenar deudas: más antiguas primero cronológicamente
+          let debtsToProcess = updatedDebts.sort((a: any, b: any) => parsePeriodSortKey(a.period) - parsePeriodSortKey(b.period));
 
           // Si el usuario seleccionó deudas específicas, solo afectamos a esas
           if (selectedDebtIds.length > 0) {
@@ -83,13 +102,22 @@ const CollectionsView: React.FC<CollectionsViewProps> = ({ payments, units, hist
               }
           }
 
-          // Distribuir a las deudas
+          // Distribuir a las deudas cronológicamente (imputando primero a intereses y luego al capital base)
           for (const debt of debtsToProcess) {
               if (remainingToAllocate <= 0) break;
               const amountToApply = Math.min(debt.total, remainingToAllocate);
               if (amountToApply > 0) {
                   allocations.push({ period: debt.period, amount: amountToApply });
-                  debt.total -= amountToApply;
+
+                  const currentInterest = Number(debt.interestAmount) || 0;
+                  const payToInterest = Math.min(currentInterest, amountToApply);
+                  const payToBase = amountToApply - payToInterest;
+
+                  debt.interestAmount = Math.max(0, currentInterest - payToInterest);
+                  debt.baseAmount = Math.max(0, (Number(debt.baseAmount) || 0) - payToBase);
+                  debt.total = Math.max(0, debt.baseAmount + debt.interestAmount);
+                  debt.paidAmount = (debt.paidAmount || 0) + amountToApply;
+
                   remainingToAllocate -= amountToApply;
               }
           }

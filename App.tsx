@@ -80,8 +80,39 @@ function App() {
       }
   }, [consortiumList]);
 
+  /**
+   * Resolución de Roles de Usuario y Hardware IoT / Control de Accesos:
+   * 
+   * Se evalúa el perfil autenticado para otorgar permisos según su rol funcional:
+   * - 'ADMIN': Administrador del consorcio con acceso total a contabilidad, cobranzas y liquidaciones.
+   * - 'DEVICE': Microcontroladores o dispositivos embebidos (ESP32, Raspberry Pi, relés de portones,
+   *             porteros IP, molinetes) que operan con credenciales de servicio IoT.
+   * - 'CONTROL_WIFI': Módulos de automatización de control de acceso Wi-Fi local para apertura y telemetría.
+   * - 'USER': Propietarios e inquilinos que acceden a "Mis Unidades", reservas y reportes de pago.
+   */
   const isConsortiumAdmin = useMemo(() => consortium && user ? (consortium.adminIds || []).includes(user.uid) : false, [consortium, user]);
-  const userRole: UserRole = isConsortiumAdmin ? 'ADMIN' : 'USER';
+
+  const userRole: UserRole = useMemo(() => {
+      if (!user) return 'USER';
+      
+      const emailLower = (user.email || '').toLowerCase();
+      
+      // Verificación de dispositivos de hardware IoT / Automatización
+      if (emailLower.includes('control_wifi') || emailLower.endsWith('@wifi.consorcio.local')) {
+          return 'CONTROL_WIFI';
+      }
+      if (emailLower.includes('device') || emailLower.includes('hardware') || emailLower.endsWith('@iot.consorcio.local')) {
+          return 'DEVICE';
+      }
+      
+      // Administrador
+      if (isConsortiumAdmin) {
+          return 'ADMIN';
+      }
+      
+      // Rol por defecto para residentes y propietarios
+      return 'USER';
+  }, [user, isConsortiumAdmin]);
 
   const { data: fetchedUnits } = useQuery({
       queryKey: ['units', consortium?.id, user?.email],
@@ -131,13 +162,29 @@ function App() {
 
   // (Removed faulty reactive role middleware)
 
-  // Interceptor de navegación segura para prevenir que un USER acceda a paneles ADMIN tecleando o forzando el estado
+  // Interceptor de navegación segura para prevenir accesos indebidos según el rol
   const handleSetViewSafe = (requestedView: ViewState) => {
-      if (userRole === 'USER' && ['accounting', 'management', 'settings', 'expenses', 'collections'].includes(requestedView)) {
-          setView('user_portal');
-      } else {
-          setView(requestedView);
+      switch (userRole) {
+          case 'USER':
+              if (['accounting', 'management', 'settings', 'expenses', 'collections'].includes(requestedView)) {
+                  setView('user_portal');
+                  return;
+              }
+              break;
+          case 'DEVICE':
+          case 'CONTROL_WIFI':
+              // Los dispositivos de hardware están restringidos principalmente a telemetría / dashboard y perfil
+              if (!['dashboard', 'profile'].includes(requestedView)) {
+                  setView('dashboard');
+                  return;
+              }
+              break;
+          case 'ADMIN':
+          default:
+              // Los administradores tienen acceso sin restricciones
+              break;
       }
+      setView(requestedView);
   };
 
   const handleSelectConsortium = (c: Consortium) => { localStorage.setItem('selectedConsortiumId', c.id); setConsortium(c); };
@@ -160,6 +207,12 @@ function App() {
 
         setHistory(newHistory); setExpenses([]); 
         
+        // Recargar las unidades inmediatamente para que los estados y deudas se actualicen en vivo
+        if (user) {
+            const updatedUnits = await getUnits(consortium.id, user.email, isConsortiumAdmin);
+            setUnits(updatedUnits);
+        }
+
         if (view !== 'accounting') {
             setView('history');
         }

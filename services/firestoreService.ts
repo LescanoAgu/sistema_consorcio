@@ -3,7 +3,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; 
 import { db } from '../src/config/firebase'; 
-import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ExpenseTemplate, ReserveTransaction, JoinRequest } from '../types';
+import { Unit, Expense, Payment, SettlementRecord, Consortium, ConsortiumSettings, Announcement, MaintenanceRequest, Amenity, Booking, ConsortiumDocument, ExpenseTemplate, ReserveTransaction, JoinRequest, DebtItem } from '../types';
 
 export const clearCollection = async (consortiumId: string, collectionName: string) => {
     const q = query(collection(db, `consortiums/${consortiumId}/${collectionName}`));
@@ -232,22 +232,38 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
     // (Ya no sobreescribimos reserveFundBalance en settings — el saldo real siempre
     // se computa en App.tsx desde la suma de reserve_transactions, no desde settings)
 
-    // Actualizar deudas de las unidades
+    // Actualizar deudas de las unidades:
+    // En lugar de consolidar o borrar deudas anteriores, el cierre de mes agrega ÚNICAMENTE
+    // el monto de las expensas de ESE mes (detail.totalToPay) como un nuevo período de deuda.
+    // De esta forma, cada deudor mantiene sus períodos separados individualmente (Ej: Enero $50k, Feb $60k)
+    // permitiendo imputar pagos a la más antigua y calcular interés simple sobre el baseAmount de cada mes.
     if (record.unitDetails && units.length > 0) {
         record.unitDetails.forEach(detail => {
             if (detail.totalToPay > 0) {
                 const unit = units.find(u => u.id === detail.unitId);
                 if (unit) {
-                    const newDebtItem = {
-                        id: `debt_${record.month}_${Date.now()}`,
+                    const currentDebts: DebtItem[] = [...(unit.debts || [])];
+                    const existingIndex = currentDebts.findIndex(d => d.period === record.month);
+
+                    const newDebtItem: DebtItem = {
+                        id: existingIndex >= 0 ? currentDebts[existingIndex].id : `debt_${record.month.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`,
                         period: record.month,
                         baseAmount: detail.totalToPay,
-                        interestRate: 0,
-                        interestAmount: 0,
-                        total: detail.totalToPay
+                        interestRate: existingIndex >= 0 ? currentDebts[existingIndex].interestRate : 0,
+                        interestAmount: existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0,
+                        total: detail.totalToPay + (existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0),
+                        createdAt: existingIndex >= 0 ? currentDebts[existingIndex].createdAt : new Date().toISOString()
                     };
-                    const updatedDebts = [...(unit.debts || []), newDebtItem];
-                    mainBatch.update(doc(db, `consortiums/${consortiumId}/units`, unit.id), { debts: updatedDebts });
+
+                    if (existingIndex >= 0) {
+                        // Si ya existía el registro de este período, se actualiza su baseAmount sin duplicarlo
+                        currentDebts[existingIndex] = newDebtItem;
+                    } else {
+                        // Se agrega al listado de períodos históricos conservando todas las deudas previas separadas
+                        currentDebts.push(newDebtItem);
+                    }
+
+                    mainBatch.update(doc(db, `consortiums/${consortiumId}/units`, unit.id), { debts: currentDebts });
                 }
             }
         });

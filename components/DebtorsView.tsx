@@ -111,13 +111,24 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
         const newDebt = { ...debt };
         if (field === 'period') {
           newDebt.period = value;
-        } else {
-          const numValue = parseFloat(value) || 0;
-          (newDebt as any)[field] = numValue;
-          if (field === 'baseAmount' || field === 'interestRate') {
-            newDebt.interestAmount = newDebt.baseAmount * (newDebt.interestRate / 100);
-            newDebt.total = newDebt.baseAmount + newDebt.interestAmount;
-          }
+        } else if (field === 'baseAmount') {
+          const numValue = Math.max(0, parseFloat(value) || 0);
+          newDebt.baseAmount = numValue;
+          // Interés simple calculado sobre el nuevo monto base del período
+          newDebt.interestAmount = Number((numValue * ((newDebt.interestRate || 0) / 100)).toFixed(2));
+          newDebt.total = Number((numValue + newDebt.interestAmount).toFixed(2));
+        } else if (field === 'interestRate') {
+          const numValue = Math.max(0, parseFloat(value) || 0);
+          newDebt.interestRate = numValue;
+          // Interés simple: baseAmount * rate%
+          newDebt.interestAmount = Number((newDebt.baseAmount * (numValue / 100)).toFixed(2));
+          newDebt.total = Number((newDebt.baseAmount + newDebt.interestAmount).toFixed(2));
+        } else if (field === 'interestAmount') {
+          const numValue = Math.max(0, parseFloat(value) || 0);
+          newDebt.interestAmount = numValue;
+          // Deducir el porcentaje simple a partir del monto en pesos
+          newDebt.interestRate = newDebt.baseAmount > 0 ? Number(((numValue / newDebt.baseAmount) * 100).toFixed(2)) : 0;
+          newDebt.total = Number((newDebt.baseAmount + numValue).toFixed(2));
         }
         return newDebt;
       }
@@ -148,14 +159,32 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
     const updated = editingDebts.map((debt, i) => {
       const safeId = debt.id || debt.period || String(i);
       if (selectedDebtIds.includes(safeId)) {
-        const newInterestAmount = debt.baseAmount * (rate / 100);
-        return { ...debt, interestRate: rate, interestAmount: newInterestAmount, total: debt.baseAmount + newInterestAmount };
+        const newInterestAmount = Number((debt.baseAmount * (rate / 100)).toFixed(2));
+        return { ...debt, interestRate: rate, interestAmount: newInterestAmount, total: Number((debt.baseAmount + newInterestAmount).toFixed(2)) };
       }
       return debt;
     });
     setEditingDebts(updated);
     setSelectedDebtIds([]);
     setBulkInterestRate('');
+  };
+
+  const removeBulkInterest = () => {
+    if (selectedDebtIds.length === 0) return;
+    const updated = editingDebts.map((debt, i) => {
+      const safeId = debt.id || debt.period || String(i);
+      if (selectedDebtIds.includes(safeId)) {
+        return {
+          ...debt,
+          interestRate: 0,
+          interestAmount: 0,
+          total: Number(debt.baseAmount.toFixed(2))
+        };
+      }
+      return debt;
+    });
+    setEditingDebts(updated);
+    setSelectedDebtIds([]);
   };
 
   const saveDebts = async () => {
@@ -167,9 +196,11 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
         id: d.id,
         period: d.period || '',
         baseAmount: Number(d.baseAmount) || 0,
+        paidAmount: Number(d.paidAmount) || 0,
         interestRate: Number(d.interestRate) || 0,
         interestAmount: Number(d.interestAmount) || 0,
-        total: Number(d.total) || 0
+        total: Number(d.total) || 0,
+        createdAt: d.createdAt || new Date().toISOString()
       }));
 
       await onUpdateUnit(selectedUnit.id, { debts: cleanDebts });
@@ -192,6 +223,8 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
 
   const currentUnitDebt = getUnitDebt(selectedUnit);
   const realTimeHistoricalDebt = editingDebts.reduce((sum, d) => sum + d.total, 0) + (selectedUnit?.initialBalance || 0);
+  const totalBaseDebt = editingDebts.reduce((sum, d) => sum + (d.baseAmount || 0), 0) + (selectedUnit?.initialBalance || 0);
+  const totalInterestDebt = editingDebts.reduce((sum, d) => sum + (d.interestAmount || 0), 0);
 
   const filteredUnits = units.filter(u =>
     u.unitNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -282,9 +315,10 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                       <p className="text-xl font-black text-amber-600">{formatCurrency(currentUnitDebt.current)}</p>
                     </div>
                   )}
-                  <div className="bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+                  <div className="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-right">
                     <p className="text-[10px] text-red-600 uppercase font-bold tracking-wider">Deuda Histórica</p>
                     <p className="text-xl font-black text-red-600">{formatCurrency(realTimeHistoricalDebt)}</p>
+                    <p className="text-[10px] text-slate-500 font-medium">Base: {formatCurrency(totalBaseDebt)} | Int: {formatCurrency(totalInterestDebt)}</p>
                   </div>
                 </div>
               </div>
@@ -333,6 +367,14 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                       className="ml-auto px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
                     >
                       Aplicar Lote
+                    </button>
+                    <button
+                      onClick={removeBulkInterest}
+                      disabled={selectedDebtIds.length === 0}
+                      className="px-3 py-1.5 bg-slate-200 text-slate-700 hover:bg-slate-300 text-xs font-bold rounded disabled:opacity-50 transition-colors shadow-sm"
+                      title="Quitar intereses de los períodos seleccionados"
+                    >
+                      Quitar Interés
                     </button>
                   </div>
                 </div>
@@ -416,8 +458,18 @@ const DebtorsView: React.FC<DebtorsViewProps> = ({ units, history, payments, con
                           <span className="absolute right-2 top-2 text-slate-400 text-sm">%</span>
                         </div>
                       </div>
-                      <div className="col-span-2 text-sm font-medium text-slate-500 pl-2">
-                        {formatCurrency(debt.interestAmount)}
+                      <div className="col-span-2">
+                        <div className="relative">
+                          <span className="absolute left-2 top-2 text-slate-400 text-sm">$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.00"
+                            className="w-full pl-6 bg-white border border-slate-200 rounded text-sm p-2 outline-none focus:border-indigo-500"
+                            value={debt.interestAmount === 0 ? '' : debt.interestAmount}
+                            onChange={(e) => updateDebtField(safeId, 'interestAmount', e.target.value)}
+                          />
+                        </div>
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-2">
                         <span className="text-sm font-bold text-slate-800">

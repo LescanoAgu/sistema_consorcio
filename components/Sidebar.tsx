@@ -17,8 +17,8 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortiumName, onSwitchConsortium, onLogout, userRole, isOpen, onClose, badges = {} }) => {
   
   const allItems = [
-    // ADMIN & DEV Views
-    { id: 'dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['ADMIN'] },
+    // ADMIN & DEV / HARDWARE Views
+    { id: 'dashboard', label: 'Tablero', icon: LayoutDashboard, roles: ['ADMIN', 'DEVICE', 'CONTROL_WIFI'] },
     
     // USER ONLY
     { id: 'user_portal', label: 'Mis Unidades', icon: Home, roles: ['USER'] },
@@ -32,9 +32,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
     { id: 'management', label: 'Gestión Integral', icon: LayoutTemplate, roles: ['ADMIN'] },
     { id: 'accounting', label: 'Contabilidad', icon: PieChart, roles: ['ADMIN'] },
     
-    // SETTINGS
+    // SETTINGS & PROFILE
     { id: 'settings', label: 'Configuración', icon: Building2, roles: ['ADMIN'] },
-    { id: 'profile', label: 'Mi Perfil', icon: User, roles: ['ADMIN', 'USER'] }, 
+    { id: 'profile', label: 'Mi Perfil', icon: User, roles: ['ADMIN', 'USER', 'DEVICE', 'CONTROL_WIFI'] }, 
   ];
 
   const filteredItems = allItems.filter(item => item.roles.includes(userRole));

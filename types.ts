@@ -4,7 +4,14 @@ export enum ExpenseDistributionType {
   FROM_RESERVE = 'FROM_RESERVE'
 }
 
-export type UserRole = 'ADMIN' | 'USER';
+/**
+ * Roles del sistema:
+ * - ADMIN: Administrador de consorcio con acceso total a gestión, contabilidad, cobros, etc.
+ * - USER: Copropietario / Inquilino con acceso al portal de vecino (cupones, expensas, amenidades, etc.).
+ * - DEVICE: Dispositivos de hardware genéricos IoT (porteros IP, cámaras, lectores de tarjetas).
+ * - CONTROL_WIFI: Dispositivos de hardware específicos para control de acceso WiFi (relés ESP32, portones, molinetes).
+ */
+export type UserRole = 'ADMIN' | 'USER' | 'DEVICE' | 'CONTROL_WIFI';
 export type MaintenanceStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE';
 
 export interface ConsortiumDocument {
@@ -34,13 +41,20 @@ export interface Booking {
   createdAt: string;
 }
 
+/**
+ * Item individual de deuda por período mensual.
+ * Permite mantener la deuda separada por mes (Ej: Enero $50k, Febrero $60k),
+ * imputar pagos a la más antigua y calcular interés simple sobre el baseAmount de cada período.
+ */
 export interface DebtItem {
   id: string;
   period: string;       
   baseAmount: number;   
   interestRate: number; 
   interestAmount: number; 
-  total: number;        
+  total: number;
+  paidAmount?: number;
+  createdAt?: string;        
 }
 
 export interface Unit {
