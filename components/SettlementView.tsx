@@ -94,14 +94,14 @@ const SettlementView: React.FC<SettlementViewProps> = ({
 
           // Distribuimos el monto
           if (exp.distributionType === ExpenseDistributionType.EQUAL_PARTS) {
-              const share = exp.amount / affectedUnits.length;
-              affectedUnits.forEach(u => targetMap.set(u.id, targetMap.get(u.id)! + share));
+              const share = Number((exp.amount / affectedUnits.length).toFixed(2));
+              affectedUnits.forEach(u => targetMap.set(u.id, Number(((targetMap.get(u.id) || 0) + share).toFixed(2))));
           } else {
               // PRORATEO: Sumamos los coeficientes de los afectados para hacer la regla de 3
               const totalProrate = affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
               affectedUnits.forEach(u => {
-                  const share = exp.amount * ((Number(u.proratePercentage) || 0) / totalProrate);
-                  targetMap.set(u.id, targetMap.get(u.id)! + share);
+                  const share = Number((exp.amount * ((Number(u.proratePercentage) || 0) / totalProrate)).toFixed(2));
+                  targetMap.set(u.id, Number(((targetMap.get(u.id) || 0) + share).toFixed(2)));
               });
           }
       });
@@ -111,18 +111,18 @@ const SettlementView: React.FC<SettlementViewProps> = ({
       const debtsMap = new Map<string, number>();
 
       uniqueUnits.forEach(u => {
-           const unitOrd = ordDebtsMap.get(u.id) || 0;
-           const unitExt = extDebtsMap.get(u.id) || 0;
+           const unitOrd = Number((ordDebtsMap.get(u.id) || 0).toFixed(2));
+           const unitExt = Number((extDebtsMap.get(u.id) || 0).toFixed(2));
 
            const participates = u.contributesToReserve !== false && u.isOccupied !== false;
            let reserveShare = 0;
            if (participates && (settings.monthlyReserveContributionPercentage || 0) > 0 && unitOrd > 0) {
                // Mismo % para todos aplicado directamente sobre las expensas ordinarias de la unidad
-               reserveShare = (unitOrd * settings.monthlyReserveContributionPercentage) / 100;
-               totalActualReserveContribution += reserveShare;
+               reserveShare = Number(((unitOrd * settings.monthlyReserveContributionPercentage) / 100).toFixed(2));
+               totalActualReserveContribution = Number((totalActualReserveContribution + reserveShare).toFixed(2));
            }
 
-           debtsMap.set(u.id, unitOrd + unitExt + reserveShare);
+           debtsMap.set(u.id, Number((unitOrd + unitExt + reserveShare).toFixed(2)));
       });
 
       const resContribution = totalActualReserveContribution;
@@ -136,7 +136,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
 
       // Armamos el Array final
       const finalUnitDebts = uniqueUnits.map(u => ({
-          unitId: u.id, unitNumber: u.unitNumber, owner: u.ownerName, total: debtsMap.get(u.id)!
+          unitId: u.id, unitNumber: u.unitNumber, owner: u.ownerName, total: Number((debtsMap.get(u.id) || 0).toFixed(2))
       })).sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
 
       return {

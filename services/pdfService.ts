@@ -258,9 +258,13 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // --- PROCESAMIENTO Y SEPARACIÓN DE GASTOS (ORDINARIOS Y EXTRAORDINARIOS) ---
     const allExpenses = settlement.snapshotExpenses || [];
     
+    // Deduplicar listado de unidades para cálculo exacto de partes iguales y prorrateo
+    const cleanAllUnitsMap = new Map<string, Unit>();
+    (allUnitsData || []).forEach(u => cleanAllUnitsMap.set(u.id, u));
+    const cleanAllUnits = Array.from(cleanAllUnitsMap.values());
+
     let sumOrdinary = 0;
     let sumExtraordinary = 0;
-    let calculatedExpensesSum = 0;
 
     const ordinaryRows: any[][] = [];
     const extraordinaryRows: any[][] = [];
@@ -273,30 +277,24 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
             unitAmount = 0;
             distributionLabel = 'Fondo Reserva (Sin Cargo)';
         } else {
+            let affectedUnits = cleanAllUnits;
             if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
-                if (!exp.affectedUnitIds.includes(unit.id)) return; // No afecta a esta unidad
-                
-                if (exp.distributionType === 'EQUAL_PARTS') {
-                    unitAmount = exp.amount / exp.affectedUnitIds.length;
-                    distributionLabel = `Partes Iguales (${exp.affectedUnitIds.length} UF)`;
-                } else {
-                    const affectedUnitsData = allUnitsData.filter(u => exp.affectedUnitIds!.includes(u.id));
-                    const totalAffectedProrate = affectedUnitsData.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
-                    unitAmount = exp.amount * (Number(unit.proratePercentage || 0) / totalAffectedProrate);
-                    distributionLabel = `Prorrateo Normalizado`;
-                }
+                affectedUnits = cleanAllUnits.filter(u => exp.affectedUnitIds!.includes(u.id));
+            }
+
+            if (!affectedUnits.some(u => u.id === unit.id)) return; // No afecta a esta unidad
+            
+            if (exp.distributionType === 'EQUAL_PARTS') {
+                unitAmount = Number((exp.amount / (affectedUnits.length || 1)).toFixed(2));
+                distributionLabel = `Partes Iguales (${affectedUnits.length} UF)`;
             } else {
-                if (exp.distributionType === 'EQUAL_PARTS') {
-                    unitAmount = exp.amount / (allUnitsData.length || 1);
-                    distributionLabel = 'Partes Iguales';
-                } else {
-                    unitAmount = exp.amount * globalProrateRatio;
-                    distributionLabel = `Prorrateo ${formattedPercentage}%`;
-                }
+                const totalAffectedProrate = affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
+                unitAmount = Number((exp.amount * ((Number(unit.proratePercentage) || 0) / totalAffectedProrate)).toFixed(2));
+                distributionLabel = affectedUnits.length === cleanAllUnits.length 
+                    ? `Prorrateo ${formattedPercentage}%` 
+                    : `Prorrateo Normalizado`;
             }
         }
-
-        calculatedExpensesSum += unitAmount;
 
         const rowItem = [
             exp.description,
@@ -306,10 +304,10 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ];
 
         if (exp.category === 'Ordinary') {
-            sumOrdinary += unitAmount;
+            sumOrdinary = Number((sumOrdinary + unitAmount).toFixed(2));
             ordinaryRows.push(rowItem);
         } else {
-            sumExtraordinary += unitAmount;
+            sumExtraordinary = Number((sumExtraordinary + unitAmount).toFixed(2));
             extraordinaryRows.push(rowItem);
         }
     });
@@ -352,8 +350,8 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     let reserveContributionForUnit = 0;
 
     if (participatesInReserve && (settings.monthlyReserveContributionPercentage || 0) > 0 && sumOrdinary > 0) {
-        // El porcentaje es el mismo para todos aplicado a las expensas ordinarias de la unidad
-        reserveContributionForUnit = (sumOrdinary * settings.monthlyReserveContributionPercentage) / 100;
+        // El porcentaje es el mismo para todos aplicado directamente a las expensas ordinarias de la unidad
+        reserveContributionForUnit = Number(((sumOrdinary * settings.monthlyReserveContributionPercentage) / 100).toFixed(2));
 
         bodyRows.push([
             { 
@@ -372,18 +370,10 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
             { content: 'SUBTOTAL APORTE FONDO DE RESERVA', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [4, 120, 87] } },
             { content: formatCurrency(reserveContributionForUnit), styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [4, 120, 87] } }
         ]);
-
-        calculatedExpensesSum += reserveContributionForUnit;
     }
 
-    const detail = (settlement.unitDetails || []).find(d => d.unitId === unit.id);
-    const exactAmountToPayMonth = detail ? detail.totalToPay : calculatedExpensesSum;
-
-    // Pequeño ajuste técnico por redondeo de decimales si existiera
-    const diff = exactAmountToPayMonth - calculatedExpensesSum;
-    if (Math.abs(diff) > 0.05) {
-        bodyRows.push(['Ajustes por redondeo técnico / Ítems particulares', '-', '-', formatCurrency(diff)]);
-    }
+    // El subtotal de expensas del mes coincide de forma exacta con la suma visible de los tres subtotales
+    const monthExpensesTotal = Number((sumOrdinary + sumExtraordinary + reserveContributionForUnit).toFixed(2));
 
     // Filtrar para excluir cualquier deuda que corresponda al mismo período de la liquidación actual
     const priorDebts = (unit.debts || []).filter(debt => !isCurrentPeriodDebt(debt.period, settlement.month));
@@ -391,9 +381,9 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // Cálculo e inyección de Deuda Histórica Real (SOLO deudas de períodos anteriores)
     let totalHistoricalDebt = 0;
     const initialBalance = unit.initialBalance || 0;
-    if (initialBalance > 0) totalHistoricalDebt += initialBalance;
+    if (initialBalance > 0) totalHistoricalDebt = Number((totalHistoricalDebt + initialBalance).toFixed(2));
     priorDebts.forEach(debt => {
-        totalHistoricalDebt += debt.total;
+        totalHistoricalDebt = Number((totalHistoricalDebt + (debt.total || 0)).toFixed(2));
     });
 
     if (totalHistoricalDebt > 0) {
@@ -403,7 +393,7 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ]);
     }
 
-    const finalTotalToPay = exactAmountToPayMonth + totalHistoricalDebt;
+    const finalTotalToPay = Number((monthExpensesTotal + totalHistoricalDebt).toFixed(2));
 
     // Fila FINAL de TOTAL
     bodyRows.push([
@@ -432,8 +422,8 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     finalY = doc.lastAutoTable.finalY + 4;
 
     const interestRate = settings.interestRate || 0;
-    const interestAmount = (finalTotalToPay * interestRate) / 100;
-    const secondDueTotal = finalTotalToPay + interestAmount;
+    const interestAmount = Number(((finalTotalToPay * interestRate) / 100).toFixed(2));
+    const secondDueTotal = Number((finalTotalToPay + interestAmount).toFixed(2));
 
     const vto1 = settlement.firstExpirationDate ? formatDate(settlement.firstExpirationDate) : '-';
     const vto2 = settlement.secondExpirationDate ? formatDate(settlement.secondExpirationDate) : '-';
