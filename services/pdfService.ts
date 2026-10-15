@@ -268,32 +268,40 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
 
     const ordinaryRows: any[][] = [];
     const extraordinaryRows: any[][] = [];
+    const reserveCoveredRows: any[][] = [];
 
     allExpenses.forEach(exp => {
+        // Si el gasto se pagó con el Fondo de Reserva, NO se cobra a los propietarios
+        if (exp.distributionType === 'FROM_RESERVE') {
+            const rowItem = [
+                exp.description,
+                formatCurrency(exp.amount),
+                'Fondo Reserva (Sin Cargo)',
+                formatCurrency(0)
+            ];
+            reserveCoveredRows.push(rowItem);
+            return;
+        }
+
+        let affectedUnits = cleanAllUnits;
+        if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
+            affectedUnits = cleanAllUnits.filter(u => exp.affectedUnitIds!.includes(u.id));
+        }
+
+        if (!affectedUnits.some(u => u.id === unit.id)) return; // No afecta a esta unidad
+        
         let unitAmount = 0;
         let distributionLabel = '';
 
-        if (exp.distributionType === 'FROM_RESERVE') {
-            unitAmount = 0;
-            distributionLabel = 'Fondo Reserva (Sin Cargo)';
+        if (exp.distributionType === 'EQUAL_PARTS') {
+            unitAmount = Number((exp.amount / (affectedUnits.length || 1)).toFixed(2));
+            distributionLabel = `Partes Iguales (${affectedUnits.length} UF)`;
         } else {
-            let affectedUnits = cleanAllUnits;
-            if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
-                affectedUnits = cleanAllUnits.filter(u => exp.affectedUnitIds!.includes(u.id));
-            }
-
-            if (!affectedUnits.some(u => u.id === unit.id)) return; // No afecta a esta unidad
-            
-            if (exp.distributionType === 'EQUAL_PARTS') {
-                unitAmount = Number((exp.amount / (affectedUnits.length || 1)).toFixed(2));
-                distributionLabel = `Partes Iguales (${affectedUnits.length} UF)`;
-            } else {
-                const totalAffectedProrate = affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
-                unitAmount = Number((exp.amount * ((Number(unit.proratePercentage) || 0) / totalAffectedProrate)).toFixed(2));
-                distributionLabel = affectedUnits.length === cleanAllUnits.length 
-                    ? `Prorrateo ${formattedPercentage}%` 
-                    : `Prorrateo Normalizado`;
-            }
+            const totalAffectedProrate = affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
+            unitAmount = Number((exp.amount * ((Number(unit.proratePercentage) || 0) / totalAffectedProrate)).toFixed(2));
+            distributionLabel = affectedUnits.length === cleanAllUnits.length 
+                ? `Prorrateo ${formattedPercentage}%` 
+                : `Prorrateo Normalizado`;
         }
 
         const rowItem = [
@@ -372,13 +380,42 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ]);
     }
 
-    // El subtotal de expensas del mes coincide de forma exacta con la suma visible de los tres subtotales
+    // 4. SECCIÓN INFORMATIVA: GASTOS CUBIERTOS CON FONDO DE RESERVA (Sin cargo para propietarios)
+    if (reserveCoveredRows.length > 0) {
+        bodyRows.push([
+            { 
+                content: '4. GASTOS CUBIERTOS CON FONDO DE RESERVA (Sin cargo para propietarios)', 
+                colSpan: 4, 
+                styles: { fontStyle: 'bold', fillColor: [243, 244, 246], textColor: [71, 85, 105], fontSize: 8 } 
+            }
+        ]);
+        reserveCoveredRows.forEach(r => bodyRows.push(r));
+        bodyRows.push([
+            { content: 'SUBTOTAL GASTOS CUBIERTOS POR RESERVA', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [71, 85, 105] } },
+            { content: formatCurrency(0), styles: { fontStyle: 'bold', halign: 'right', fontSize: 8, textColor: [71, 85, 105] } }
+        ]);
+    }
+
+    // El total a pagar por el mes se compone estrictamente de: Ordinarias + Extraordinarias + Fondo de Reserva
     const monthExpensesTotal = Number((sumOrdinary + sumExtraordinary + reserveContributionForUnit).toFixed(2));
+
+    // Fila destacada del TOTAL A PAGAR DEL MES
+    bodyRows.push([
+        { 
+            content: 'TOTAL A PAGAR DEL MES (Ord. + Ext. + F. Reserva)', 
+            colSpan: 3, 
+            styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', textColor: [255, 255, 255], fillColor: THEME.primary } 
+        },
+        { 
+            content: formatCurrency(monthExpensesTotal), 
+            styles: { fontStyle: 'bold', fontSize: 9, halign: 'right', textColor: [255, 255, 255], fillColor: THEME.primary } 
+        }
+    ]);
 
     // Filtrar para excluir cualquier deuda que corresponda al mismo período de la liquidación actual
     const priorDebts = (unit.debts || []).filter(debt => !isCurrentPeriodDebt(debt.period, settlement.month));
 
-    // Cálculo e inyección de Deuda Histórica Real (SOLO deudas de períodos anteriores)
+    // Cálculo e inyección de Deuda Histórica Acarreada (va aparte del total del mes)
     let totalHistoricalDebt = 0;
     const initialBalance = unit.initialBalance || 0;
     if (initialBalance > 0) totalHistoricalDebt = Number((totalHistoricalDebt + initialBalance).toFixed(2));
@@ -386,20 +423,33 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         totalHistoricalDebt = Number((totalHistoricalDebt + (debt.total || 0)).toFixed(2));
     });
 
-    if (totalHistoricalDebt > 0) {
-        bodyRows.push([
-            { content: 'DEUDA ANTERIOR / SALDO PENDIENTE (Ver detalle en Anexo Pág. 2)', colSpan: 3, styles: { fontStyle: 'bold', halign: 'right', textColor: [220, 38, 38], fillColor: [254, 226, 226], fontSize: 8 } },
-            { content: formatCurrency(totalHistoricalDebt), styles: { fontStyle: 'bold', halign: 'right', textColor: [220, 38, 38], fillColor: [254, 226, 226], fontSize: 8 } }
-        ]);
-    }
-
     const finalTotalToPay = Number((monthExpensesTotal + totalHistoricalDebt).toFixed(2));
 
-    // Fila FINAL de TOTAL
-    bodyRows.push([
-        { content: 'TOTAL COMPLETO A PAGAR', colSpan: 3, styles: { fontStyle: 'bold', fontSize: 9.5, textColor: [255, 255, 255], fillColor: THEME.primary } },
-        { content: formatCurrency(finalTotalToPay), styles: { fontStyle: 'bold', fontSize: 9.5, halign: 'right', textColor: [255, 255, 255], fillColor: THEME.primary } }
-    ]);
+    if (totalHistoricalDebt > 0) {
+        bodyRows.push([
+            { 
+                content: 'DEUDA ACARREADA / SALDO ANTERIOR (Períodos Anteriores - Ver Anexo Pág. 2)', 
+                colSpan: 3, 
+                styles: { fontStyle: 'bold', fontSize: 8.5, halign: 'right', textColor: [220, 38, 38], fillColor: [254, 226, 226] } 
+            },
+            { 
+                content: formatCurrency(totalHistoricalDebt), 
+                styles: { fontStyle: 'bold', fontSize: 8.5, halign: 'right', textColor: [220, 38, 38], fillColor: [254, 226, 226] } 
+            }
+        ]);
+
+        bodyRows.push([
+            { 
+                content: 'TOTAL GENERAL CON DEUDA (Mes Actual + Deuda Acarreada)', 
+                colSpan: 3, 
+                styles: { fontStyle: 'bold', fontSize: 9.5, halign: 'right', textColor: [255, 255, 255], fillColor: [15, 23, 42] } 
+            },
+            { 
+                content: formatCurrency(finalTotalToPay), 
+                styles: { fontStyle: 'bold', fontSize: 9.5, halign: 'right', textColor: [255, 255, 255], fillColor: [15, 23, 42] } 
+            }
+        ]);
+    }
 
     autoTable(doc, {
         startY: finalY, 
@@ -422,35 +472,70 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     finalY = doc.lastAutoTable.finalY + 4;
 
     const interestRate = settings.interestRate || 0;
-    const interestAmount = Number(((finalTotalToPay * interestRate) / 100).toFixed(2));
-    const secondDueTotal = Number((finalTotalToPay + interestAmount).toFixed(2));
+    const interestAmountMonth = Number(((monthExpensesTotal * interestRate) / 100).toFixed(2));
+    const secondDueMonth = Number((monthExpensesTotal + interestAmountMonth).toFixed(2));
 
     const vto1 = settlement.firstExpirationDate ? formatDate(settlement.firstExpirationDate) : '-';
     const vto2 = settlement.secondExpirationDate ? formatDate(settlement.secondExpirationDate) : '-';
 
-    // Cuadro de Vencimientos e Importes (12 mm)
-    doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(14, finalY, pageWidth - 28, 12, 1.5, 1.5, 'FD');
+    // Cuadro de Vencimientos e Importes
+    if (totalHistoricalDebt > 0) {
+        const boxHeight = 16;
+        doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(14, finalY, pageWidth - 28, boxHeight, 1.5, 1.5, 'FD');
 
-    doc.setFontSize(8.5);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
-    doc.text(`1° VTO (${vto1}):`, 20, finalY + 7.5);
-    doc.setFontSize(9.5);
-    doc.text(`${formatCurrency(finalTotalToPay)}`, 62, finalY + 7.5);
+        // Línea 1: Mes Corriente (1° y 2° Vto)
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+        doc.text(`1° VTO (${vto1}) [Total Mes]:`, 18, finalY + 5.5);
+        doc.setFontSize(9);
+        doc.text(`${formatCurrency(monthExpensesTotal)}`, 74, finalY + 5.5);
 
-    if (interestRate > 0) {
+        if (interestRate > 0) {
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
+            doc.text(`2° VTO (${vto2}) [+${interestRate}%]: ${formatCurrency(secondDueMonth)}`, pageWidth - 18, finalY + 5.5, { align: 'right' });
+        }
+
+        // Línea 2: Deuda acarreada y Total general con deuda
         doc.setFontSize(8);
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
-        doc.text(`2° VTO (${vto2}) [+${interestRate}%]:`, 110, finalY + 7.5);
-        doc.setFontSize(9);
-        doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
-        doc.text(`${formatCurrency(secondDueTotal)}`, pageWidth - 20, finalY + 7.5, { align: 'right' });
-    }
+        doc.setTextColor(220, 38, 38);
+        doc.text(`Deuda Acarreada: ${formatCurrency(totalHistoricalDebt)}`, 18, finalY + 12);
 
-    finalY += 16;
+        doc.setFontSize(8.5);
+        doc.setTextColor(15, 23, 42);
+        doc.text(`TOTAL A ABONAR CON DEUDA: ${formatCurrency(finalTotalToPay)}`, pageWidth - 18, finalY + 12, { align: 'right' });
+
+        finalY += boxHeight + 4;
+    } else {
+        const boxHeight = 12;
+        doc.setDrawColor(THEME.border[0], THEME.border[1], THEME.border[2]);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(14, finalY, pageWidth - 28, boxHeight, 1.5, 1.5, 'FD');
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(THEME.primary[0], THEME.primary[1], THEME.primary[2]);
+        doc.text(`1° VTO (${vto1}):`, 20, finalY + 7.5);
+        doc.setFontSize(9.5);
+        doc.text(`${formatCurrency(monthExpensesTotal)}`, 62, finalY + 7.5);
+
+        if (interestRate > 0) {
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(THEME.secondary[0], THEME.secondary[1], THEME.secondary[2]);
+            doc.text(`2° VTO (${vto2}) [+${interestRate}%]:`, 110, finalY + 7.5);
+            doc.setFontSize(9);
+            doc.setTextColor(THEME.text[0], THEME.text[1], THEME.text[2]);
+            doc.text(`${formatCurrency(secondDueMonth)}`, pageWidth - 20, finalY + 7.5, { align: 'right' });
+        }
+
+        finalY += boxHeight + 4;
+    }
 
     // Caja de Modalidad de Pago: Transferencia Bancaria vs Efectivo en Administración
     const showBank = settings.showBankDetailsOnCoupon !== false && Boolean(settings.bankCBU || settings.bankAlias || settings.bankName);
