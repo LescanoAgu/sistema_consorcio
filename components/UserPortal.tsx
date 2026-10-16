@@ -186,10 +186,15 @@ const UserPortal: React.FC<UserPortalProps> = ({
                       </div>
                   </div>
                   
-                  {currentUnitDebt.total > 1 && (
+                  {(currentUnitDebt.total > 1 || (currentUnit.creditBalance || 0) > 0) && (
                       <div className="mt-6 pt-4 border-t border-slate-100 flex flex-wrap gap-4">
                           {currentUnitDebt.historical > 0 && <span className="text-xs font-bold bg-red-50 text-red-700 px-3 py-1 rounded-lg border border-red-100">Deuda Anterior: {formatCurrency(currentUnitDebt.historical)}</span>}
                           {currentUnitDebt.current > 0 && <span className="text-xs font-bold bg-amber-50 text-amber-700 px-3 py-1 rounded-lg border border-amber-100">Mes {currentUnitDebt.pendingPeriod}: {formatCurrency(currentUnitDebt.current)}</span>}
+                          {(currentUnit.creditBalance || 0) > 0 && (
+                              <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg border border-indigo-200">
+                                  Saldo a Favor disponible: {formatCurrency(currentUnit.creditBalance || 0)}
+                              </span>
+                          )}
                       </div>
                   )}
               </div>

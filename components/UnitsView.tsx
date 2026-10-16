@@ -68,6 +68,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
     ownerName: '',
     proratePercentage: '',
     initialBalance: '',
+    creditBalance: '',
     authorizedEmailsStr: '',
     contributesToReserve: true // Por defecto alquilado / aporta al fondo
   });
@@ -482,6 +483,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
         ownerName: formData.ownerName.trim(),
         proratePercentage: parseFloat(formData.proratePercentage) || 0,
         initialBalance: parseFloat(formData.initialBalance) || 0,
+        creditBalance: parseFloat(formData.creditBalance) || 0,
         authorizedEmails,
         isOccupied: formData.contributesToReserve,
         contributesToReserve: formData.contributesToReserve
@@ -497,7 +499,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
       }
 
       setIsModalOpen(false);
-      setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '', contributesToReserve: true });
+      setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', creditBalance: '', authorizedEmailsStr: '', contributesToReserve: true });
     } catch (err) {
       alert("Error al guardar la unidad.");
     } finally {
@@ -513,6 +515,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
       ownerName: u.ownerName,
       proratePercentage: String(u.proratePercentage || 0),
       initialBalance: String(u.initialBalance || 0),
+      creditBalance: String(u.creditBalance || 0),
       authorizedEmailsStr: (u.authorizedEmails || []).join(', '),
       contributesToReserve: u.contributesToReserve !== false && u.isOccupied !== false
     });
@@ -577,7 +580,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
           <button 
             onClick={() => {
               setEditingUnit(null);
-              setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', authorizedEmailsStr: '', contributesToReserve: true });
+              setFormData({ block: '', unitNumber: '', ownerName: '', proratePercentage: '', initialBalance: '', creditBalance: '', authorizedEmailsStr: '', contributesToReserve: true });
               setIsModalOpen(true);
             }} 
             className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
@@ -599,7 +602,7 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                 <th className="px-6 py-4">Propietario / Inquilino</th>
                 <th className="px-6 py-4 text-center">Fondo Reserva</th>
                 <th className="px-6 py-4 text-right">Prorrateo (%)</th>
-                <th className="px-6 py-4 text-right">Saldo Inicial</th>
+                <th className="px-6 py-4 text-right">Saldo Inicial / A Favor</th>
                 <th className="px-6 py-4">Emails Vinculados</th>
                 <th className="px-6 py-4 text-center">Acciones</th>
               </tr>
@@ -636,7 +639,12 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                       </td>
                       <td className="px-6 py-4 text-right font-mono text-slate-600 font-semibold">{(u.proratePercentage || 0).toFixed(4)}%</td>
                       <td className={`px-6 py-4 text-right font-mono font-bold ${u.initialBalance && u.initialBalance < 0 ? 'text-rose-600' : 'text-slate-600'}`}>
-                          {formatCurrency(u.initialBalance || 0)}
+                          <div>{formatCurrency(u.initialBalance || 0)}</div>
+                          {(u.creditBalance || 0) > 0 && (
+                              <span className="inline-block text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-sans font-bold mt-0.5">
+                                  A favor: {formatCurrency(u.creditBalance || 0)}
+                              </span>
+                          )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-1 max-w-[200px]">
@@ -975,9 +983,15 @@ const UnitsView: React.FC<UnitsViewProps> = ({
                 <input type="text" required value={formData.ownerName} onChange={e => setFormData({...formData, ownerName: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="Carlos Gómez"/>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Porcentaje Prorrateo (%)</label>
-                <input type="number" step="0.0001" value={formData.proratePercentage} onChange={e => setFormData({...formData, proratePercentage: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="5.0000"/>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Porcentaje Prorrateo (%)</label>
+                  <input type="number" step="0.0001" value={formData.proratePercentage} onChange={e => setFormData({...formData, proratePercentage: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="5.0000"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-indigo-600 mb-1.5">Saldo a Favor ($)</label>
+                  <input type="number" step="0.01" value={formData.creditBalance} onChange={e => setFormData({...formData, creditBalance: e.target.value})} className="w-full p-3 bg-indigo-50/40 border border-indigo-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-bold text-indigo-700" placeholder="0.00"/>
+                </div>
               </div>
 
               {/* Toggle de Aporte a Fondo de Reserva / Ocupación */}

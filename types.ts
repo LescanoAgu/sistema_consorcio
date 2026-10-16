@@ -60,6 +60,9 @@ export interface DebtItem {
   id: string;
   period: string;       
   baseAmount: number;   
+  ordinaryAmount?: number;
+  extraordinaryAmount?: number;
+  reserveAmount?: number;
   interestRate: number; 
   interestAmount: number; 
   total: number;
@@ -76,6 +79,7 @@ export interface Unit {
   authorizedEmails: string[]; 
   proratePercentage: number; 
   initialBalance: number; 
+  creditBalance?: number; // Saldo a favor por pagos a cuenta / excedentes
   debts?: DebtItem[]; 
   isOccupied?: boolean; // Indica si la unidad está ocupada / alquilada
   contributesToReserve?: boolean; // Indica si aporta al Fondo de Reserva (default: true si está alquilada)
@@ -103,7 +107,15 @@ export interface Payment {
   notes?: string;
   attachmentUrl?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  allocations?: { period: string; amount: number }[];
+  allocations?: {
+    period: string;
+    amount: number;
+    basePaid?: number;
+    interestPaid?: number;
+    reservePaid?: number;
+  }[];
+  reserveContribution?: number;
+  creditGenerated?: number;
 }
 
 export interface Announcement {
@@ -156,7 +168,14 @@ export interface SettlementRecord {
   snapshotExpenses: Expense[];
   snapshotPayments?: Payment[];
   couponMessage?: string;
-  unitDetails: { unitId: string; totalToPay: number }[]; 
+  unitDetails: {
+    unitId: string;
+    totalToPay: number;
+    ordinaryAmount?: number;
+    extraordinaryAmount?: number;
+    reserveAmount?: number;
+    creditApplied?: number;
+  }[]; 
 }
 
 export interface ReserveTransaction {
@@ -165,6 +184,8 @@ export interface ReserveTransaction {
     amount: number; 
     description: string; 
     type: 'SYSTEM' | 'MANUAL' | 'INITIAL';
+    paymentId?: string;
+    expenseId?: string;
 }
 
 export interface Consortium {

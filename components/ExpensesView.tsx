@@ -2,7 +2,7 @@ import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Expense, ExpenseDistributionType, ExpenseTemplate, Unit } from '../types';
 import { Plus, Trash2, Tag, Paperclip, CheckCircle, Loader2, FileText, Download, Bookmark, X, Save, Upload, FileSpreadsheet, Edit2, Users } from 'lucide-react';
-import { addExpense, deleteExpense, updateExpense, uploadExpenseReceipt, getExpenseTemplates, addExpenseTemplate, deleteExpenseTemplate, addReserveTransaction } from '../services/firestoreService';
+import { addExpense, deleteExpense, updateExpense, uploadExpenseReceipt, getExpenseTemplates, addExpenseTemplate, deleteExpenseTemplate, addReserveTransaction, getReserveTransactions, deleteReserveTransaction } from '../services/firestoreService';
 import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 
@@ -131,7 +131,8 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
                     date: saved.date,
                     amount: -saved.amount,
                     description: `Pago de Gasto: ${saved.description}`,
-                    type: 'SYSTEM'
+                    type: 'SYSTEM',
+                    expenseId: saved.id
                 });
                 queryClient.invalidateQueries({ queryKey: ['reserve'] });
                 queryClient.invalidateQueries({ queryKey: ['settings'] });
@@ -153,8 +154,34 @@ const ExpensesView: React.FC<ExpensesViewProps> = ({ expenses, setExpenses, rese
 
   const handleDelete = async (id: string) => {
     if(confirm('¿Eliminar gasto?')) {
+        const expenseToDelete = expenses.find(e => e.id === id);
         await deleteExpense(consortiumId, id);
         setExpenses(expenses.filter(e => e.id !== id));
+
+        // Si el gasto se había descontado del Fondo de Reserva, revertir el movimiento en el Libro Mayor
+        if (expenseToDelete && expenseToDelete.distributionType === ExpenseDistributionType.FROM_RESERVE) {
+            try {
+                const reserveTxs = await getReserveTransactions(consortiumId);
+                const matchingTx = reserveTxs.find(
+                    t => t.expenseId === id ||
+                    (t.type === 'SYSTEM' && t.description === `Pago de Gasto: ${expenseToDelete.description}` && Math.abs(t.amount + expenseToDelete.amount) < 0.01)
+                );
+                if (matchingTx) {
+                    await deleteReserveTransaction(consortiumId, matchingTx.id);
+                } else {
+                    await addReserveTransaction(consortiumId, {
+                        date: getLocalIsoDate(),
+                        amount: expenseToDelete.amount,
+                        description: `Reversión de Gasto eliminado: ${expenseToDelete.description}`,
+                        type: 'SYSTEM'
+                    });
+                }
+                queryClient.invalidateQueries({ queryKey: ['reserve'] });
+                queryClient.invalidateQueries({ queryKey: ['settings'] });
+            } catch (e) {
+                console.error("Error al revertir gasto de reserva:", e);
+            }
+        }
     }
   };
 

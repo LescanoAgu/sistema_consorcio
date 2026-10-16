@@ -1,8 +1,10 @@
 import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useMemo } from 'react';
-import { ReserveTransaction, Consortium, ConsortiumSettings, Payment } from '../types';
-import { Plus, Download, Trash2, FileSpreadsheet, Vault, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, Wrench } from 'lucide-react';
+import { ReserveTransaction, Consortium, ConsortiumSettings, Payment, Unit, SettlementRecord } from '../types';
+import { Plus, Download, Trash2, FileSpreadsheet, Vault, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, Wrench, RefreshCw } from 'lucide-react';
 import { generateReserveLedgerPDF } from '../services/pdfService';
+import { reconcileReserveTransactionsBatch, updatePayment } from '../services/firestoreService';
+import { analyzePaymentReserve } from '../utils/reserveAccounting';
 import * as XLSX from 'xlsx';
 
 const formatCurrency = (amount: number) => {
@@ -14,24 +16,38 @@ interface ReserveViewProps {
   consortium: Consortium;
   onAddTransaction: (t: Omit<ReserveTransaction, 'id'>) => Promise<void>;
   onDeleteTransaction: (id: string) => Promise<void>;
+  onRefreshTransactions?: () => Promise<void>;
   settings: ConsortiumSettings;
   payments: Payment[];
+  units?: Unit[];
+  history?: SettlementRecord[];
 }
 
-const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onAddTransaction, onDeleteTransaction, settings, payments }) => {
+const ReserveView: React.FC<ReserveViewProps> = ({
+  transactions,
+  consortium,
+  onAddTransaction,
+  onDeleteTransaction,
+  onRefreshTransactions,
+  settings,
+  payments,
+  units = [],
+  history = []
+}) => {
   const [showModal, setShowModal] = useState(false);
   const [newDesc, setNewDesc] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newDate, setNewDate] = useState(getLocalIsoDate());
   const [type, setType] = useState<'IN' | 'OUT'>('IN');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReconciling, setIsReconciling] = useState(false);
 
   // Calcula el saldo arrastrado fila por fila
   const ledgerData = useMemo(() => {
       const sorted = [...transactions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       let runningBalance = 0;
       return sorted.map(t => {
-          runningBalance += t.amount;
+          runningBalance = Number((runningBalance + t.amount).toFixed(2));
           return { ...t, runningBalance };
       }).reverse();
   }, [transactions]);
@@ -39,55 +55,195 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
   const currentBalance = ledgerData.length > 0 ? ledgerData[0].runningBalance : 0;
 
   // ──────────────────────────────────────────────────
-  // DIAGNÓSTICO AUTOMÁTICO DE CONSISTENCIA
-  // Compara lo que el sistema acreditó automáticamente (tipo SYSTEM)
-  // contra lo que DEBERÍA haber acreditado según los cobros reales aprobados.
+  // AUDITORÍA Y DIAGNÓSTICO CONTABLE DEL FONDO DE RESERVA
+  // Excluye intereses por mora, locales libres y gastos extraordinarios
   // ──────────────────────────────────────────────────
   const diagnostic = useMemo(() => {
     const rate = settings.monthlyReserveContributionPercentage;
     if (rate <= 0) return null;
 
-    // 1. Lo que el sistema acreditó automáticamente (transacciones SYSTEM positivas)
-    const systemCreditTotal = transactions
-      .filter(t => t.type === 'SYSTEM' && t.amount > 0)
-      .reduce((acc, t) => acc + t.amount, 0);
+    const approvedPayments = payments.filter(p => p.status === 'APPROVED');
+    const breakdowns = approvedPayments.map(p => analyzePaymentReserve(p, units, history, settings));
 
-    // 2. Lo que DEBERÍA haber acreditado con la fórmula correcta: pago × rate/(100+rate)
-    const approvedPaymentsTotal = payments
-      .filter(p => p.status === 'APPROVED')
-      .reduce((acc, p) => acc + p.amount, 0);
-    const expectedSystemCredit = approvedPaymentsTotal * (rate / (100 + rate));
+    const approvedPaymentsTotal = Number(breakdowns.reduce((acc, b) => acc + b.totalPaid, 0).toFixed(2));
+    const totalInterestInPayments = Number(breakdowns.reduce((acc, b) => acc + b.interestPaid, 0).toFixed(2));
+    const totalFreeUnitsPayments = Number(breakdowns.filter(b => !b.isOccupied).reduce((acc, b) => acc + b.totalPaid, 0).toFixed(2));
+    const expectedSystemCredit = Number(breakdowns.reduce((acc, b) => acc + b.expectedReserveContribution, 0).toFixed(2));
+    const naiveSystemCredit = Number(breakdowns.reduce((acc, b) => acc + b.naiveReserveContribution, 0).toFixed(2));
 
-    // 3. Diferencia (positivo = sobre-acreditado; negativo = sub-acreditado)
-    const discrepancy = systemCreditTotal - expectedSystemCredit;
+    // Movimientos en el libro mayor generados por cobros (SYSTEM de cobros + parches automáticos previos)
+    const cobroSystemTxs = transactions.filter(
+      t =>
+        (t.type === 'SYSTEM' && (t.description.includes('Cobro') || t.amount > 0) && !t.description.includes('Gasto')) ||
+        t.description.includes('Corrección automática:')
+    );
+
+    const systemCreditTotal = Number(cobroSystemTxs.reduce((acc, t) => acc + t.amount, 0).toFixed(2));
+    const discrepancy = Number((systemCreditTotal - expectedSystemCredit).toFixed(2));
+
+    // Verificar si hay transacciones individuales de cobro cuyo monto difiere del esperado sin mora
+    let misalignedTxCount = 0;
+    breakdowns.forEach(b => {
+      const suffix = `(${b.paymentId.slice(-4)})`;
+      const tx = transactions.find(
+        t => t.paymentId === b.paymentId || (t.type === 'SYSTEM' && t.description.includes(suffix) && t.amount > 0)
+      );
+      if (tx && Math.abs(tx.amount - b.expectedReserveContribution) > 0.05) {
+        misalignedTxCount++;
+      } else if (!tx && b.expectedReserveContribution > 0.05) {
+        misalignedTxCount++;
+      }
+    });
 
     return {
+      breakdowns,
+      approvedPayments,
+      approvedPaymentsTotal,
+      totalInterestInPayments,
+      totalFreeUnitsPayments,
       systemCreditTotal,
       expectedSystemCredit,
-      approvedPaymentsTotal,
+      naiveSystemCredit,
       discrepancy,
+      misalignedTxCount,
       isOver: discrepancy > 0.5,
       isUnder: discrepancy < -0.5,
+      needsCleanup: Math.abs(discrepancy) > 0.5 || misalignedTxCount > 0
     };
-  }, [transactions, payments, settings]);
+  }, [transactions, payments, units, history, settings]);
 
-  const handleApplyCorrection = async () => {
+  /**
+   * Acomoda y corrige por código todas las transacciones de cobro en el Libro Mayor:
+   * 1. Recalcula cada cobro aprobado descontando los intereses por mora, gastos extraordinarios y locales libres.
+   * 2. Actualiza directamente cada movimiento "Aporte Reserva de Cobro" en Firestore con su monto exacto sin mora.
+   * 3. Elimina acreditaciones erróneas de locales desocupados o parches manuales duplicados.
+   */
+  const handleReconcileReserveByCode = async () => {
     if (!diagnostic) return;
-    const adj = -diagnostic.discrepancy;
-    const desc = adj > 0
-      ? 'Corrección automática: sub-acreditación histórica'
-      : 'Corrección automática: sobre-acreditación histórica';
-    if (!confirm(
-      'Se registrará un ajuste de ' + formatCurrency(Math.abs(adj)) +
-      ' (' + (adj > 0 ? 'INGRESO' : 'EGRESO') + ') para corregir el saldo del fondo de reserva.' +
-      '\n\nEsto deja el libro mayor en línea con los cobros reales aprobados.' +
-      '\n\n¿Confirmar?'
-    )) return;
-    setIsSubmitting(true);
+
+    const msgLines = [
+      '¿Ejecutar la corrección y saneamiento automático de la Caja de Reserva?',
+      '',
+      `• Total cobros aprobados: ${formatCurrency(diagnostic.approvedPaymentsTotal)}`,
+      `• Intereses por mora detectados (NO van a reserva): ${formatCurrency(diagnostic.totalInterestInPayments)}`,
+      `• Cobros de locales libres/exentos (NO van a reserva): ${formatCurrency(diagnostic.totalFreeUnitsPayments)}`,
+      `• Acreditado actualmente en caja por cobros: ${formatCurrency(diagnostic.systemCreditTotal)}`,
+      `• Aporte real exacto que corresponde a Reserva: ${formatCurrency(diagnostic.expectedSystemCredit)}`,
+      `• Diferencia a acomodar: ${formatCurrency(diagnostic.discrepancy)}`,
+      '',
+      'El sistema actualizará los asientos de cobro en el Libro Mayor para que reflejen únicamente el porcentaje sobre expensas ordinarias sin mora.'
+    ];
+
+    if (!confirm(msgLines.join('\n'))) return;
+
+    setIsReconciling(true);
     try {
-      await onAddTransaction({ date: getLocalIsoDate(), description: desc, amount: adj, type: 'MANUAL' });
-    } catch { alert('Error al registrar el ajuste.'); }
-    finally { setIsSubmitting(false); }
+      const updates: { id: string; amount: number; description?: string }[] = [];
+      const toDeleteIds: string[] = [];
+      const toAddList: Omit<ReserveTransaction, 'id'>[] = [];
+      const matchedTxIds = new Set<string>();
+
+      // 1. Eliminar parches viejos de "Corrección automática" para dejar el Libro Mayor limpio asiento por asiento
+      transactions.forEach(t => {
+        if (t.description.includes('Corrección automática:')) {
+          toDeleteIds.push(t.id);
+          matchedTxIds.add(t.id);
+        }
+      });
+
+      // 2. Alinear cada cobro aprobado con su asiento en reserve_transactions
+      for (const b of diagnostic.breakdowns) {
+        const payment = diagnostic.approvedPayments.find(p => p.id === b.paymentId);
+        const suffix = `(${b.paymentId.slice(-4)})`;
+
+        // Buscar todas las transacciones SYSTEM positivas asociadas a este cobro
+        const matchingTxs = transactions.filter(
+          t =>
+            !matchedTxIds.has(t.id) &&
+            t.type === 'SYSTEM' &&
+            t.amount > 0 &&
+            (t.paymentId === b.paymentId || t.description.includes(suffix))
+        );
+
+        if (b.expectedReserveContribution <= 0.01) {
+          // Local libre o cobro sin base ordinaria -> no debe existir acreditación en reserva
+          matchingTxs.forEach(t => {
+            toDeleteIds.push(t.id);
+            matchedTxIds.add(t.id);
+          });
+        } else if (matchingTxs.length > 0) {
+          const primaryTx = matchingTxs[0];
+          matchedTxIds.add(primaryTx.id);
+          const cleanDesc = b.interestPaid > 0
+            ? `Aporte Reserva UF ${b.unitNumber} ${suffix} (Sin Mora)`
+            : `Aporte Reserva UF ${b.unitNumber} ${suffix}`;
+
+          if (Math.abs(primaryTx.amount - b.expectedReserveContribution) > 0.01 || primaryTx.description !== cleanDesc) {
+            updates.push({
+              id: primaryTx.id,
+              amount: b.expectedReserveContribution,
+              description: cleanDesc
+            });
+          }
+
+          // Si había duplicados del mismo cobro, eliminarlos
+          matchingTxs.slice(1).forEach(dup => {
+            toDeleteIds.push(dup.id);
+            matchedTxIds.add(dup.id);
+          });
+        } else {
+          // Faltaba el asiento de este cobro aprobado
+          const cleanDesc = b.interestPaid > 0
+            ? `Aporte Reserva UF ${b.unitNumber} ${suffix} (Sin Mora)`
+            : `Aporte Reserva UF ${b.unitNumber} ${suffix}`;
+          toAddList.push({
+            date: payment?.date || getLocalIsoDate(),
+            amount: b.expectedReserveContribution,
+            description: cleanDesc,
+            type: 'SYSTEM',
+            paymentId: b.paymentId
+          });
+        }
+
+        // Actualizar también el campo informativo reserveContribution en el documento Payment si difiere
+        if (payment && Math.abs((payment.reserveContribution ?? -1) - b.expectedReserveContribution) > 0.01) {
+          try {
+            await updatePayment(consortium.id, payment.id, { reserveContribution: b.expectedReserveContribution });
+          } catch {
+            // Ignorar si falla actualización individual de metadata
+          }
+        }
+      }
+
+      // 3. Revisar si quedaron transacciones SYSTEM de cobros huérfanas (de pagos borrados o reversiones viejas)
+      const orphanSystemCobroTxs = transactions.filter(
+        t =>
+          !matchedTxIds.has(t.id) &&
+          t.type === 'SYSTEM' &&
+          (t.description.includes('Aporte Reserva de Cobro') || t.description.includes('Reversión de Cobro'))
+      );
+      orphanSystemCobroTxs.forEach(t => {
+        toDeleteIds.push(t.id);
+      });
+
+      await reconcileReserveTransactionsBatch(consortium.id, updates, toDeleteIds, toAddList);
+
+      if (onRefreshTransactions) {
+        await onRefreshTransactions();
+      }
+
+      alert(
+        `¡Caja de Fondo de Reserva corregida y acomodada exitosamente!\n\n` +
+        `• Asientos corregidos (mora descontada): ${updates.length}\n` +
+        `• Asientos excedentes/locales libres depurados: ${toDeleteIds.length}\n` +
+        `• Asientos faltantes generados: ${toAddList.length}`
+      );
+    } catch (err) {
+      console.error(err);
+      alert('Ocurrió un error al acomodar la caja de reserva.');
+    } finally {
+      setIsReconciling(false);
+    }
   };
 
   const handleManualAdd = async (e: React.FormEvent) => {
@@ -139,103 +295,86 @@ const ReserveView: React.FC<ReserveViewProps> = ({ transactions, consortium, onA
               <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                   <Vault className="w-6 h-6 text-amber-500" /> Libro Mayor: Fondo de Reserva
               </h2>
-              <p className="text-slate-500">Historial completo de ingresos y egresos de la caja de ahorro.</p>
+              <p className="text-slate-500">Historial completo de ingresos y egresos de la caja de ahorro (sin intereses por mora ni locales libres).</p>
           </div>
-          <div className="text-right bg-white px-6 py-3 rounded-xl shadow-sm border border-amber-100">
-              <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Saldo Actual Disponible</p>
-              <p className={`text-2xl font-black ${currentBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {formatCurrency(currentBalance)}
-              </p>
+          <div className="flex items-center gap-3">
+              <div className="text-right bg-white px-6 py-3 rounded-xl shadow-sm border border-amber-100">
+                  <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Saldo Actual Disponible</p>
+                  <p className={`text-2xl font-black ${currentBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {formatCurrency(currentBalance)}
+                  </p>
+              </div>
           </div>
       </div>
 
-      {/* ── PANEL DE DIAGNÓSTICO DE CONSISTENCIA ── */}
-      {diagnostic && diagnostic.isOver && (
-        <div className="rounded-xl border-2 border-red-300 bg-red-50 p-5">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-6 h-6 flex-shrink-0 mt-0.5 text-red-600" />
-            <div className="flex-1">
-              <h3 className="font-black text-lg text-red-700">
-                Fondo Sobre-Acreditado — Exceso histórico detectado
-              </h3>
-              <p className="text-sm text-slate-600 mt-1 mb-4">
-                El sistema detectó que se acreditó más de lo que corresponde según los cobros aprobados.
-                Esto ocurre cuando una versión anterior del sistema usaba una fórmula incorrecta
-                o acreditaba al cerrar la liquidación además de al cobrar.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                <div className="bg-white rounded-lg p-3 border border-slate-200">
-                  <p className="text-xs text-slate-500 uppercase font-bold">Total cobros aprobados</p>
-                  <p className="text-lg font-black text-slate-800">{formatCurrency(diagnostic.approvedPaymentsTotal)}</p>
-                </div>
-                <div className="bg-white rounded-lg p-3 border border-slate-200">
-                  <p className="text-xs text-slate-500 uppercase font-bold">Acreditado por sistema</p>
-                  <p className="text-lg font-black text-indigo-700">{formatCurrency(diagnostic.systemCreditTotal)}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Correcto: {formatCurrency(diagnostic.expectedSystemCredit)}</p>
-                </div>
-                <div className="rounded-lg p-3 border-2 bg-red-100 border-red-300">
-                  <p className="text-xs uppercase font-bold text-slate-600">Exceso a corregir</p>
-                  <p className="text-lg font-black text-red-700">{formatCurrency(Math.abs(diagnostic.discrepancy))}</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">{settings.monthlyReserveContributionPercentage}% de cobros reales</p>
-                </div>
+      {/* ── PANEL DE RESUMEN Y REPARACIÓN DE COBROS CON MORA / LOCALES LIBRES ── */}
+      {diagnostic && (
+        <div className={`rounded-xl border-2 p-5 ${diagnostic.needsCleanup ? 'border-amber-300 bg-amber-50/80' : 'border-emerald-200 bg-emerald-50/70'}`}>
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4">
+            <div className="flex items-start gap-3">
+              {diagnostic.needsCleanup ? (
+                <AlertTriangle className="w-6 h-6 flex-shrink-0 mt-0.5 text-amber-600" />
+              ) : (
+                <CheckCircle2 className="w-6 h-6 flex-shrink-0 mt-0.5 text-emerald-600" />
+              )}
+              <div>
+                <h3 className={`font-black text-lg ${diagnostic.needsCleanup ? 'text-amber-900' : 'text-emerald-900'}`}>
+                  {diagnostic.needsCleanup
+                    ? 'Ajuste Pendiente en Cobros con Mora / Unidades Exentas'
+                    : 'Caja de Reserva Alineada (Libre de Intereses por Mora)'}
+                </h3>
+                <p className="text-sm text-slate-600 mt-0.5">
+                  El Fondo de Reserva ({settings.monthlyReserveContributionPercentage}%) se calcula exclusivamente sobre las expensas ordinarias cobradas de unidades ocupadas, excluyendo intereses por mora y locales libres.
+                </p>
               </div>
-              <button
-                onClick={handleApplyCorrection}
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 font-bold rounded-lg transition-colors text-white shadow-md bg-red-600 hover:bg-red-700 shadow-red-200 disabled:opacity-50"
-              >
-                <Wrench className="w-4 h-4" />
-                Aplicar Corrección Automática ({formatCurrency(Math.abs(diagnostic.discrepancy))})
-              </button>
+            </div>
+
+            <button
+              onClick={handleReconcileReserveByCode}
+              disabled={isReconciling}
+              className={`flex items-center gap-2 px-5 py-2.5 font-bold rounded-xl transition-all text-white shadow-md whitespace-nowrap disabled:opacity-50 ${
+                diagnostic.needsCleanup
+                  ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
+              }`}
+            >
+              {isReconciling ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wrench className="w-4 h-4" />}
+              {isReconciling
+                ? 'Acomodando Caja...'
+                : 'Corregir Cobros con Mora y Acomodar Caja'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white rounded-lg p-3 border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase font-bold">Total Cobros Aprobados</p>
+              <p className="text-lg font-black text-slate-800">{formatCurrency(diagnostic.approvedPaymentsTotal)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{diagnostic.approvedPayments.length} cobros registrados</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-slate-200">
+              <p className="text-[11px] text-amber-700 uppercase font-bold">Mora + Locales Libres Excluidos</p>
+              <p className="text-lg font-black text-amber-600">
+                {formatCurrency(diagnostic.totalInterestInPayments + diagnostic.totalFreeUnitsPayments)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Mora: {formatCurrency(diagnostic.totalInterestInPayments)} | Libres: {formatCurrency(diagnostic.totalFreeUnitsPayments)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-slate-200">
+              <p className="text-[11px] text-slate-500 uppercase font-bold">Acreditado en Caja (Cobros)</p>
+              <p className="text-lg font-black text-indigo-700">{formatCurrency(diagnostic.systemCreditTotal)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Suma actual de asientos de cobro</p>
+            </div>
+            <div className={`rounded-lg p-3 border ${diagnostic.needsCleanup ? 'bg-amber-100/80 border-amber-300' : 'bg-emerald-100/70 border-emerald-300'}`}>
+              <p className="text-[11px] uppercase font-bold text-slate-700">Reserva Exacta Correspondiente</p>
+              <p className="text-lg font-black text-emerald-700">{formatCurrency(diagnostic.expectedSystemCredit)}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">
+                {Math.abs(diagnostic.discrepancy) > 0.05
+                  ? `Diferencia a ajustar: ${formatCurrency(diagnostic.discrepancy)}`
+                  : 'Sin diferencias pendientes'}
+              </p>
             </div>
           </div>
-        </div>
-      )}
-
-      {diagnostic && diagnostic.isUnder && (
-        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-6 h-6 flex-shrink-0 mt-0.5 text-amber-600" />
-            <div className="flex-1">
-              <h3 className="font-black text-lg text-amber-700">Fondo Sub-Acreditado</h3>
-              <p className="text-sm text-slate-600 mt-1 mb-4">
-                El saldo es menor al esperado según los cobros aprobados. Posiblemente faltaron acreditar algunos cobros.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                <div className="bg-white rounded-lg p-3 border border-slate-200">
-                  <p className="text-xs text-slate-500 uppercase font-bold">Total cobros aprobados</p>
-                  <p className="text-lg font-black text-slate-800">{formatCurrency(diagnostic.approvedPaymentsTotal)}</p>
-                </div>
-                <div className="bg-white rounded-lg p-3 border border-slate-200">
-                  <p className="text-xs text-slate-500 uppercase font-bold">Acreditado por sistema</p>
-                  <p className="text-lg font-black text-indigo-700">{formatCurrency(diagnostic.systemCreditTotal)}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Esperado: {formatCurrency(diagnostic.expectedSystemCredit)}</p>
-                </div>
-                <div className="rounded-lg p-3 border-2 bg-amber-100 border-amber-300">
-                  <p className="text-xs uppercase font-bold text-slate-600">Faltante a acreditar</p>
-                  <p className="text-lg font-black text-amber-700">{formatCurrency(Math.abs(diagnostic.discrepancy))}</p>
-                </div>
-              </div>
-              <button
-                onClick={handleApplyCorrection}
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 font-bold rounded-lg transition-colors text-white shadow-md bg-amber-500 hover:bg-amber-600 shadow-amber-200 disabled:opacity-50"
-              >
-                <Wrench className="w-4 h-4" />
-                Aplicar Corrección Automática (+{formatCurrency(Math.abs(diagnostic.discrepancy))})
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {diagnostic && !diagnostic.isOver && !diagnostic.isUnder && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-center gap-3">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-          <p className="text-sm font-medium text-emerald-800">
-            El saldo del fondo es consistente con los cobros aprobados
-            ({settings.monthlyReserveContributionPercentage}% sobre {formatCurrency(diagnostic.approvedPaymentsTotal)} cobrados = {formatCurrency(diagnostic.expectedSystemCredit)}).
-          </p>
         </div>
       )}
 

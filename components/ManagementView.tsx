@@ -1,6 +1,6 @@
 import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
 import React, { useState, useEffect } from 'react';
-import { Unit, SettlementRecord, Payment, Consortium, JoinRequest } from '../types';
+import { Unit, SettlementRecord, Payment, Consortium, JoinRequest, ConsortiumSettings } from '../types';
 import CollectionsView from './CollectionsView';
 import DebtorsView from './DebtorsView';
 import UnitsView from './UnitsView';
@@ -14,9 +14,10 @@ interface ManagementViewProps {
   history: SettlementRecord[];
   payments: Payment[];
   consortium: Consortium;
+  settings?: ConsortiumSettings;
   onUpdateUnit: (id: string, updates: Partial<Unit>) => Promise<void>;
   onAddPayment: (p: Omit<Payment, 'id'>) => Promise<void>;
-  onUpdateStatus: (id: string, s: 'APPROVED' | 'REJECTED') => Promise<void>;
+  onUpdateStatus: (id: string, s: 'APPROVED' | 'REJECTED', approvalPayload?: Partial<Payment>) => Promise<void>;
   onDeletePayment: (id: string) => Promise<void>;
 }
 
@@ -26,6 +27,8 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
   const [requests, setRequests] = useState<JoinRequest[]>([]);
   const [approvingReq, setApprovingReq] = useState<JoinRequest | null>(null);
   const [selectedUnitForReq, setSelectedUnitForReq] = useState('');
+
+  const pendingPaymentsCount = props.payments.filter(p => p.status === 'PENDING').length;
 
   useEffect(() => {
       if (props.consortiumId) {
@@ -71,8 +74,9 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
           </div>
           
           <div className="flex bg-slate-800 p-1.5 rounded-xl w-full md:w-auto overflow-x-auto">
-              <button onClick={() => setActiveTab('COBROS')} className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'COBROS' ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-slate-700'}`}>
+              <button onClick={() => setActiveTab('COBROS')} className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap relative ${activeTab === 'COBROS' ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-slate-700'}`}>
                   <Wallet className="w-4 h-4"/> Cobros
+                  {pendingPaymentsCount > 0 && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-black">{pendingPaymentsCount}</span>}
               </button>
               <button onClick={() => setActiveTab('DEUDAS')} className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'DEUDAS' ? 'bg-red-500 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-slate-700'}`}>
                   <AlertTriangle className="w-4 h-4"/> Deudas
@@ -88,7 +92,7 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
       </div>
 
       <div className="animate-fade-in">
-          {activeTab === 'COBROS' && <CollectionsView payments={props.payments} units={props.units} history={props.history} onAddPayment={props.onAddPayment} onUpdateStatus={props.onUpdateStatus} onUpdateUnit={props.onUpdateUnit} />}
+          {activeTab === 'COBROS' && <CollectionsView payments={props.payments} units={props.units} history={props.history} settings={props.settings} onAddPayment={props.onAddPayment} onUpdateStatus={props.onUpdateStatus} onUpdateUnit={props.onUpdateUnit} onDeletePayment={props.onDeletePayment} />}
           {activeTab === 'DEUDAS' && <DebtorsView units={props.units} setUnits={props.setUnits} history={props.history} payments={props.payments} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} />}
           {activeTab === 'UNIDADES' && <UnitsView units={props.units} setUnits={props.setUnits} consortiumId={props.consortiumId} payments={props.payments} history={props.history} consortium={props.consortium} onUpdateUnit={props.onUpdateUnit} onDeletePayment={props.onDeletePayment} />}
           

@@ -354,11 +354,11 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ]);
     }
 
-    // 3. SECCIÓN FONDO DE RESERVA (Mismo % para todos sobre sus expensas ordinarias)
+    // 3. SECCIÓN FONDO DE RESERVA (Mismo % para las unidades ocupadas sobre sus expensas ordinarias)
     let reserveContributionForUnit = 0;
 
     if (participatesInReserve && (settings.monthlyReserveContributionPercentage || 0) > 0 && sumOrdinary > 0) {
-        // El porcentaje es el mismo para todos aplicado directamente a las expensas ordinarias de la unidad
+        // El porcentaje se aplica directamente a las expensas ordinarias de la unidad ocupada
         reserveContributionForUnit = Number(((sumOrdinary * settings.monthlyReserveContributionPercentage) / 100).toFixed(2));
 
         bodyRows.push([
@@ -396,8 +396,32 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
         ]);
     }
 
-    // El total a pagar por el mes se compone estrictamente de: Ordinarias + Extraordinarias + Fondo de Reserva
-    const monthExpensesTotal = Number((sumOrdinary + sumExtraordinary + reserveContributionForUnit).toFixed(2));
+    // Subtotal bruto del mes: Ordinarias + Extraordinarias + Fondo de Reserva
+    const grossMonthTotal = Number((sumOrdinary + sumExtraordinary + reserveContributionForUnit).toFixed(2));
+
+    // Verificar si se aplicó Saldo a Favor (en el detalle del cierre o vista previa)
+    const unitSettlementDetail = (settlement.unitDetails || []).find(d => d.unitId === unit.id);
+    const creditApplied = unitSettlementDetail?.creditApplied !== undefined
+        ? Number(unitSettlementDetail.creditApplied)
+        : (settlement.id === 'preview' && (unit.creditBalance || 0) > 0
+            ? Number(Math.min(grossMonthTotal, Number(unit.creditBalance || 0)).toFixed(2))
+            : 0);
+
+    if (creditApplied > 0) {
+        bodyRows.push([
+            { 
+                content: '(-) SALDO A FAVOR APLICADO (Pago a cuenta anterior)', 
+                colSpan: 3, 
+                styles: { fontStyle: 'bold', fontSize: 8.5, halign: 'right', textColor: [4, 120, 87], fillColor: [236, 253, 245] } 
+            },
+            { 
+                content: `-${formatCurrency(creditApplied)}`, 
+                styles: { fontStyle: 'bold', fontSize: 8.5, halign: 'right', textColor: [4, 120, 87], fillColor: [236, 253, 245] } 
+            }
+        ]);
+    }
+
+    const monthExpensesTotal = Number(Math.max(0, grossMonthTotal - creditApplied).toFixed(2));
 
     // Fila destacada del TOTAL A PAGAR DEL MES
     bodyRows.push([

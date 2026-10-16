@@ -54,7 +54,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
   const [secondDate, setSecondDate] = useState(nextMonthEnd.toISOString().split('T')[0]);
 
   // CÁLCULO INTELIGENTE UNIDAD POR UNIDAD
-  const { totalOrdinary, totalExtraordinary, totalReserveSpent, reserveContribution, reserveBalanceStart, newReserveBalance, unitDebts } = useMemo(() => {
+  const { totalOrdinary, totalExtraordinary, totalReserveSpent, reserveContribution, totalCreditApplied, occupiedCount, freeCount, reserveBalanceStart, newReserveBalance, unitDebts } = useMemo(() => {
       let tOrd = 0;
       let tExt = 0;
       let tRes = 0;
@@ -106,47 +106,68 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           }
       });
 
-      // Cálculo de Reserva: El aporte es el % directo para TODOS sobre su cuota de expensas ordinarias
+      // Cálculo de Reserva: ÚNICAMENTE los locales/unidades ocupados aportan el % sobre sus expensas ordinarias.
+      // Cuando un local está libre/desocupado, no aporta al Fondo de Reserva ($0).
       let totalActualReserveContribution = 0;
-      const debtsMap = new Map<string, number>();
+      let totalCreditsUsed = 0;
+      let occCount = 0;
+      let frCount = 0;
 
-      uniqueUnits.forEach(u => {
+      const detailedUnits = uniqueUnits.map(u => {
            const unitOrd = Number((ordDebtsMap.get(u.id) || 0).toFixed(2));
            const unitExt = Number((extDebtsMap.get(u.id) || 0).toFixed(2));
 
            const participates = u.contributesToReserve !== false && u.isOccupied !== false;
+           if (participates) occCount++;
+           else frCount++;
+
            let reserveShare = 0;
            if (participates && (settings.monthlyReserveContributionPercentage || 0) > 0 && unitOrd > 0) {
-               // Mismo % para todos aplicado directamente sobre las expensas ordinarias de la unidad
                reserveShare = Number(((unitOrd * settings.monthlyReserveContributionPercentage) / 100).toFixed(2));
                totalActualReserveContribution = Number((totalActualReserveContribution + reserveShare).toFixed(2));
            }
 
-           debtsMap.set(u.id, Number((unitOrd + unitExt + reserveShare).toFixed(2)));
-      });
+           const grossTotal = Number((unitOrd + unitExt + reserveShare).toFixed(2));
+           const availableCredit = Number(u.creditBalance || 0);
+           const creditApplied = availableCredit > 0 ? Number(Math.min(grossTotal, availableCredit).toFixed(2)) : 0;
+           const netTotal = Number(Math.max(0, grossTotal - creditApplied).toFixed(2));
+
+           if (creditApplied > 0) {
+               totalCreditsUsed = Number((totalCreditsUsed + creditApplied).toFixed(2));
+           }
+
+           return {
+               unitId: u.id,
+               unitNumber: u.unitNumber,
+               owner: u.ownerName,
+               isOccupied: participates,
+               ordinaryAmount: unitOrd,
+               extraordinaryAmount: unitExt,
+               reserveAmount: reserveShare,
+               grossTotal,
+               creditApplied,
+               total: netTotal
+           };
+      }).sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
 
       const resContribution = totalActualReserveContribution;
 
       // settings.reserveFundBalance is the true ledger balance (computed in App.tsx) 
       // which ALREADY has tRes deducted from it. 
-      // So the balance BEFORE tRes was deducted is:
       const resBalanceStart = settings.reserveFundBalance + tRes;
-      // The final estimated balance adds the contribution to the current ledger balance
       const resBalanceAtClose = settings.reserveFundBalance + resContribution;
-
-      // Armamos el Array final
-      const finalUnitDebts = uniqueUnits.map(u => ({
-          unitId: u.id, unitNumber: u.unitNumber, owner: u.ownerName, total: Number((debtsMap.get(u.id) || 0).toFixed(2))
-      })).sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
 
       return {
           totalOrdinary: tOrd,
           totalExtraordinary: tExt,
           totalReserveSpent: tRes,
           reserveContribution: resContribution,
+          totalCreditApplied: totalCreditsUsed,
+          occupiedCount: occCount,
+          freeCount: frCount,
           reserveBalanceStart: resBalanceStart,
           newReserveBalance: resBalanceAtClose,
-          unitDebts: finalUnitDebts
+          unitDebts: detailedUnits
       };
   }, [units, expenses, settings]);
 
@@ -169,7 +190,14 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: reserveBalanceStart,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
           firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
-          unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
+          unitDetails: unitDebts.map(u => ({
+              unitId: u.unitId,
+              totalToPay: u.total,
+              ordinaryAmount: u.ordinaryAmount,
+              extraordinaryAmount: u.extraordinaryAmount,
+              reserveAmount: u.reserveAmount,
+              creditApplied: u.creditApplied
+          }))
       };
 
       return { consortiumData, dummyRecord };
@@ -203,6 +231,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           block: rawUnit.block || '',
           proratePercentage: Number(rawUnit.proratePercentage || 0), 
           initialBalance: rawUnit.initialBalance || 0, 
+          creditBalance: rawUnit.creditBalance || 0,
           authorizedEmails: rawUnit.authorizedEmails || [], 
           debts: rawUnit.debts || [],
           isOccupied: rawUnit.isOccupied,
@@ -229,14 +258,21 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           totalExpenses: totalOrdinary + totalExtraordinary, totalCollected, reserveBalanceStart: reserveBalanceStart,
           reserveContribution, reserveExpense: totalReserveSpent, reserveBalanceAtClose: newReserveBalance,
           firstExpirationDate: firstDate, secondExpirationDate: secondDate, snapshotExpenses: expenses, snapshotPayments: recentPayments, couponMessage,
-          unitDetails: unitDebts.map(u => ({ unitId: u.unitId, totalToPay: u.total }))
+          unitDetails: unitDebts.map(u => ({
+              unitId: u.unitId,
+              totalToPay: u.total,
+              ordinaryAmount: u.ordinaryAmount,
+              extraordinaryAmount: u.extraordinaryAmount,
+              reserveAmount: u.reserveAmount,
+              creditApplied: u.creditApplied
+          }))
       };
 
       const finalRecordForPDF = { ...record };
 
       try {
           await onCloseMonth(record);
-          const unitsToPrint = unitDebts.filter(u => u.total > 0);
+          const unitsToPrint = unitDebts.filter(u => u.grossTotal > 0 || u.total > 0);
           
           let delay = 0;
           unitsToPrint.forEach((debtItem) => {
@@ -249,6 +285,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
                       block: rawUnit?.block || '',
                       proratePercentage: Number(rawUnit?.proratePercentage || 0), 
                       initialBalance: rawUnit?.initialBalance || 0, 
+                      creditBalance: rawUnit?.creditBalance || 0,
                       authorizedEmails: rawUnit?.authorizedEmails || [], 
                       debts: rawUnit?.debts || [],
                       isOccupied: rawUnit?.isOccupied,
@@ -308,8 +345,25 @@ const SettlementView: React.FC<SettlementViewProps> = ({
                   <div className="space-y-3">
                       <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Ordinarios</span><span className="font-bold">{formatCurrency(totalOrdinary)}</span></div>
                       <div className="flex justify-between text-sm"><span className="text-slate-600">Gastos Extraordinarios</span><span className="font-bold">{formatCurrency(totalExtraordinary)}</span></div>
-                      <div className="flex justify-between text-sm pt-2 border-t border-slate-100"><span className="text-slate-600">+ Fondo Reserva ({settings.monthlyReserveContributionPercentage}% de ordinarios)</span><span className="font-bold text-emerald-600">{formatCurrency(reserveContribution)}</span></div>
-                      <div className="flex justify-between text-lg pt-2 border-t border-slate-200 font-bold"><span className="text-slate-800">Total Distribuido</span><span className="text-indigo-600">{formatCurrency(totalOrdinary + totalExtraordinary + reserveContribution)}</span></div>
+                      <div className="pt-2 border-t border-slate-100">
+                          <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">+ Fondo Reserva ({settings.monthlyReserveContributionPercentage}% s/ ordinarios)</span>
+                              <span className="font-bold text-emerald-600">{formatCurrency(reserveContribution)}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                              Aplicado a {occupiedCount} UF ocupadas ({freeCount} UF libres exentas)
+                          </p>
+                      </div>
+                      {totalCreditApplied > 0 && (
+                          <div className="flex justify-between text-sm pt-2 border-t border-slate-100">
+                              <span className="text-indigo-600 font-medium">(-) Saldos a Favor aplicados</span>
+                              <span className="font-bold text-indigo-600">-{formatCurrency(totalCreditApplied)}</span>
+                          </div>
+                      )}
+                      <div className="flex justify-between text-lg pt-2 border-t border-slate-200 font-bold">
+                          <span className="text-slate-800">Total a Emitir</span>
+                          <span className="text-indigo-600">{formatCurrency(totalOrdinary + totalExtraordinary + reserveContribution - totalCreditApplied)}</span>
+                      </div>
                   </div>
               </div>
 
@@ -340,19 +394,49 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           </div>
 
           <div className="md:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[700px]">
-              <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2"><User className="w-5 h-5 text-indigo-500"/> Distribución Final por Unidad</h3>
-              <p className="text-xs text-slate-500 mb-4">Monto exacto calculado sumando todas las expensas que le corresponden a cada UF (Prorrateo y Partes Iguales).</p>
+              <h3 className="font-bold text-slate-700 mb-1 flex items-center gap-2"><User className="w-5 h-5 text-indigo-500"/> Distribución Final por Unidad</h3>
+              <p className="text-xs text-slate-500 mb-4">
+                  El Fondo de Reserva ({settings.monthlyReserveContributionPercentage}%) se aplica sobre gastos ordinarios únicamente a las unidades ocupadas.
+              </p>
               <div className="flex-1 overflow-y-auto pr-2">
                   <table className="w-full text-sm">
                       <thead className="bg-slate-100 text-slate-600 sticky top-0 uppercase text-xs">
-                          <tr><th className="px-4 py-3 text-left">UF</th><th className="px-4 py-3 text-left">Propietario</th><th className="px-4 py-3 text-right">Cuota Período</th></tr>
+                          <tr>
+                              <th className="px-3 py-3 text-left">UF</th>
+                              <th className="px-3 py-3 text-left">Propietario</th>
+                              <th className="px-3 py-3 text-right">Ord. + Ext.</th>
+                              <th className="px-3 py-3 text-right">F. Reserva</th>
+                              <th className="px-3 py-3 text-right">Cuota Período</th>
+                          </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                           {unitDebts.map(u => (
                               <tr key={u.unitId} className="hover:bg-slate-50 transition-colors">
-                                  <td className="px-4 py-3 font-bold text-slate-800">{u.unitNumber}</td>
-                                  <td className="px-4 py-3 text-slate-600 truncate max-w-[200px]">{u.owner}</td>
-                                  <td className="px-4 py-3 text-right font-black text-emerald-600">{formatCurrency(u.total)}</td>
+                                  <td className="px-3 py-3 font-bold text-slate-800">{u.unitNumber}</td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                      <div className="truncate max-w-[160px] font-medium">{u.owner}</div>
+                                      {!u.isOccupied && (
+                                          <span className="inline-block text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold mt-0.5">
+                                              Local Libre (Sin Reserva)
+                                          </span>
+                                      )}
+                                      {u.creditApplied > 0 && (
+                                          <span className="inline-block text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold mt-0.5 ml-1">
+                                              Saldo a favor: -{formatCurrency(u.creditApplied)}
+                                          </span>
+                                      )}
+                                  </td>
+                                  <td className="px-3 py-3 text-right text-slate-600 font-medium">
+                                      {formatCurrency(u.ordinaryAmount + u.extraordinaryAmount)}
+                                  </td>
+                                  <td className="px-3 py-3 text-right">
+                                      {u.isOccupied ? (
+                                          <span className="font-bold text-emerald-600">+{formatCurrency(u.reserveAmount)}</span>
+                                      ) : (
+                                          <span className="text-xs font-bold text-amber-600">Exento ($0)</span>
+                                      )}
+                                  </td>
+                                  <td className="px-3 py-3 text-right font-black text-indigo-700">{formatCurrency(u.total)}</td>
                               </tr>
                           ))}
                       </tbody>

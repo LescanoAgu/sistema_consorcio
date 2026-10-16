@@ -12,15 +12,18 @@ service cloud.firestore {
     
     // 2. ¿Es un usuario/vecino autorizado en este consorcio?
     function isAuthorizedUser(consortiumId) {
-      return request.auth != null && 
-        exists(/databases/$(database)/documents/user_access/$(request.auth.token.email)) &&
-        consortiumId in get(/databases/$(database)/documents/user_access/$(request.auth.token.email)).data.consortiumIds;
+      return request.auth != null && (
+        exists(/databases/$(database)/documents/user_access/$(request.auth.token.email)/consortium_roles/$(consortiumId)) ||
+        (exists(/databases/$(database)/documents/user_access/$(request.auth.token.email)) &&
+         consortiumId in get(/databases/$(database)/documents/user_access/$(request.auth.token.email)).data.consortiumIds)
+      );
     }
     
     // 3. ¿Tiene permiso para crear más consorcios? (Control SaaS)
     function canCreateConsortium() {
-      let adminDoc = get(/databases/$(database)/documents/saas_admins/$(request.auth.uid));
-      return adminDoc != null && adminDoc.data.activeConsortiums < adminDoc.data.maxConsortiums;
+      return !exists(/databases/$(database)/documents/saas_admins/$(request.auth.uid)) || (
+        get(/databases/$(database)/documents/saas_admins/$(request.auth.uid)).data.activeConsortiums < get(/databases/$(database)/documents/saas_admins/$(request.auth.uid)).data.maxConsortiums
+      );
     }
 
     // --- REGLAS POR COLECCIÓN ---
@@ -52,11 +55,12 @@ service cloud.firestore {
 
     // 3. Consorcios
     match /consortiums/{consortiumId} {
-      // Crear: Solo si tiene plan SaaS activo
+      // Crear: Si está autenticado y respeta su cupo SaaS
       allow create: if request.auth != null && canCreateConsortium();
       
-      // LEER: CORREGIDO. Solo ve el consorcio si es Admin del mismo O si es un vecino asignado.
-      allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
+      // LEER: Usuarios autenticados pueden ver el listado básico de consorcios para solicitar unirse,
+      // mientras que todas las subcolecciones internas exigen ser miembro o administrador.
+      allow read: if request.auth != null;
 
       // Modificar/Borrar: Solo Admins de ese consorcio
       allow update, delete: if isAdmin(consortiumId);

@@ -1,6 +1,7 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
@@ -9,16 +10,28 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
       },
-      plugins: [react()],
+      plugins: [react(), tailwindcss()],
       define: {
-        // Mantenemos la estructura por compatibilidad, pero DEBES migrar 
-        // las llamadas de IA a Firebase Cloud Functions para máxima seguridad.
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || ''),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || '')
       },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+        }
+      },
+      build: {
+        chunkSizeWarningLimit: 800,
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'vendor-react': ['react', 'react-dom', 'react-router-dom', '@tanstack/react-query'],
+              'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
+              'vendor-pdf': ['jspdf', 'jspdf-autotable'],
+              'vendor-excel': ['xlsx'],
+              'vendor-charts': ['recharts']
+            }
+          }
         }
       }
     };

@@ -91,7 +91,7 @@ export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/units`), unit);
     if (unit.authorizedEmails && unit.authorizedEmails.length > 0) {
         for (const email of unit.authorizedEmails) {
-            await registerUserAccess(email, consortiumId);
+            await registerUserAccess(email.trim().toLowerCase(), consortiumId);
         }
     }
     return { id: docRef.id, ...unit };
@@ -100,9 +100,12 @@ export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
 export const updateUnit = async (consortiumId: string, unitId: string, updates: Partial<Unit>, unit?: Unit) => {
     const docRef = doc(db, `consortiums/${consortiumId}/units`, unitId);
     await updateDoc(docRef, { ...updates });
-    if (unit && unit.authorizedEmails && unit.authorizedEmails.length > 0) {
-        for (const email of unit.authorizedEmails) {
-            await registerUserAccess(email, consortiumId);
+    const emailsToRegister = updates.authorizedEmails || unit?.authorizedEmails || [];
+    if (emailsToRegister.length > 0) {
+        for (const email of emailsToRegister) {
+            if (email && email.trim()) {
+                await registerUserAccess(email.trim().toLowerCase(), consortiumId);
+            }
         }
     }
 };
@@ -167,10 +170,20 @@ export const deleteAnnouncement = async (consortiumId: string, id: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/announcements`, id));
 };
 
-export const getMaintenanceRequests = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/maintenance`), orderBy('date', 'desc'), limit(50));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceRequest));
+export const getMaintenanceRequests = async (consortiumId: string, isAdmin: boolean = true, myUnitIds: string[] = []) => {
+    const maintenanceRef = collection(db, `consortiums/${consortiumId}/maintenance`);
+    if (isAdmin) {
+        const q = query(maintenanceRef, orderBy('date', 'desc'), limit(50));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceRequest));
+    } else {
+        if (myUnitIds.length === 0) return [];
+        const chunk = myUnitIds.slice(0, 30);
+        const q = query(maintenanceRef, where('unitId', 'in', chunk), limit(50));
+        const snapshot = await getDocs(q);
+        const results = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceRequest));
+        return results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
 };
 export const addMaintenanceRequest = async (consortiumId: string, data: Omit<MaintenanceRequest, 'id'>) => {
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/maintenance`), data);
@@ -218,8 +231,9 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
     const q = query(historyRef, where('month', '==', record.month), limit(1));
     const snapshot = await getDocs(q);
 
-    // Operación principal (historial y settings)
+    // Operación principal atómica (historial, deudas/créditos de unidades y borrado de gastos activos)
     const mainBatch = writeBatch(db);
+    let mainBatchOpsCount = 0;
 
     if (!snapshot.empty) {
         const existingDoc = snapshot.docs[0];
@@ -228,54 +242,70 @@ export const saveSettlement = async (consortiumId: string, record: SettlementRec
         const newHistoryRef = doc(historyRef);
         mainBatch.set(newHistoryRef, record);
     }
-    
-    // (Ya no sobreescribimos reserveFundBalance en settings — el saldo real siempre
-    // se computa en App.tsx desde la suma de reserve_transactions, no desde settings)
+    mainBatchOpsCount++;
 
-    // Actualizar deudas de las unidades:
-    // En lugar de consolidar o borrar deudas anteriores, el cierre de mes agrega ÚNICAMENTE
-    // el monto de las expensas de ESE mes (detail.totalToPay) como un nuevo período de deuda.
-    // De esta forma, cada deudor mantiene sus períodos separados individualmente (Ej: Enero $50k, Feb $60k)
-    // permitiendo imputar pagos a la más antigua y calcular interés simple sobre el baseAmount de cada mes.
+    // Actualizar deudas y saldos a favor de las unidades
     if (record.unitDetails && units.length > 0) {
         record.unitDetails.forEach(detail => {
+            const unit = units.find(u => u.id === detail.unitId);
+            if (!unit) return;
+
+            const creditApplied = Number(detail.creditApplied || 0);
+            const currentCredit = Number(unit.creditBalance || 0);
+            const newCreditBalance = Number(Math.max(0, currentCredit - creditApplied).toFixed(2));
+
+            const currentDebts: DebtItem[] = [...(unit.debts || [])];
+            const existingIndex = currentDebts.findIndex(d => d.period === record.month);
+
             if (detail.totalToPay > 0) {
-                const unit = units.find(u => u.id === detail.unitId);
-                if (unit) {
-                    const currentDebts: DebtItem[] = [...(unit.debts || [])];
-                    const existingIndex = currentDebts.findIndex(d => d.period === record.month);
+                const newDebtItem: DebtItem = {
+                    id: existingIndex >= 0 ? currentDebts[existingIndex].id : `debt_${record.month.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`,
+                    period: record.month,
+                    baseAmount: detail.totalToPay,
+                    ordinaryAmount: detail.ordinaryAmount !== undefined ? detail.ordinaryAmount : detail.totalToPay,
+                    extraordinaryAmount: detail.extraordinaryAmount || 0,
+                    reserveAmount: detail.reserveAmount || 0,
+                    interestRate: existingIndex >= 0 ? currentDebts[existingIndex].interestRate : 0,
+                    interestAmount: existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0,
+                    total: Number((detail.totalToPay + (existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0)).toFixed(2)),
+                    createdAt: existingIndex >= 0 ? currentDebts[existingIndex].createdAt : new Date().toISOString(),
+                    interestLogs: existingIndex >= 0 ? (currentDebts[existingIndex].interestLogs || []) : []
+                };
 
-                    const newDebtItem: DebtItem = {
-                        id: existingIndex >= 0 ? currentDebts[existingIndex].id : `debt_${record.month.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`,
-                        period: record.month,
-                        baseAmount: detail.totalToPay,
-                        interestRate: existingIndex >= 0 ? currentDebts[existingIndex].interestRate : 0,
-                        interestAmount: existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0,
-                        total: detail.totalToPay + (existingIndex >= 0 ? currentDebts[existingIndex].interestAmount : 0),
-                        createdAt: existingIndex >= 0 ? currentDebts[existingIndex].createdAt : new Date().toISOString(),
-                        interestLogs: existingIndex >= 0 ? (currentDebts[existingIndex].interestLogs || []) : []
-                    };
-
-                    if (existingIndex >= 0) {
-                        // Si ya existía el registro de este período, se actualiza su baseAmount sin duplicarlo
-                        currentDebts[existingIndex] = newDebtItem;
-                    } else {
-                        // Se agrega al listado de períodos históricos conservando todas las deudas previas separadas
-                        currentDebts.push(newDebtItem);
-                    }
-
-                    mainBatch.update(doc(db, `consortiums/${consortiumId}/units`, unit.id), { debts: currentDebts });
+                if (existingIndex >= 0) {
+                    currentDebts[existingIndex] = newDebtItem;
+                } else {
+                    currentDebts.push(newDebtItem);
                 }
+            }
+
+            if (detail.totalToPay > 0 || creditApplied > 0) {
+                mainBatch.update(doc(db, `consortiums/${consortiumId}/units`, unit.id), {
+                    debts: currentDebts,
+                    creditBalance: newCreditBalance
+                });
+                mainBatchOpsCount++;
             }
         });
     }
 
+    // Incluir el borrado de gastos en el mismo mainBatch mientras no supere las 450 operaciones (atomicidad total)
+    const remainingExpenseIds: string[] = [];
+    for (const expId of expenseIdsToRemove) {
+        if (mainBatchOpsCount < 450) {
+            mainBatch.delete(doc(db, `consortiums/${consortiumId}/expenses`, expId));
+            mainBatchOpsCount++;
+        } else {
+            remainingExpenseIds.push(expId);
+        }
+    }
+
     await mainBatch.commit();
 
-    // Eliminar gastos en chunks de 400 para evitar límite de 500 de Firestore
+    // Si quedaran más de 450 operaciones, eliminar el excedente en chunks
     const chunkSize = 400;
-    for (let i = 0; i < expenseIdsToRemove.length; i += chunkSize) {
-        const chunk = expenseIdsToRemove.slice(i, i + chunkSize);
+    for (let i = 0; i < remainingExpenseIds.length; i += chunkSize) {
+        const chunk = remainingExpenseIds.slice(i, i + chunkSize);
         const chunkBatch = writeBatch(db);
         for (const id of chunk) {
             chunkBatch.delete(doc(db, `consortiums/${consortiumId}/expenses`, id));
@@ -310,7 +340,6 @@ export const getPayments = async (consortiumId: string, isAdmin: boolean = true,
         q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'), limit(150));
     } else {
         if (myUnitIds.length === 0) return [];
-        // Firestore limita el uso de 'in' a arrays de máximo 30 elementos.
         const chunk = myUnitIds.slice(0, 30);
         q = query(collection(db, `consortiums/${consortiumId}/payments`), where('unitId', 'in', chunk), orderBy('date', 'desc'), limit(50));
     }
@@ -365,7 +394,7 @@ export const deleteExpenseTemplate = async (consortiumId: string, id: string) =>
 };
 
 export const getReserveTransactions = async (consortiumId: string) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/reserve_transactions`), orderBy('date', 'desc'), limit(100));
+    const q = query(collection(db, `consortiums/${consortiumId}/reserve_transactions`), orderBy('date', 'desc'), limit(200));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ReserveTransaction));
 };
@@ -373,8 +402,34 @@ export const addReserveTransaction = async (consortiumId: string, data: Omit<Res
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/reserve_transactions`), data);
     return { id: docRef.id, ...data };
 };
+export const updateReserveTransaction = async (consortiumId: string, id: string, updates: Partial<ReserveTransaction>) => {
+    const docRef = doc(db, `consortiums/${consortiumId}/reserve_transactions`, id);
+    await updateDoc(docRef, updates);
+};
 export const deleteReserveTransaction = async (consortiumId: string, id: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/reserve_transactions`, id));
+};
+export const reconcileReserveTransactionsBatch = async (
+    consortiumId: string,
+    updates: { id: string; amount: number; description?: string }[],
+    toDeleteIds: string[],
+    toAddList: Omit<ReserveTransaction, 'id'>[]
+) => {
+    const batch = writeBatch(db);
+    updates.forEach(u => {
+        const refDoc = doc(db, `consortiums/${consortiumId}/reserve_transactions`, u.id);
+        const payload: any = { amount: Number(u.amount.toFixed(2)) };
+        if (u.description) payload.description = u.description;
+        batch.update(refDoc, payload);
+    });
+    toDeleteIds.forEach(id => {
+        batch.delete(doc(db, `consortiums/${consortiumId}/reserve_transactions`, id));
+    });
+    toAddList.forEach(item => {
+        const newRef = doc(collection(db, `consortiums/${consortiumId}/reserve_transactions`));
+        batch.set(newRef, { ...item, amount: Number(item.amount.toFixed(2)) });
+    });
+    await batch.commit();
 };
 
 export const getAllConsortiums = async () => {
