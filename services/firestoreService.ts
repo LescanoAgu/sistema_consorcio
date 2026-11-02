@@ -32,22 +32,30 @@ export const getAdminConsortiums = async (userId: string) => {
 };
 
 export const getUserConsortiums = async (email: string) => {
-    // Leer accesos legacy (documento viejo)
-    const accessRef = doc(db, 'user_access', email);
-    const accessSnap = await getDoc(accessRef);
+    if (!email) return [];
+    const cleanEmail = email.trim().toLowerCase();
+    const candidates = Array.from(new Set([cleanEmail, email.trim()]));
     let consortiumIds: string[] = [];
-    if (accessSnap.exists() && accessSnap.data().consortiumIds) {
-        consortiumIds = [...accessSnap.data().consortiumIds];
-    }
-    
-    // Leer accesos nuevos (subcolección segura)
-    const rolesQuery = query(collection(db, `user_access/${email}/consortium_roles`));
-    const rolesSnap = await getDocs(rolesQuery);
-    rolesSnap.forEach(doc => {
-        if (!consortiumIds.includes(doc.id)) {
-            consortiumIds.push(doc.id);
+
+    for (const candidateEmail of candidates) {
+        // Leer accesos legacy (documento viejo)
+        const accessRef = doc(db, 'user_access', candidateEmail);
+        const accessSnap = await getDoc(accessRef);
+        if (accessSnap.exists() && accessSnap.data().consortiumIds) {
+            accessSnap.data().consortiumIds.forEach((cid: string) => {
+                if (!consortiumIds.includes(cid)) consortiumIds.push(cid);
+            });
         }
-    });
+        
+        // Leer accesos nuevos (subcolección segura)
+        const rolesQuery = query(collection(db, `user_access/${candidateEmail}/consortium_roles`));
+        const rolesSnap = await getDocs(rolesQuery);
+        rolesSnap.forEach(roleDoc => {
+            if (!consortiumIds.includes(roleDoc.id)) {
+                consortiumIds.push(roleDoc.id);
+            }
+        });
+    }
 
     if (consortiumIds.length === 0) return [];
     
@@ -68,23 +76,34 @@ export const getUserConsortiums = async (email: string) => {
 
 export const registerUserAccess = async (email: string, consortiumId: string) => {
     if (!email) return;
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return;
     // Nueva forma segura usando subcolección donde el ID del documento es el ID del consorcio
-    const roleRef = doc(db, `user_access/${email}/consortium_roles/${consortiumId}`);
+    const roleRef = doc(db, `user_access/${cleanEmail}/consortium_roles/${consortiumId}`);
     await setDoc(roleRef, { active: true, addedAt: new Date().toISOString() }, { merge: true });
 };
 
 export const getUnits = async (consortiumId: string, userEmail: string | null = null, isAdmin: boolean = true) => {
     const unitsRef = collection(db, `consortiums/${consortiumId}/units`);
-    let q;
     if (isAdmin) {
-        q = query(unitsRef);
+        const snapshot = await getDocs(query(unitsRef));
+        const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id } as Unit));
+        return list.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true, sensitivity: 'base' }));
     } else {
         if (!userEmail) return [];
-        q = query(unitsRef, where('authorizedEmails', 'array-contains', userEmail));
+        const cleanEmail = userEmail.trim().toLowerCase();
+        const emailVariants = Array.from(new Set([cleanEmail, userEmail.trim()]));
+        const unitMap = new Map<string, Unit>();
+
+        for (const variant of emailVariants) {
+            const q = query(unitsRef, where('authorizedEmails', 'array-contains', variant));
+            const snapshot = await getDocs(q);
+            snapshot.docs.forEach(d => unitMap.set(d.id, { ...(d.data() as any), id: d.id } as Unit));
+        }
+
+        const list = Array.from(unitMap.values());
+        return list.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true, sensitivity: 'base' }));
     }
-    const snapshot = await getDocs(q);
-    const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id } as Unit));
-    return list.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true, sensitivity: 'base' }));
 };
 
 export const addUnit = async (consortiumId: string, unit: Omit<Unit, 'id'>) => {
@@ -216,9 +235,13 @@ export const getBookings = async (consortiumId: string) => {
     return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Booking));
 };
 export const addBooking = async (consortiumId: string, data: Omit<Booking, 'id'>) => {
-    const q = query(collection(db, `consortiums/${consortiumId}/bookings`), where('amenityId', '==', data.amenityId), where('date', '==', data.date), where('timeSlot', '==', data.timeSlot), where('status', '==', 'CONFIRMED'));
+    const q = query(collection(db, `consortiums/${consortiumId}/bookings`), where('date', '==', data.date));
     const snapshot = await getDocs(q);
-    if (!snapshot.empty) throw new Error("El turno ya está reservado.");
+    const alreadyBooked = snapshot.docs.some(d => {
+        const b = d.data() as Booking;
+        return b.amenityId === data.amenityId && b.timeSlot === data.timeSlot && b.status === 'CONFIRMED';
+    });
+    if (alreadyBooked) throw new Error("El turno ya está reservado.");
     const docRef = await addDoc(collection(db, `consortiums/${consortiumId}/bookings`), data);
     return { id: docRef.id, ...data };
 };
@@ -335,16 +358,18 @@ export const updatePayment = async (consortiumId: string, paymentId: string, upd
     await updateDoc(docRef, updates);
 };
 export const getPayments = async (consortiumId: string, isAdmin: boolean = true, myUnitIds: string[] = []) => {
-    let q;
     if (isAdmin) {
-        q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'), limit(150));
+        const q = query(collection(db, `consortiums/${consortiumId}/payments`), orderBy('date', 'desc'), limit(150));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
     } else {
         if (myUnitIds.length === 0) return [];
         const chunk = myUnitIds.slice(0, 30);
-        q = query(collection(db, `consortiums/${consortiumId}/payments`), where('unitId', 'in', chunk), orderBy('date', 'desc'), limit(50));
+        const q = query(collection(db, `consortiums/${consortiumId}/payments`), where('unitId', 'in', chunk), limit(100));
+        const snapshot = await getDocs(q);
+        const results = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
+        return results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 50);
     }
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Payment));
 };
 export const deletePayment = async (consortiumId: string, paymentId: string) => {
     await deleteDoc(doc(db, `consortiums/${consortiumId}/payments`, paymentId));
@@ -438,20 +463,30 @@ export const getAllConsortiums = async () => {
 };
 
 export const createJoinRequest = async (data: Omit<JoinRequest, 'id'>) => {
-    const docRef = await addDoc(collection(db, 'join_requests'), data);
-    return { id: docRef.id, ...data };
+    const normalizedData = { ...data, userEmail: data.userEmail.trim().toLowerCase() };
+    const docRef = await addDoc(collection(db, 'join_requests'), normalizedData);
+    return { id: docRef.id, ...normalizedData };
 };
 
 export const getPendingJoinRequests = async (consortiumId: string) => {
-    const q = query(collection(db, 'join_requests'), where('consortiumId', '==', consortiumId), where('status', '==', 'PENDING'));
+    const q = query(collection(db, 'join_requests'), where('consortiumId', '==', consortiumId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as JoinRequest));
+    return snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() } as JoinRequest))
+        .filter(r => r.status === 'PENDING');
 };
 
 export const getUserJoinRequests = async (email: string) => {
-    const q = query(collection(db, 'join_requests'), where('userEmail', '==', email));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as JoinRequest));
+    if (!email) return [];
+    const cleanEmail = email.trim().toLowerCase();
+    const variants = Array.from(new Set([cleanEmail, email.trim()]));
+    const reqMap = new Map<string, JoinRequest>();
+    for (const v of variants) {
+        const q = query(collection(db, 'join_requests'), where('userEmail', '==', v));
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach(d => reqMap.set(d.id, { id: d.id, ...d.data() } as JoinRequest));
+    }
+    return Array.from(reqMap.values());
 };
 
 export const updateJoinRequest = async (id: string, status: 'APPROVED' | 'REJECTED') => {

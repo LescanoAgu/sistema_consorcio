@@ -258,10 +258,42 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
     // --- PROCESAMIENTO Y SEPARACIÓN DE GASTOS (ORDINARIOS Y EXTRAORDINARIOS) ---
     const allExpenses = settlement.snapshotExpenses || [];
     
-    // Deduplicar listado de unidades para cálculo exacto de partes iguales y prorrateo
+    // Deduplicar listado de unidades cargadas en memoria
     const cleanAllUnitsMap = new Map<string, Unit>();
     (allUnitsData || []).forEach(u => cleanAllUnitsMap.set(u.id, u));
-    const cleanAllUnits = Array.from(cleanAllUnitsMap.values());
+
+    // Si quien descarga es un vecino (USER), allUnitsData solo contiene su(s) unidad(es) por privacidad.
+    // Reconstruimos el padrón numérico del consorcio usando settlement.unitDetails para que Partes Iguales
+    // y Prorrateo calculen exactamente sobre la totalidad real de unidades del edificio.
+    interface RosterEntry { id: string; proratePercentage?: number; }
+    let rosterUnits: RosterEntry[];
+    const detailsList = settlement.unitDetails || [];
+
+    if (detailsList.length > cleanAllUnitsMap.size) {
+        const rosterMap = new Map<string, RosterEntry>();
+        detailsList.forEach(d => {
+            const loaded = cleanAllUnitsMap.get(d.unitId);
+            rosterMap.set(d.unitId, {
+                id: d.unitId,
+                proratePercentage: d.proratePercentage !== undefined
+                    ? Number(d.proratePercentage)
+                    : (loaded ? Number(loaded.proratePercentage || 0) : undefined)
+            });
+        });
+        if (!rosterMap.has(unit.id)) {
+            rosterMap.set(unit.id, { id: unit.id, proratePercentage: Number(unit.proratePercentage || 0) });
+        }
+        rosterUnits = Array.from(rosterMap.values());
+    } else {
+        rosterUnits = Array.from(cleanAllUnitsMap.values()).map(u => ({
+            id: u.id,
+            proratePercentage: Number(u.proratePercentage || 0)
+        }));
+    }
+
+    const currentUnitPercentage = detailsList.find(d => d.unitId === unit.id)?.proratePercentage !== undefined
+        ? Number(detailsList.find(d => d.unitId === unit.id)!.proratePercentage)
+        : Number(unit.proratePercentage || 0);
 
     let sumOrdinary = 0;
     let sumExtraordinary = 0;
@@ -283,23 +315,31 @@ const createCouponDoc = (settlement: SettlementRecord, unit: Unit, consortium: C
             return;
         }
 
-        let affectedUnits = cleanAllUnits;
-        if (exp.affectedUnitIds && exp.affectedUnitIds.length > 0) {
-            affectedUnits = cleanAllUnits.filter(u => exp.affectedUnitIds!.includes(u.id));
-        }
+        const hasSpecificUnits = Boolean(exp.affectedUnitIds && exp.affectedUnitIds.length > 0);
+        if (hasSpecificUnits && !exp.affectedUnitIds!.includes(unit.id)) return; // No afecta a esta unidad
 
-        if (!affectedUnits.some(u => u.id === unit.id)) return; // No afecta a esta unidad
+        const affectedUnits = hasSpecificUnits
+            ? rosterUnits.filter(u => exp.affectedUnitIds!.includes(u.id))
+            : rosterUnits;
+
+        if (!hasSpecificUnits && !affectedUnits.some(u => u.id === unit.id)) return;
         
         let unitAmount = 0;
         let distributionLabel = '';
 
         if (exp.distributionType === 'EQUAL_PARTS') {
-            unitAmount = Number((exp.amount / (affectedUnits.length || 1)).toFixed(2));
-            distributionLabel = `Partes Iguales (${affectedUnits.length} UF)`;
+            const totalEqualCount = hasSpecificUnits
+                ? (affectedUnits.length || exp.affectedUnitIds!.length || 1)
+                : (affectedUnits.length || 1);
+            unitAmount = Number((exp.amount / totalEqualCount).toFixed(2));
+            distributionLabel = `Partes Iguales (${totalEqualCount} UF)`;
         } else {
-            const totalAffectedProrate = affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100;
-            unitAmount = Number((exp.amount * ((Number(unit.proratePercentage) || 0) / totalAffectedProrate)).toFixed(2));
-            distributionLabel = affectedUnits.length === cleanAllUnits.length 
+            const allAffectedHaveProrate = affectedUnits.length > 0 && affectedUnits.every(u => u.proratePercentage !== undefined);
+            const totalAffectedProrate = allAffectedHaveProrate
+                ? (affectedUnits.reduce((sum, u) => sum + (Number(u.proratePercentage) || 0), 0) || 100)
+                : 100;
+            unitAmount = Number((exp.amount * (currentUnitPercentage / totalAffectedProrate)).toFixed(2));
+            distributionLabel = !hasSpecificUnits || affectedUnits.length === rosterUnits.length
                 ? `Prorrateo ${formattedPercentage}%` 
                 : `Prorrateo Normalizado`;
         }

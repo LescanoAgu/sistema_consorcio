@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Consortium, UserRole, JoinRequest } from '../types';
-import { Building2, ArrowRight, LogOut, PlusCircle, AlertCircle, Loader2, UserPlus, Info, Search, X, CheckCircle2 } from 'lucide-react';
+import { Building2, ArrowRight, LogOut, PlusCircle, AlertCircle, Loader2, UserPlus, Info, Search, X, CheckCircle2, KeyRound } from 'lucide-react';
 import { auth } from '../src/config/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { getAllConsortiums, getUserJoinRequests, createJoinRequest } from '../services/firestoreService';
 
 interface AuthViewProps {
@@ -28,7 +28,8 @@ const AuthView: React.FC<AuthViewProps> = ({
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [mode, setMode] = useState<'LOGIN' | 'REGISTER' | 'RESET'>('LOGIN');
   
   const [isCreatingConsortium, setIsCreatingConsortium] = useState(false);
   const [newConsortium, setNewConsortium] = useState({ name: '', address: '', cuit: '' });
@@ -45,6 +46,12 @@ const AuthView: React.FC<AuthViewProps> = ({
   const closeJoinModal = () => {
       setJoinModal(null);
       setJoinForm({ firstName: '', lastName: '', message: '' });
+  };
+
+  const switchMode = (nextMode: 'LOGIN' | 'REGISTER' | 'RESET') => {
+      setMode(nextMode);
+      setError('');
+      setSuccessMsg('');
   };
 
   // Cargar lista global de consorcios y solicitudes del usuario cuando se autentica
@@ -64,21 +71,51 @@ const AuthView: React.FC<AuthViewProps> = ({
     }
   }, [isAuthenticated, userEmail]);
 
-  // Manejador del Formulario de Autenticación
+  // Manejador del Formulario de Autenticación / Recuperación
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password.trim()) {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      setError('Por favor, ingresa tu correo electrónico.');
+      return;
+    }
+
+    if (mode === 'RESET') {
+      setLoading(true);
+      setError('');
+      setSuccessMsg('');
+      try {
+        await sendPasswordResetEmail(auth, cleanEmail);
+        setSuccessMsg('Te enviamos un correo para restablecer tu contraseña. Revisá tu bandeja de entrada o correo no deseado (Spam).');
+      } catch (err: any) {
+        console.error("Error al recuperar contraseña:", err);
+        if (err.code === 'auth/invalid-email') {
+          setError('El correo electrónico ingresado no tiene un formato válido.');
+        } else if (err.code === 'auth/user-not-found') {
+          setError('No existe ninguna cuenta registrada con ese correo.');
+        } else {
+          setError('No pudimos enviar el correo de recuperación. Intentá nuevamente en unos minutos.');
+        }
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (!password.trim()) {
       setError('Por favor, completa todos los campos obligatorios.');
       return;
     }
     setLoading(true);
     setError('');
+    setSuccessMsg('');
 
     try {
       if (mode === 'LOGIN') {
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        await signInWithEmailAndPassword(auth, cleanEmail, password);
       } else {
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        await createUserWithEmailAndPassword(auth, cleanEmail, password);
       }
     } catch (err: any) {
       console.error("Error de autenticación:", err);
@@ -88,7 +125,7 @@ const AuthView: React.FC<AuthViewProps> = ({
         case 'auth/user-not-found':
         case 'auth/wrong-password':
         case 'auth/invalid-credential': setError('El correo electrónico o la contraseña son incorrectos.'); break;
-        case 'auth/email-already-in-use': setError('Este correo electrónico ya se encuentra registrado.'); break;
+        case 'auth/email-already-in-use': setError('Este correo electrónico ya se encuentra registrado. Inicia sesión.'); break;
         case 'auth/weak-password': setError('La contraseña es muy débil. Debe tener al menos 6 caracteres.'); break;
         default: setError('Ocurrió un inconveniente al procesar la solicitud. Inténtalo de nuevo.');
       }
@@ -128,10 +165,11 @@ const AuthView: React.FC<AuthViewProps> = ({
 
     try {
       setLoading(true);
+      const normalizedEmail = userEmail.trim().toLowerCase();
       const requestData = {
         consortiumId: joinModal.consortiumId,
         consortiumName: joinModal.consortiumName,
-        userEmail,
+        userEmail: normalizedEmail,
         firstName: joinForm.firstName.trim(),
         lastName: joinForm.lastName.trim(),
         message: joinForm.message.trim(),
@@ -139,9 +177,9 @@ const AuthView: React.FC<AuthViewProps> = ({
         date: new Date().toISOString()
       };
       await createJoinRequest(requestData);
-      const updatedRequests = await getUserJoinRequests(userEmail);
+      const updatedRequests = await getUserJoinRequests(normalizedEmail);
       setJoinRequests(updatedRequests);
-      alert("¡Solicitud enviada! El administrador del consorcio recibirá tu aviso.");
+      alert("¡Solicitud enviada! El administrador del consorcio recibirá tu aviso y vinculará tu unidad.");
       setJoinModal(null);
       setJoinForm({ firstName: '', lastName: '', message: '' });
     } catch (err) {
@@ -153,22 +191,27 @@ const AuthView: React.FC<AuthViewProps> = ({
 
   const filteredConsortiums = allConsortiums.filter(c => 
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (c.cuit && c.cuit.includes(searchTerm))
+    (c.cuit && c.cuit.includes(searchTerm)) ||
+    (c.address && c.address.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 antialiased font-sans">
       
       {!isAuthenticated ? (
-        /* ================= PANTALLA DE LOGIN / REGISTRO ================= */
+        /* ================= PANTALLA DE LOGIN / REGISTRO / RECUPERACIÓN ================= */
         <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden p-8 border border-slate-100 transition-all">
           <div className="flex flex-col items-center mb-8">
             <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl mb-4">
-              <Building2 className="w-8 h-8" />
+              {mode === 'RESET' ? <KeyRound className="w-8 h-8" /> : <Building2 className="w-8 h-8" />}
             </div>
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight">Sistema de Gestión del Consorcio</h1>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight text-center">
+              {mode === 'RESET' ? 'Recuperar Contraseña' : 'Gestión de Consorcios'}
+            </h1>
             <p className="text-slate-500 text-sm mt-1 text-center">
-              {mode === 'LOGIN' ? 'Ingresa tus credenciales para administrar o ver tus expensas' : 'Crea una cuenta para comenzar a operar'}
+              {mode === 'LOGIN' && 'Ingresá con tu correo para ver tus expensas o administrar'}
+              {mode === 'REGISTER' && 'Creá tu cuenta con el correo informado a la administración'}
+              {mode === 'RESET' && 'Te enviaremos un enlace a tu correo para crear una nueva clave'}
             </p>
           </div>
 
@@ -176,6 +219,13 @@ const AuthView: React.FC<AuthViewProps> = ({
             <div className="mb-6 p-4 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl flex items-start gap-3 text-sm">
               <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {successMsg && (
+            <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-start gap-3 text-sm">
+              <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
+              <span>{successMsg}</span>
             </div>
           )}
 
@@ -189,20 +239,35 @@ const AuthView: React.FC<AuthViewProps> = ({
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 disabled={loading}
+                required
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Contraseña</label>
-              <input 
-                type="password" 
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all font-medium"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                disabled={loading}
-              />
-            </div>
+            {mode !== 'RESET' && (
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">Contraseña</label>
+                  {mode === 'LOGIN' && (
+                    <button
+                      type="button"
+                      onClick={() => switchMode('RESET')}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </button>
+                  )}
+                </div>
+                <input 
+                  type="password" 
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all font-medium"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+            )}
 
             <button 
               type="submit" 
@@ -216,21 +281,33 @@ const AuthView: React.FC<AuthViewProps> = ({
                 </>
               ) : (
                 <>
-                  <span>{mode === 'LOGIN' ? 'Iniciar Sesión' : 'Registrar Cuenta'}</span>
+                  <span>
+                    {mode === 'LOGIN' ? 'Iniciar Sesión' : mode === 'REGISTER' ? 'Crear Cuenta' : 'Enviar enlace de recuperación'}
+                  </span>
                   <ArrowRight className="w-5 h-5" />
                 </>
               )}
             </button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-slate-100 text-center">
-            <button 
-              onClick={() => setMode(mode === 'LOGIN' ? 'REGISTER' : 'LOGIN')}
-              className="text-indigo-600 hover:text-indigo-800 text-sm font-semibold transition-colors"
-              disabled={loading}
-            >
-              {mode === 'LOGIN' ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya posees una cuenta? Inicia sesión'}
-            </button>
+          <div className="mt-8 pt-6 border-t border-slate-100 text-center space-y-2">
+            {mode === 'RESET' ? (
+              <button 
+                onClick={() => switchMode('LOGIN')}
+                className="text-indigo-600 hover:text-indigo-800 text-sm font-semibold transition-colors"
+                disabled={loading}
+              >
+                Volver a Iniciar Sesión
+              </button>
+            ) : (
+              <button 
+                onClick={() => switchMode(mode === 'LOGIN' ? 'REGISTER' : 'LOGIN')}
+                className="text-indigo-600 hover:text-indigo-800 text-sm font-semibold transition-colors"
+                disabled={loading}
+              >
+                {mode === 'LOGIN' ? '¿Primera vez que ingresás? Registrate aquí' : '¿Ya tenés una cuenta? Iniciá sesión'}
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -254,21 +331,16 @@ const AuthView: React.FC<AuthViewProps> = ({
             
             {/* Columna Izquierda: Consorcios Vinculados */}
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-black text-slate-800 text-lg">Tus Consorcios</h3>
-                <button 
-                  onClick={() => setIsCreatingConsortium(true)}
-                  className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-bold px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg transition-all"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Nuevo (Admin)</span>
-                </button>
+              <div className="mb-4">
+                <h3 className="font-black text-slate-800 text-lg">Tus Consorcios Vinculados</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Seleccioná tu edificio o complejo para ingresar.</p>
               </div>
 
               {consortiums.length === 0 ? (
                 <div className="p-8 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center text-center">
                   <Info className="w-8 h-8 text-slate-400 mb-2" />
-                  <p className="text-sm text-slate-500 font-medium">Aún no estás vinculado a ningún consorcio activo.</p>
+                  <p className="text-sm text-slate-600 font-bold">Aún no estás vinculado a ningún consorcio.</p>
+                  <p className="text-xs text-slate-400 mt-1">Buscá tu edificio en el panel derecho para solicitar acceso a tu departamento.</p>
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[350px] overflow-y-auto pr-2">
@@ -276,11 +348,11 @@ const AuthView: React.FC<AuthViewProps> = ({
                     <div 
                       key={c.id}
                       onClick={() => onSelectConsortium(c)}
-                      className="group p-4 bg-slate-50 hover:bg-indigo-600 border border-slate-100 rounded-xl cursor-pointer flex justify-between items-center transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
+                      className="group p-4 bg-slate-50 hover:bg-indigo-600 border border-slate-200 rounded-xl cursor-pointer flex justify-between items-center transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5"
                     >
                       <div>
                         <h4 className="font-bold text-slate-800 group-hover:text-white transition-colors">{c.name}</h4>
-                        <p className="text-xs text-slate-500 group-hover:text-indigo-200 transition-colors mt-0.5">{c.address || 'Sin dirección registrada'}</p>
+                        <p className="text-xs text-slate-500 group-hover:text-indigo-200 transition-colors mt-0.5">{c.address || 'Ingresar al portal'}</p>
                       </div>
                       <ArrowRight className="w-5 h-5 text-slate-400 group-hover:text-white group-hover:translate-x-1 transition-all" />
                     </div>
@@ -291,7 +363,7 @@ const AuthView: React.FC<AuthViewProps> = ({
               {/* Historial de solicitudes enviadas por el Vecino */}
               {joinRequests.length > 0 && (
                 <div className="mt-6">
-                  <h4 className="font-bold text-slate-700 text-sm mb-3">Tus Solicitudes de Ingreso</h4>
+                  <h4 className="font-bold text-slate-700 text-sm mb-3">Estado de tus Solicitudes</h4>
                   <div className="space-y-2">
                     {joinRequests.map((req) => (
                       <div key={req.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs">
@@ -301,7 +373,7 @@ const AuthView: React.FC<AuthViewProps> = ({
                           req.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
                           'bg-rose-50 text-rose-600 border border-rose-100'
                         }`}>
-                          {req.status === 'PENDING' ? 'Pendiente' : req.status === 'APPROVED' ? 'Aprobada' : 'Rechazada'}
+                          {req.status === 'PENDING' ? 'En Revisión' : req.status === 'APPROVED' ? 'Aprobada' : 'Rechazada'}
                         </span>
                       </div>
                     ))}
@@ -312,9 +384,9 @@ const AuthView: React.FC<AuthViewProps> = ({
 
             {/* Columna Derecha: Buscador Global (Vecinos / Coposesores) */}
             <div className="border-t lg:border-t-0 lg:border-l border-slate-100 pt-6 lg:pt-0 lg:pl-8">
-              <h3 className="font-black text-slate-800 text-lg mb-4">¿Eres Inquilino o Propietario?</h3>
+              <h3 className="font-black text-slate-800 text-lg mb-2">¿Sos Propietario o Inquilino?</h3>
               <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed">
-                Busca el consorcio de tu edificio o barrio por su nombre o CUIT para solicitar el acceso a tus resúmenes de expensas.
+                Buscá tu edificio o complejo por nombre, dirección o CUIT para solicitar a la administración el acceso a tu unidad.
               </p>
 
               <div className="relative mb-4">
@@ -322,7 +394,7 @@ const AuthView: React.FC<AuthViewProps> = ({
                 <input 
                   type="text"
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all font-medium text-slate-800"
-                  placeholder="Buscar por Nombre o CUIT del Consorcio..."
+                  placeholder="Nombre o dirección de tu edificio..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -331,7 +403,7 @@ const AuthView: React.FC<AuthViewProps> = ({
               {searchTerm.trim().length > 0 && (
                 <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1 border border-slate-100 rounded-xl p-2 bg-slate-50/50">
                   {filteredConsortiums.length === 0 ? (
-                    <p className="text-center text-xs text-slate-400 py-4 font-medium">No se hallaron consorcios bajo ese término.</p>
+                    <p className="text-center text-xs text-slate-400 py-4 font-medium">No se hallaron edificios con ese nombre.</p>
                   ) : (
                     filteredConsortiums.map((c) => {
                       const isLinked = consortiums.some(myC => myC.id === c.id);
@@ -339,9 +411,9 @@ const AuthView: React.FC<AuthViewProps> = ({
 
                       return (
                         <div key={c.id} className="flex justify-between items-center p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
-                          <div className="max-w-[70%]">
+                          <div className="max-w-[68%]">
                             <h5 className="font-bold text-xs text-slate-800 truncate">{c.name}</h5>
-                            <p className="text-[10px] text-slate-400 mt-0.5 truncate">CUIT: {c.cuit || 'No informado'}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5 truncate">{c.address || (c.cuit ? `CUIT: ${c.cuit}` : 'Consorcio activo')}</p>
                           </div>
                           {isLinked ? (
                             <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-1 rounded-lg flex items-center gap-1">
@@ -354,10 +426,10 @@ const AuthView: React.FC<AuthViewProps> = ({
                           ) : (
                             <button 
                               onClick={() => setJoinModal({isOpen: true, consortiumId: c.id, consortiumName: c.name})}
-                              className="text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
+                              className="text-[11px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
                               disabled={loading}
                             >
-                              <UserPlus className="w-3 h-3" /> Unirse
+                              <UserPlus className="w-3 h-3" /> Solicitar Acceso
                             </button>
                           )}
                         </div>
@@ -368,6 +440,17 @@ const AuthView: React.FC<AuthViewProps> = ({
               )}
             </div>
 
+          </div>
+
+          {/* Pie discreto exclusivo para Administradores */}
+          <div className="mt-8 pt-4 border-t border-slate-100 flex justify-end">
+            <button
+              onClick={() => setIsCreatingConsortium(true)}
+              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-600 font-semibold transition-colors"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Soy Administrador: Registrar nuevo consorcio</span>
+            </button>
           </div>
         </div>
       )}
@@ -383,7 +466,7 @@ const AuthView: React.FC<AuthViewProps> = ({
               </button>
             </div>
             
-            <p className="text-sm text-slate-500 mb-4">Ingresa tus datos para que el administrador de <strong>{joinModal.consortiumName}</strong> pueda verificar tu identidad y asignarte a tu unidad.</p>
+            <p className="text-sm text-slate-500 mb-4">Ingresá tus datos para que la administración de <strong>{joinModal.consortiumName}</strong> verifique tu identidad y te asigne tu unidad.</p>
 
             <form onSubmit={handleSendJoinRequest} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -398,15 +481,15 @@ const AuthView: React.FC<AuthViewProps> = ({
               </div>
               
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Unidad / Mensaje Adicional</label>
-                <textarea value={joinForm.message} onChange={e => setJoinForm({...joinForm, message: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm resize-none h-24" placeholder="Ej: Soy el propietario del Dpto 4B..."></textarea>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">Piso / Departamento / Local *</label>
+                <textarea required value={joinForm.message} onChange={e => setJoinForm({...joinForm, message: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm resize-none h-24" placeholder="Ej: Propietario del Dpto 4° B / Local 2..."></textarea>
               </div>
 
               <div className="flex gap-3 pt-4 mt-2 border-t border-slate-100">
                 <button type="button" onClick={closeJoinModal} className="flex-1 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition-colors" disabled={loading}>
                   Cancelar
                 </button>
-                <button type="submit" disabled={!joinForm.firstName.trim() || !joinForm.lastName.trim() || loading} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-colors flex items-center justify-center gap-2">
+                <button type="submit" disabled={!joinForm.firstName.trim() || !joinForm.lastName.trim() || !joinForm.message.trim() || loading} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-colors flex items-center justify-center gap-2">
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Enviar Solicitud'}
                 </button>
               </div>
@@ -446,14 +529,14 @@ const AuthView: React.FC<AuthViewProps> = ({
                 <input 
                   type="text" 
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors font-medium text-slate-800"
-                  placeholder="Av. San Martín 1234, Mendoza"
+                  placeholder="Av. San Martín 1234"
                   value={newConsortium.address}
                   onChange={e => setNewConsortium({...newConsortium, address: e.target.value})}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">CUIT Comercial</label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">CUIT del Consorcio</label>
                 <input 
                   type="text" 
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors font-medium text-slate-800"

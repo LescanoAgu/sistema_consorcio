@@ -41,10 +41,12 @@ const ManagementView: React.FC<ManagementViewProps> = (props) => {
       try {
           const unit = props.units.find(u => u.id === selectedUnitForReq);
           if(!unit) return;
-          const newEmails = [...(unit.authorizedEmails || []), approvingReq.userEmail];
+          const normalizedEmail = approvingReq.userEmail.trim().toLowerCase();
+          const existingEmails = (unit.authorizedEmails || []).map(e => e.trim().toLowerCase());
+          const newEmails = Array.from(new Set([...existingEmails, normalizedEmail]));
           
           await props.onUpdateUnit(selectedUnitForReq, { authorizedEmails: newEmails });
-          await registerUserAccess(approvingReq.userEmail, props.consortiumId);
+          await registerUserAccess(normalizedEmail, props.consortiumId);
           await updateJoinRequest(approvingReq.id, 'APPROVED');
           
           setRequests(requests.filter(r => r.id !== approvingReq.id));

@@ -140,6 +140,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
                unitId: u.id,
                unitNumber: u.unitNumber,
                owner: u.ownerName,
+               proratePercentage: Number(u.proratePercentage || 0),
                isOccupied: participates,
                ordinaryAmount: unitOrd,
                extraordinaryAmount: unitExt,
@@ -193,6 +194,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           unitDetails: unitDebts.map(u => ({
               unitId: u.unitId,
               totalToPay: u.total,
+              proratePercentage: u.proratePercentage,
               ordinaryAmount: u.ordinaryAmount,
               extraordinaryAmount: u.extraordinaryAmount,
               reserveAmount: u.reserveAmount,
@@ -261,6 +263,7 @@ const SettlementView: React.FC<SettlementViewProps> = ({
           unitDetails: unitDebts.map(u => ({
               unitId: u.unitId,
               totalToPay: u.total,
+              proratePercentage: u.proratePercentage,
               ordinaryAmount: u.ordinaryAmount,
               extraordinaryAmount: u.extraordinaryAmount,
               reserveAmount: u.reserveAmount,

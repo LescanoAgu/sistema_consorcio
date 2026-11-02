@@ -74,6 +74,7 @@ function App() {
   const [view, setView] = useState<ViewState>(() => pathToView(location.pathname));
   const [loading, setLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [manualConsortiumSwitch, setManualConsortiumSwitch] = useState(false);
 
   // Sync URL changes (back/forward button) with current view
   useEffect(() => {
@@ -86,27 +87,39 @@ function App() {
   useEffect(() => {
       const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
           if (firebaseUser && firebaseUser.email) {
-              setUser({ email: firebaseUser.email, uid: firebaseUser.uid });
+              const cleanEmail = firebaseUser.email.trim();
+              setUser({ email: cleanEmail, uid: firebaseUser.uid });
               const adminList = await getAdminConsortiums(firebaseUser.uid);
-              const userList = await getUserConsortiums(firebaseUser.email);
+              const userList = await getUserConsortiums(cleanEmail);
               const combinedMap = new Map();
               [...adminList, ...userList].forEach(c => combinedMap.set(c.id, c));
               setConsortiumList(Array.from(combinedMap.values()));
           } else {
               setUser(null);
               setConsortium(null);
+              setConsortiumList([]);
+              setManualConsortiumSwitch(false);
           }
       });
       return () => unsubscribe();
   }, []);
 
   useEffect(() => {
+      if (consortium || consortiumList.length === 0) return;
       const savedConsortiumId = localStorage.getItem('selectedConsortiumId');
-      if (savedConsortiumId && consortiumList.length > 0 && !consortium) {
+      if (savedConsortiumId) {
           const found = consortiumList.find(c => c.id === savedConsortiumId);
-          if (found) setConsortium(found);
+          if (found) {
+              setConsortium(found);
+              return;
+          }
       }
-  }, [consortiumList]);
+      // Si el vecino/usuario tiene un único consorcio vinculado y no pidió cambiar manualmente, ingresa directo
+      if (consortiumList.length === 1 && !manualConsortiumSwitch) {
+          localStorage.setItem('selectedConsortiumId', consortiumList[0].id);
+          setConsortium(consortiumList[0]);
+      }
+  }, [consortiumList, consortium, manualConsortiumSwitch]);
 
   /**
    * Resolución de Roles de Usuario y Hardware IoT / Control de Accesos:
@@ -142,18 +155,18 @@ function App() {
       return 'USER';
   }, [user, isConsortiumAdmin]);
 
-  const { data: fetchedUnits } = useQuery({
+  const { data: fetchedUnits, isLoading: isLoadingUnits } = useQuery({
       queryKey: ['units', consortium?.id, user?.email, isConsortiumAdmin],
       queryFn: () => getUnits(consortium!.id, user!.email, isConsortiumAdmin),
       enabled: !!consortium && !!user,
       staleTime: 1000 * 60 * 5
   });
 
-  const myUnitIds = useMemo(() => fetchedUnits ? fetchedUnits.filter(u => u.authorizedEmails?.some(e => e.toLowerCase() === user?.email.toLowerCase())).map(u => u.id) : [], [fetchedUnits, user]);
+  const myUnitIds = useMemo(() => fetchedUnits ? fetchedUnits.filter(u => u.authorizedEmails?.some(e => e.trim().toLowerCase() === user?.email.trim().toLowerCase())).map(u => u.id) : [], [fetchedUnits, user]);
 
-  const { data: fetchedExpenses } = useQuery({ queryKey: ['expenses', consortium?.id], queryFn: () => getExpenses(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
-  const { data: fetchedHistory } = useQuery({ queryKey: ['history', consortium?.id], queryFn: () => getHistory(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
-  const { data: fetchedSettings } = useQuery({ queryKey: ['settings', consortium?.id], queryFn: () => getSettings(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
+  const { data: fetchedExpenses } = useQuery({ queryKey: ['expenses', consortium?.id], queryFn: () => getExpenses(consortium!.id), enabled: !!consortium && userRole !== 'USER', staleTime: 1000 * 60 * 5 });
+  const { data: fetchedHistory, isLoading: isLoadingHistory } = useQuery({ queryKey: ['history', consortium?.id], queryFn: () => getHistory(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
+  const { data: fetchedSettings, isLoading: isLoadingSettings } = useQuery({ queryKey: ['settings', consortium?.id], queryFn: () => getSettings(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
   
   const { data: fetchedPayments } = useQuery({ 
       queryKey: ['payments', consortium?.id, isConsortiumAdmin, myUnitIds], 
@@ -172,7 +185,7 @@ function App() {
   const { data: fetchedAmenities } = useQuery({ queryKey: ['amenities', consortium?.id], queryFn: () => getAmenities(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
   const { data: fetchedBookings } = useQuery({ queryKey: ['bookings', consortium?.id], queryFn: () => getBookings(consortium!.id), enabled: !!consortium && ['amenities', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
   const { data: fetchedDocuments } = useQuery({ queryKey: ['documents', consortium?.id], queryFn: () => getDocuments(consortium!.id), enabled: !!consortium && ['documents', 'user_portal'].includes(view), staleTime: 1000 * 60 * 5 });
-  const { data: fetchedReserve } = useQuery({ queryKey: ['reserve', consortium?.id], queryFn: () => getReserveTransactions(consortium!.id), enabled: !!consortium, staleTime: 1000 * 60 * 5 });
+  const { data: fetchedReserve } = useQuery({ queryKey: ['reserve', consortium?.id], queryFn: () => getReserveTransactions(consortium!.id), enabled: !!consortium && userRole !== 'USER', staleTime: 1000 * 60 * 5 });
 
   useEffect(() => {
       if (fetchedUnits) setUnits(fetchedUnits);
@@ -186,19 +199,18 @@ function App() {
       if (fetchedBookings) setBookings(fetchedBookings);
       if (fetchedDocuments) setDocuments(fetchedDocuments);
       if (fetchedReserve) setReserveTransactions(fetchedReserve);
-      setLoading(false);
   }, [fetchedUnits, fetchedExpenses, fetchedHistory, fetchedSettings, fetchedPayments, fetchedAnnouncements, fetchedMaintenance, fetchedAmenities, fetchedBookings, fetchedDocuments, fetchedReserve]);
 
   useEffect(() => {
-      if(consortium && user) setLoading(true);
-  }, [consortium, user]);
+      setLoading(Boolean(consortium && user && (isLoadingUnits || isLoadingHistory || isLoadingSettings)));
+  }, [consortium, user, isLoadingUnits, isLoadingHistory, isLoadingSettings]);
 
   // Interceptor de navegación segura para prevenir accesos indebidos según el rol y sincronizar URL
   const handleSetViewSafe = (requestedView: ViewState) => {
       let targetView: ViewState = requestedView;
       switch (userRole) {
           case 'USER':
-              if (['accounting', 'management', 'settings', 'expenses', 'collections'].includes(requestedView)) {
+              if (!['user_portal', 'announcements', 'documents', 'amenities', 'maintenance', 'profile'].includes(requestedView)) {
                   targetView = 'user_portal';
               }
               break;
@@ -209,24 +221,66 @@ function App() {
               }
               break;
           case 'ADMIN':
+              if (requestedView === 'user_portal') {
+                  targetView = 'dashboard';
+              }
+              break;
           default:
               break;
       }
       setView(targetView);
       const targetPath = targetView === 'dashboard' ? '/' : `/${targetView}`;
       if (location.pathname !== targetPath) {
-          navigate(targetPath);
+          navigate(targetPath, { replace: true });
       }
   };
 
-  const handleSelectConsortium = (c: Consortium) => { localStorage.setItem('selectedConsortiumId', c.id); setConsortium(c); };
-  const handleSwitchConsortium = () => { localStorage.removeItem('selectedConsortiumId'); setConsortium(null); };
-  const handleLogout = () => { localStorage.removeItem('selectedConsortiumId'); auth.signOut(); };
+  // Garantizar que al resolver rol/consorcio el vecino aterrice siempre en 'user_portal' (Mis Unidades)
+  useEffect(() => {
+      if (!consortium || !user) return;
+      if (userRole === 'USER' && !['user_portal', 'announcements', 'documents', 'amenities', 'maintenance', 'profile'].includes(view)) {
+          handleSetViewSafe('user_portal');
+      } else if (userRole === 'ADMIN' && view === 'user_portal') {
+          handleSetViewSafe('dashboard');
+      }
+  }, [consortium, user, userRole, view]);
+
+  const clearConsortiumState = () => {
+      setUnits([]);
+      setExpenses([]);
+      setPayments([]);
+      setHistory([]);
+      setAnnouncements([]);
+      setMaintenanceRequests([]);
+      setAmenities([]);
+      setBookings([]);
+      setDocuments([]);
+      setReserveTransactions([]);
+  };
+
+  const handleSelectConsortium = (c: Consortium) => {
+      clearConsortiumState();
+      setManualConsortiumSwitch(false);
+      localStorage.setItem('selectedConsortiumId', c.id);
+      setConsortium(c);
+  };
+  const handleSwitchConsortium = () => {
+      clearConsortiumState();
+      setManualConsortiumSwitch(true);
+      localStorage.removeItem('selectedConsortiumId');
+      setConsortium(null);
+  };
+  const handleLogout = () => {
+      clearConsortiumState();
+      setManualConsortiumSwitch(false);
+      localStorage.removeItem('selectedConsortiumId');
+      auth.signOut();
+  };
   const handleCreateConsortium = async (c: Consortium, userId: string) => {
       const newC = await createConsortium(c, userId);
       setConsortiumList([...consortiumList, newC as Consortium]);
   };
-  const handleLoginSuccess = () => handleSetViewSafe('dashboard');
+  const handleLoginSuccess = () => handleSetViewSafe(userRole === 'USER' ? 'user_portal' : 'dashboard');
 
   const handleRefreshReserve = async () => {
       if (!consortium) return;
@@ -268,11 +322,11 @@ function App() {
   
   const handleReportPayment = async (data: any) => {
       if(!consortium || !user) return;
-      const myUnit = units.find(u => u.id === data.unitId) || units.find(u => u.authorizedEmails?.some(e => e.toLowerCase() === user.email.toLowerCase()));
+      const myUnit = units.find(u => u.id === data.unitId) || units.find(u => u.authorizedEmails?.some(e => e.trim().toLowerCase() === user.email.trim().toLowerCase()));
       if (!myUnit) { alert("Error de unidad."); return; }
       let attachmentUrl = '';
       if (data.file) attachmentUrl = await uploadPaymentReceipt(data.file);
-      const newPayment = { unitId: myUnit.id, amount: data.amount, date: data.date, method: data.method, notes: data.notes, attachmentUrl, status: 'PENDING' as const };
+      const newPayment = { unitId: myUnit.id, amount: data.amount, date: data.date, method: data.method || 'Transferencia', notes: data.notes, attachmentUrl, status: 'PENDING' as const };
       const created = await createPayment(consortium.id, newPayment);
       const nextPayments = [created as Payment, ...payments];
       setPayments(nextPayments);
@@ -591,16 +645,16 @@ function App() {
                   <span>Cargando módulo...</span>
               </div>
           }>
-            {!loading && view === 'dashboard' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={effectiveSettings} reserveHistory={[]} userRole={userRole} consortiumId={consortium.id} onDataReset={() => {}} />}
+            {!loading && view === 'dashboard' && userRole !== 'USER' && <Dashboard units={units} expenses={expenses} payments={payments} history={history} settings={effectiveSettings} reserveHistory={[]} userRole={userRole} consortiumId={consortium.id} onDataReset={() => {}} />}
             
-            {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
+            {!loading && view === 'announcements' && <AnnouncementsView announcements={announcements} units={units} userRole={userRole} onAdd={handleAddAnnouncement} onDelete={handleDeleteAnnouncement} />}
             {!loading && view === 'documents' && <DocumentsView documents={documents} userRole={userRole} onAdd={handleAddDocument} onDelete={handleDeleteDocument} />}
             {!loading && view === 'maintenance' && <MaintenanceView requests={maintenanceRequests} units={units} userRole={userRole} userEmail={user.email} onAdd={handleAddMaintenance} onUpdate={handleUpdateMaintenance} onDelete={handleDeleteMaintenance} />}
             {!loading && view === 'amenities' && <AmenitiesView amenities={amenities} bookings={bookings} units={units} userRole={userRole} userEmail={user.email} onAddAmenity={handleAddAmenity} onDeleteAmenity={handleDeleteAmenity} onAddBooking={handleAddBooking} onDeleteBooking={handleDeleteBooking} />}
             
             {!loading && view === 'expenses' && userRole === 'ADMIN' && <ExpensesView expenses={expenses} setExpenses={setExpenses} reserveBalance={effectiveSettings.reserveFundBalance} consortiumId={consortium.id} units={units} />}
             
-            {!loading && view === 'history' && <HistoryView history={history} consortium={consortium} units={units} settings={effectiveSettings} />}
+            {!loading && view === 'history' && userRole === 'ADMIN' && <HistoryView history={history} consortium={consortium} units={units} settings={effectiveSettings} />}
             
             {!loading && view === 'user_portal' && (
               <UserPortal userEmail={user.email} consortium={consortium} units={units} expenses={expenses} history={history} payments={payments} settings={effectiveSettings} announcements={announcements} myBookings={bookings} myTickets={maintenanceRequests} documents={documents} onReportPayment={handleReportPayment} />

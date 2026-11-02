@@ -1,7 +1,7 @@
 import { getLocalIsoDate, formatLocalDate } from '../utils/dateUtils';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Amenity, Booking, Unit, UserRole } from '../types';
-import { Calendar, Plus, Trash2, Clock, CheckCircle, Users, X, Info } from 'lucide-react';
+import { Calendar, Trash2, Clock, CheckCircle, Users, Info } from 'lucide-react';
 
 interface AmenitiesViewProps {
   amenities: Amenity[];
@@ -21,32 +21,47 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
   const [activeTab, setActiveTab] = useState<'CALENDAR' | 'ADMIN'>('CALENDAR');
   const [selectedAmenityId, setSelectedAmenityId] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState(getLocalIsoDate());
+  const [selectedUnitId, setSelectedUnitId] = useState<string>('');
   
-  // Admin form state
   const [newAmenity, setNewAmenity] = useState({ name: '', description: '', capacity: 10 });
 
-  const myUnit = useMemo(() => units.find(u => u.authorizedEmails?.includes(userEmail || '')), [units, userEmail]);
+  const normalizedEmail = (userEmail || '').trim().toLowerCase();
 
-  // Filtrar reservas por fecha y espacio seleccionado
-  const bookingsForDate = useMemo(() => {
-      return bookings.filter(b => b.date === selectedDate && (selectedAmenityId ? b.amenityId === selectedAmenityId : true));
-  }, [bookings, selectedDate, selectedAmenityId]);
+  const myUnits = useMemo(() => {
+      if (userRole === 'ADMIN') return units;
+      return units.filter(u =>
+          (u.authorizedEmails || []).some(em => em.trim().toLowerCase() === normalizedEmail)
+      );
+  }, [units, userRole, normalizedEmail]);
+
+  const myUnitIdsSet = useMemo(() => new Set(myUnits.map(u => u.id)), [myUnits]);
+
+  // Seleccionar automáticamente el primer espacio y la primera unidad disponible
+  useEffect(() => {
+      if (amenities.length > 0 && (!selectedAmenityId || !amenities.some(a => a.id === selectedAmenityId))) {
+          setSelectedAmenityId(amenities[0].id);
+      }
+  }, [amenities, selectedAmenityId]);
+
+  useEffect(() => {
+      if (myUnits.length > 0 && (!selectedUnitId || !myUnits.some(u => u.id === selectedUnitId))) {
+          setSelectedUnitId(myUnits[0].id);
+      }
+  }, [myUnits, selectedUnitId]);
 
   const handleCreateAmenity = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!newAmenity.name) return;
-      await onAddAmenity({ ...newAmenity, requiresApproval: false });
+      if (!newAmenity.name.trim()) return;
+      await onAddAmenity({ ...newAmenity, name: newAmenity.name.trim(), requiresApproval: false });
       setNewAmenity({ name: '', description: '', capacity: 10 });
   };
 
   const handleBook = async (slot: string) => {
       if (!selectedAmenityId) return alert("Selecciona un espacio primero.");
-      if (!myUnit && userRole !== 'ADMIN') return alert("No tienes unidad asignada.");
-      
-      const unitToBook = myUnit || (units.length > 0 ? units[0] : null);
-      if (!unitToBook) return alert("No hay unidades en el consorcio para asignar esta reserva.");
+      const unitToBook = myUnits.find(u => u.id === selectedUnitId) || myUnits[0];
+      if (!unitToBook) return alert("No tienes unidad asignada para realizar reservas.");
 
-      if (confirm(`¿Reservar ${slot} para el ${selectedDate}?`)) {
+      if (confirm(`¿Confirmar reserva de "${slot}" el ${formatLocalDate(selectedDate)} para UF ${unitToBook.unitNumber}?`)) {
           try {
               await onAddBooking({
                   amenityId: selectedAmenityId,
@@ -58,20 +73,20 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
                   createdAt: new Date().toISOString()
               });
               alert("¡Reserva confirmada!");
-          } catch (error) {
-              alert("Error: El turno ya está ocupado.");
+          } catch (error: any) {
+              alert(error?.message || "El turno ya se encuentra reservado.");
           }
       }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Calendar className="w-6 h-6 text-indigo-600"/> Reservas y Espacios
+              <Calendar className="w-6 h-6 text-indigo-600"/> Reservas y Espacios Comunes
           </h2>
           {userRole === 'ADMIN' && (
-              <div className="flex bg-white rounded-lg p-1 border shadow-sm">
+              <div className="flex bg-white rounded-lg p-1 border shadow-sm w-fit">
                   <button 
                     onClick={() => setActiveTab('CALENDAR')}
                     className={`px-4 py-1.5 text-sm font-bold rounded-md transition-colors ${activeTab === 'CALENDAR' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
@@ -89,10 +104,10 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
       </div>
 
       {amenities.length === 0 && activeTab === 'CALENDAR' && (
-          <div className="text-center p-12 bg-slate-50 border-2 border-dashed rounded-xl text-slate-400">
+          <div className="text-center p-12 bg-white border border-slate-200 rounded-xl text-slate-400 shadow-sm">
               <Info className="w-12 h-12 mx-auto mb-2 opacity-20"/>
-              <p>No hay espacios comunes configurados.</p>
-              {userRole === 'ADMIN' && <button onClick={() => setActiveTab('ADMIN')} className="text-indigo-600 hover:underline">Crear uno ahora</button>}
+              <p className="font-medium">No hay espacios comunes configurados en este consorcio.</p>
+              {userRole === 'ADMIN' && <button onClick={() => setActiveTab('ADMIN')} className="text-indigo-600 font-bold hover:underline mt-2">Crear uno ahora</button>}
           </div>
       )}
 
@@ -101,6 +116,23 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* COL 1: Selectores */}
               <div className="space-y-6">
+                  {myUnits.length > 1 && (
+                      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+                          <label className="block text-sm font-bold text-slate-700 mb-2">Reservar a nombre de:</label>
+                          <select
+                              value={selectedUnitId}
+                              onChange={e => setSelectedUnitId(e.target.value)}
+                              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg font-bold text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                          >
+                              {myUnits.map(u => (
+                                  <option key={u.id} value={u.id}>
+                                      UF {u.unitNumber} {u.block ? `(${u.block})` : ''} - {u.ownerName}
+                                  </option>
+                              ))}
+                          </select>
+                      </div>
+                  )}
+
                   <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                       <label className="block text-sm font-bold text-slate-700 mb-2">1. Elige un Espacio</label>
                       <div className="space-y-2">
@@ -110,8 +142,11 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
                                 onClick={() => setSelectedAmenityId(a.id)}
                                 className={`w-full text-left px-4 py-3 rounded-lg border transition-all flex justify-between items-center ${selectedAmenityId === a.id ? 'border-indigo-500 bg-indigo-50 text-indigo-800 shadow-sm' : 'border-slate-200 hover:border-indigo-300'}`}
                               >
-                                  <span className="font-bold">{a.name}</span>
-                                  <span className="text-xs flex items-center text-slate-500"><Users className="w-3 h-3 mr-1"/> {a.capacity} pers.</span>
+                                  <div>
+                                      <span className="font-bold block">{a.name}</span>
+                                      {a.description && <span className="text-xs text-slate-500 block">{a.description}</span>}
+                                  </div>
+                                  <span className="text-xs flex items-center text-slate-500 shrink-0 ml-2"><Users className="w-3 h-3 mr-1"/> {a.capacity} pers.</span>
                               </button>
                           ))}
                       </div>
@@ -124,7 +159,7 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
                         value={selectedDate}
                         min={getLocalIsoDate()}
                         onChange={e => setSelectedDate(e.target.value)}
-                        className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-700"
                       />
                   </div>
               </div>
@@ -133,29 +168,35 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
               <div className="lg:col-span-2">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-full">
                       <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                          <Clock className="w-5 h-5 text-indigo-600"/> Turnos Disponibles ({formatLocalDate(selectedDate)})
+                          <Clock className="w-5 h-5 text-indigo-600"/> Turnos para el {formatLocalDate(selectedDate)}
                       </h3>
                       
                       {!selectedAmenityId ? (
-                          <div className="text-center text-slate-400 py-10">Selecciona un espacio para ver turnos.</div>
+                          <div className="text-center text-slate-400 py-10">Selecciona un espacio para ver los turnos.</div>
                       ) : (
                           <div className="grid gap-4">
                               {TIME_SLOTS.map(slot => {
-                                  const booking = bookings.find(b => b.amenityId === selectedAmenityId && b.date === selectedDate && b.timeSlot === slot);
-                                  const isMyBooking = booking?.unitId === myUnit?.id;
+                                  const booking = bookings.find(b => b.amenityId === selectedAmenityId && b.date === selectedDate && b.timeSlot === slot && b.status !== 'REJECTED');
+                                  const isMyBooking = booking ? (userRole !== 'ADMIN' && myUnitIdsSet.has(booking.unitId)) : false;
 
                                   if (booking) {
                                       return (
-                                          <div key={slot} className={`p-4 rounded-lg border flex justify-between items-center ${isMyBooking ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200 opacity-70'}`}>
+                                          <div key={slot} className={`p-4 rounded-xl border flex justify-between items-center ${isMyBooking ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200 opacity-80'}`}>
                                               <div className="flex items-center gap-3">
                                                   <div className="bg-slate-200 text-slate-500 p-2 rounded-lg"><Clock className="w-5 h-5"/></div>
                                                   <div>
                                                       <p className="font-bold text-slate-700">{slot}</p>
-                                                      <p className="text-xs text-slate-500">Reservado por UF {booking.unitNumber} {isMyBooking && '(Vos)'}</p>
+                                                      <p className="text-xs text-slate-500">Reservado por UF {booking.unitNumber} {isMyBooking && <strong className="text-indigo-700">(Tu reserva)</strong>}</p>
                                                   </div>
                                               </div>
                                               {(isMyBooking || userRole === 'ADMIN') && (
-                                                  <button onClick={() => onDeleteBooking(booking.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors" title="Cancelar Reserva">
+                                                  <button
+                                                      onClick={() => {
+                                                          if (confirm("¿Cancelar esta reserva?")) onDeleteBooking(booking.id);
+                                                      }}
+                                                      className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors"
+                                                      title="Cancelar Reserva"
+                                                  >
                                                       <Trash2 className="w-5 h-5"/>
                                                   </button>
                                               )}
@@ -164,7 +205,7 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
                                   }
 
                                   return (
-                                      <div key={slot} className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 flex justify-between items-center hover:shadow-md transition-shadow">
+                                      <div key={slot} className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 flex justify-between items-center hover:shadow-md transition-shadow">
                                           <div className="flex items-center gap-3">
                                               <div className="bg-emerald-100 text-emerald-600 p-2 rounded-lg"><CheckCircle className="w-5 h-5"/></div>
                                               <div>
@@ -196,11 +237,11 @@ const AmenitiesView: React.FC<AmenitiesViewProps> = ({ amenities, bookings, unit
                   <form onSubmit={handleCreateAmenity} className="space-y-4">
                       <div>
                           <label className="block text-sm font-medium text-slate-600 mb-1">Nombre</label>
-                          <input className="w-full p-2 border rounded" placeholder="Ej: Quincho Grande" value={newAmenity.name} onChange={e => setNewAmenity({...newAmenity, name: e.target.value})} required/>
+                          <input className="w-full p-2 border rounded" placeholder="Ej: Quincho Grande / SUM" value={newAmenity.name} onChange={e => setNewAmenity({...newAmenity, name: e.target.value})} required/>
                       </div>
                       <div>
                           <label className="block text-sm font-medium text-slate-600 mb-1">Descripción</label>
-                          <input className="w-full p-2 border rounded" placeholder="Ej: Incluye parrilla y baño" value={newAmenity.description} onChange={e => setNewAmenity({...newAmenity, description: e.target.value})}/>
+                          <input className="w-full p-2 border rounded" placeholder="Ej: Incluye parrilla, vajilla y baño" value={newAmenity.description} onChange={e => setNewAmenity({...newAmenity, description: e.target.value})}/>
                       </div>
                       <div>
                           <label className="block text-sm font-medium text-slate-600 mb-1">Capacidad (Personas)</label>

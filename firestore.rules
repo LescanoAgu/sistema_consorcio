@@ -10,12 +10,24 @@ service cloud.firestore {
         request.auth.uid in get(/databases/$(database)/documents/consortiums/$(consortiumId)).data.adminIds;
     }
     
-    // 2. ¿Es un usuario/vecino autorizado en este consorcio?
+    // 2. ¿Es un usuario/vecino autorizado en este consorcio? (Soporta email exacto y minúsculas)
     function isAuthorizedUser(consortiumId) {
-      return request.auth != null && (
+      return request.auth != null && request.auth.token.email != null && (
+        exists(/databases/$(database)/documents/user_access/$(request.auth.token.email.lower())/consortium_roles/$(consortiumId)) ||
         exists(/databases/$(database)/documents/user_access/$(request.auth.token.email)/consortium_roles/$(consortiumId)) ||
+        (exists(/databases/$(database)/documents/user_access/$(request.auth.token.email.lower())) &&
+         consortiumId in get(/databases/$(database)/documents/user_access/$(request.auth.token.email.lower())).data.consortiumIds) ||
         (exists(/databases/$(database)/documents/user_access/$(request.auth.token.email)) &&
          consortiumId in get(/databases/$(database)/documents/user_access/$(request.auth.token.email)).data.consortiumIds)
+      );
+    }
+
+    // 2b. ¿Pertenece el usuario autenticado a la unidad indicada?
+    function isUnitMember(consortiumId, unitId) {
+      let unitEmails = get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(unitId)).data.authorizedEmails;
+      return request.auth != null && request.auth.token.email != null && (
+        request.auth.token.email.lower() in unitEmails ||
+        request.auth.token.email in unitEmails
       );
     }
     
@@ -36,19 +48,25 @@ service cloud.firestore {
 
     // Solicitudes de Ingreso (Join Requests) globales
     match /join_requests/{requestId} {
-      allow create: if request.auth != null && request.resource.data.userEmail == request.auth.token.email;
-      allow read: if request.auth != null && (request.auth.token.email == resource.data.userEmail || isAdmin(resource.data.consortiumId));
+      allow create: if request.auth != null
+                    && request.resource.data.status == 'PENDING'
+                    && (request.resource.data.userEmail == request.auth.token.email || request.resource.data.userEmail == request.auth.token.email.lower());
+      allow read: if request.auth != null && (
+                    request.auth.token.email == resource.data.userEmail ||
+                    request.auth.token.email.lower() == resource.data.userEmail ||
+                    isAdmin(resource.data.consortiumId)
+                  );
       allow update, delete: if request.auth != null && isAdmin(resource.data.consortiumId);
     }
 
     // 2. Perfiles de usuario (Accesos rápidos)
     match /user_access/{email} {
-      allow read: if request.auth != null && request.auth.token.email == email;
-      allow write: if false; // Solo se puede escribir por Cloud Functions o usando la subcolección
+      allow read: if request.auth != null && (request.auth.token.email == email || request.auth.token.email.lower() == email);
+      allow write: if false; // Solo se escribe por Cloud Functions o usando la subcolección
       
       // Subcolección segura para roles de consorcio
       match /consortium_roles/{consortiumId} {
-          allow read: if request.auth != null && request.auth.token.email == email;
+          allow read: if request.auth != null && (request.auth.token.email == email || request.auth.token.email.lower() == email);
           allow write: if isAdmin(consortiumId);
       }
     }
@@ -67,9 +85,14 @@ service cloud.firestore {
       
       // --- SUBCOLECCIONES ---
       
-      // A. Unidades
+      // A. Unidades (Cada vecino solo puede leer su(s) propia(s) unidad(es))
       match /units/{unitId} {
-        allow read: if isAdmin(consortiumId) || (request.auth.token.email in resource.data.authorizedEmails);
+        allow read: if isAdmin(consortiumId) || (
+          request.auth != null && request.auth.token.email != null && (
+            request.auth.token.email.lower() in resource.data.authorizedEmails ||
+            request.auth.token.email in resource.data.authorizedEmails
+          )
+        );
         allow write: if isAdmin(consortiumId);
       }
 
@@ -84,10 +107,16 @@ service cloud.firestore {
          allow write: if isAdmin(consortiumId);
       }
       
-      // C. Pagos
+      // C. Pagos (Vecinos solo pueden crear pagos en estado PENDING para sus unidades y leer los suyos)
       match /payments/{paymentId} {
-        allow create: if request.auth != null && (isAdmin(consortiumId) || request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(request.resource.data.unitId)).data.authorizedEmails);
-        allow read: if isAdmin(consortiumId) || (resource.data != null && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
+        allow create: if request.auth != null && (
+          isAdmin(consortiumId) || (
+            request.resource.data.status == 'PENDING' &&
+            request.resource.data.amount > 0 &&
+            isUnitMember(consortiumId, request.resource.data.unitId)
+          )
+        );
+        allow read: if isAdmin(consortiumId) || (resource.data != null && isUnitMember(consortiumId, resource.data.unitId));
         allow update, delete: if isAdmin(consortiumId);
       }
       
@@ -109,11 +138,15 @@ service cloud.firestore {
          allow write: if isAdmin(consortiumId);
       }
 
-      // G. Mantenimiento (Maintenance)
+      // G. Mantenimiento (Vecinos solo crean y ven reclamos de sus unidades; Admin gestiona estados/respuestas)
       match /maintenance/{reqId} {
-         allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
-         allow write: if isAdmin(consortiumId) || (resource.data != null && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
-         allow create: if isAuthorizedUser(consortiumId);
+         allow read: if isAdmin(consortiumId) || (resource.data != null && isUnitMember(consortiumId, resource.data.unitId));
+         allow create: if isAdmin(consortiumId) || (
+           isAuthorizedUser(consortiumId) &&
+           request.resource.data.status == 'PENDING' &&
+           isUnitMember(consortiumId, request.resource.data.unitId)
+         );
+         allow update, delete: if isAdmin(consortiumId);
       }
 
       // H. Amenities y Bookings
@@ -123,8 +156,8 @@ service cloud.firestore {
       }
       match /bookings/{bookingId} {
          allow read: if isAdmin(consortiumId) || isAuthorizedUser(consortiumId);
-         allow create: if isAdmin(consortiumId) || (isAuthorizedUser(consortiumId) && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(request.resource.data.unitId)).data.authorizedEmails);
-         allow update, delete: if isAdmin(consortiumId) || (isAuthorizedUser(consortiumId) && request.auth.token.email in get(/databases/$(database)/documents/consortiums/$(consortiumId)/units/$(resource.data.unitId)).data.authorizedEmails);
+         allow create: if isAdmin(consortiumId) || (isAuthorizedUser(consortiumId) && isUnitMember(consortiumId, request.resource.data.unitId));
+         allow update, delete: if isAdmin(consortiumId) || (isAuthorizedUser(consortiumId) && isUnitMember(consortiumId, resource.data.unitId));
       }
 
       // I. Documentos (Documents)

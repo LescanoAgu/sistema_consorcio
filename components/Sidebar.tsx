@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Building2, LogOut, ArrowLeftRight, Megaphone, X, Wrench, CalendarCheck, User, LayoutTemplate, PieChart, Home } from 'lucide-react';
+import { LayoutDashboard, Building2, LogOut, ArrowLeftRight, Megaphone, X, Wrench, CalendarCheck, User, LayoutTemplate, PieChart, Home, FolderOpen } from 'lucide-react';
 import { ViewState, UserRole } from '../types';
 
 interface SidebarProps {
@@ -14,6 +14,16 @@ interface SidebarProps {
   badges?: { [key: string]: number };
 }
 
+const getRoleLabel = (role: UserRole) => {
+  switch (role) {
+    case 'ADMIN': return 'Administración';
+    case 'USER': return 'Propietario / Vecino';
+    case 'DEVICE': return 'Dispositivo IoT';
+    case 'CONTROL_WIFI': return 'Control Acceso WiFi';
+    default: return role;
+  }
+};
+
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortiumName, onSwitchConsortium, onLogout, userRole, isOpen, onClose, badges = {} }) => {
   
   const allItems = [
@@ -25,6 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
     
     // COMPARTIDO
     { id: 'announcements', label: 'Novedades', icon: Megaphone, roles: ['ADMIN', 'USER'] },
+    { id: 'documents', label: 'Documentos', icon: FolderOpen, roles: ['ADMIN', 'USER'] },
     { id: 'amenities', label: 'Reservas', icon: CalendarCheck, roles: ['ADMIN', 'USER'] },
     { id: 'maintenance', label: 'Mantenimiento', icon: Wrench, roles: ['ADMIN', 'USER'] },
     
@@ -54,7 +65,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, consortium
             <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent truncate max-w-[180px]">
               {consortiumName || 'Mi Consorcio'}
             </h1>
-            <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{userRole}</p>
+            <p className="text-xs text-slate-400 mt-1 uppercase tracking-wider font-semibold">{getRoleLabel(userRole)}</p>
           </div>
           <button onClick={onClose} className="md:hidden text-slate-400 hover:text-white">
             <X className="w-6 h-6" />

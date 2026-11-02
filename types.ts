@@ -171,6 +171,7 @@ export interface SettlementRecord {
   unitDetails: {
     unitId: string;
     totalToPay: number;
+    proratePercentage?: number;
     ordinaryAmount?: number;
     extraordinaryAmount?: number;
     reserveAmount?: number;
